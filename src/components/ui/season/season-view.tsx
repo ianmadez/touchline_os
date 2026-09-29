@@ -241,7 +241,7 @@ function PointsBySeasonChart({
                 every bar computed against nothing and rendered empty. */}
             <span className="h-5 shrink-0 text-[11px] font-sub font-bold leading-5 tabular-nums text-slate-700 dark:text-slate-200">
               {b.points}
-              {b.projected && <span className="ml-1 text-[9px] font-normal text-amber-600 dark:text-amber-400">proj</span>}
+              {b.projected && <span className="ml-1 text-[9px] font-normal text-amber-600 dark:text-amber-400">projected</span>}
             </span>
             <div className="flex min-h-0 w-full flex-1 items-end justify-center">
               <div

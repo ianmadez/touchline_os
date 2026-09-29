@@ -33,6 +33,50 @@ const STATUS_RANK: Record<string, number> = {
   SURPLUS: 1,
 };
 
+// Back to front: GK lowest, attackers highest. Ascending sort reads GK -> DEF -> MID -> ATT;
+// descending reads ATT -> MID -> DEF -> GK. Unrecognised/unknown codes rank below GK so they
+// surface at the very top or bottom rather than scattering alphabetically through the list.
+const POSITION_GROUP_RANK: Record<string, number> = {
+  GK: 1,
+  LB: 2,
+  LCB: 2,
+  CB: 2,
+  RCB: 2,
+  RB: 2,
+  LWB: 2,
+  RWB: 2,
+  CDM: 3,
+  LDM: 3,
+  RDM: 3,
+  LM: 3,
+  LCM: 3,
+  CM: 3,
+  RCM: 3,
+  RM: 3,
+  CAM: 3,
+  LAM: 3,
+  RAM: 3,
+  LW: 4,
+  RW: 4,
+  LF: 4,
+  RF: 4,
+  CF: 4,
+  LST: 4,
+  ST: 4,
+  RST: 4,
+};
+
+function positionRank(position: string | null | undefined): number {
+  if (!position) return 0;
+  return POSITION_GROUP_RANK[position] ?? 0;
+}
+
+function roleRank(role: string | null | undefined): number {
+  if (!role) return 0;
+  const baseCode = role.split(" ")[0].toUpperCase();
+  return POSITION_GROUP_RANK[role] ?? POSITION_GROUP_RANK[baseCode] ?? 5;
+}
+
 export function SquadTable({ players, onSelectPlayer }: SquadTableProps) {
   const [filterRole, setFilterRole] = useState<string>("ALL");
   const [sortField, setSortField] = useState<SortableField>("overallRating");
@@ -66,12 +110,26 @@ export function SquadTable({ players, onSelectPlayer }: SquadTableProps) {
     if (sortField === "trustLevel") {
       valA = TRUST_RANK[a.userProfile?.trustLevel || ""] ?? 0;
       valB = TRUST_RANK[b.userProfile?.trustLevel || ""] ?? 0;
+    } else if (sortField === "primaryPosition") {
+      valA = positionRank(a.primaryPosition);
+      valB = positionRank(b.primaryPosition);
     } else if (sortField === "importanceMarker") {
       valA = STATUS_RANK[a.userProfile?.importanceMarker || ""] ?? 0;
       valB = STATUS_RANK[b.userProfile?.importanceMarker || ""] ?? 0;
     } else if (sortField === "assignedRole") {
-      valA = a.userProfile?.assignedRole || "";
-      valB = b.userProfile?.assignedRole || "";
+      const roleA = a.userProfile?.assignedRole;
+      const roleB = b.userProfile?.assignedRole;
+      valA = roleRank(roleA);
+      valB = roleRank(roleB);
+
+      if (valA === valB) {
+        const strA = roleA || "";
+        const strB = roleB || "";
+        if (strA !== strB) {
+          return sortAsc ? strA.localeCompare(strB) : strB.localeCompare(strA);
+        }
+        return a.name.localeCompare(b.name);
+      }
     } else {
       valA = a[sortField] ?? 0;
       valB = b[sortField] ?? 0;
