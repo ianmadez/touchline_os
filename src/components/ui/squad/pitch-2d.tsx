@@ -148,7 +148,7 @@ export function Pitch2D({
             alt="Tactical Pitch"
             fill
             sizes="(min-width: 1024px) 66vw, 100vw"
-            className="object-cover opacity-85"
+            className="object-fill opacity-85"
             loading="eager"
           />
 

@@ -87,6 +87,23 @@ export function venueLabel(venue: string): string {
 }
 
 /**
+ * How urgent a storyline is, as a word.
+ *
+ * Severity is computed from the evidence every time a thread is read (see `events/compose.ts`), so
+ * this is the only place its levels are spelled out. Nothing stores one, which is why there is no
+ * enum for it in the schema to keep in step.
+ */
+const SEVERITY_LABELS: Record<string, string> = {
+  WATCH: "Watch",
+  WARNING: "Warning",
+  CRITICAL: "Critical",
+};
+
+export function severityLabel(severity: string): string {
+  return SEVERITY_LABELS[severity] ?? humanise(severity);
+}
+
+/**
  * Where a storyline's card should take you, based on what it is actually about.
  *
  * A card that cannot be acted on is decoration, so every category resolves to the screen where the

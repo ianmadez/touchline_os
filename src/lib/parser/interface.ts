@@ -334,6 +334,22 @@ export interface SeasonHistoryRow {
 }
 
 /**
+ * One row of the save's own league catalogue (`leagues`).
+ *
+ * Carried on the parse result so the sync can persist it. `name` is the save's own text, untouched -
+ * what a competition is *called* on screen is a display decision made elsewhere.
+ */
+export interface LeagueEntry {
+  /** `leagues.leagueid`, the id that season and club rows point at. */
+  leagueId: number;
+  /** `leagues.leaguename`, e.g. "England Championship (2)". */
+  name: string;
+  /** `leagues.level`: the tier the save records, 0-7. Null when the save omits it. */
+  level: number | null;
+  countryId: number | null;
+}
+
+/**
  * One agreed transfer, read from `career_presignedcontract`.
  *
  * This table is the world's record of deals that have been agreed, fees included - the closest
@@ -385,6 +401,8 @@ export interface SpikeCareerData extends RawCareerData {
   matchResults: MatchResult[] | null;
   /** Every `career_managerhistory` season row, in season order. Never collapsed to [0]. */
   seasonHistory: SeasonHistoryRow[];
+  /** The save's league catalogue, so a `leagueid` anywhere can be resolved to a real name. */
+  leagueDirectory: LeagueEntry[];
   /** Agreed transfers across the whole save - the evidence base for any value estimate. */
   presignedDeals: PresignedDeal[];
   warnings: string[];

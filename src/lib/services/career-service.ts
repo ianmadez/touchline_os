@@ -14,21 +14,29 @@ import {
   StorylineStatus,
 } from "../db/schema";
 import { EventService, ParsedCareerEvent } from "./event-service";
-import { EnrichedPlayer, SquadService } from "./squad-service";
+import { EnrichedPlayer, SquadService, type SquadDepthAnalysis } from "./squad-service";
 import { PitchSlotAssignment, TacticsService } from "./tactics-service";
 import { SeasonService, type SeasonState } from "./season-service";
 import { ValueService, type PlayerValuation } from "./value-service";
 import { FORMATIONS_REGISTRY, getFormationById } from "../tactics/formations";
 import { StorylineItem, DomainEvent } from "../events/types";
 import {
+  CONTRACT_CLEARED_SEASONS,
+  DEPTH_SOLVED_AT,
   EvidenceFact,
+  FORM_RECOVERED_AT,
   contractExpiryFacts,
   developmentFacts,
   positionChangeFacts,
+  formFacts,
+  squadDepthFacts,
   evidenceEventId,
+  resolveOverStale,
+  storylineClosureEventId,
   storylineOpenedEventId,
   type DevelopmentObservation,
 } from "../events/evidence";
+import { composeStoryline, severityFor, severityReason, toComposableFact } from "../events/compose";
 
 /** A fact together with the thread it should be attached to. */
 interface PendingEvidence {
@@ -354,62 +362,127 @@ export class CareerService {
       .from(storylines)
       .where(eq(storylines.careerId, careerId));
 
-    const activeStorylines = existingStorylines.filter((s) => s.status === "ACTIVE");
-
     // Facts collected during this pass, written once at the end so the write is in one place.
     const pending: PendingEvidence[] = [];
 
     // The probe compares contract dates against the season we are actually in, which the save
     // states. Falls back to the calendar year only if the career row is somehow missing.
     const careerRow = await db
-      .select({ currentSeason: careers.currentSeason })
+      .select({ currentSeason: careers.currentSeason, inGameDate: careers.inGameDate })
       .from(careers)
       .where(eq(careers.id, careerId))
       .get();
     const currentSeason = careerRow?.currentSeason ?? new Date().getFullYear();
+    // The save's own date, passed to the composer rather than letting it read a clock.
+    const inGameDate = careerRow?.inGameDate ?? null;
 
-    // Rule 1: Squad Depth Gap Storylines
-    const depthAnalysis = this.squadService.evaluateSquadDepth(squad);
-    for (const thinPos of depthAnalysis.thinPositions) {
-      const existing = activeStorylines.find(
-        (s) => s.category === "SQUAD_DEPTH" && s.title.includes(thinPos.position)
+    // Threads we know about: the rows read above plus anything opened during this pass.
+    //
+    // Keeping this in memory matters because the rules run in sequence - a thread opened by the
+    // progress rule should be adopted by the breakthrough rule moments later, not duplicated.
+    const knownThreads = existingStorylines.map((s) => ({
+      id: s.id,
+      category: s.category as StorylineCategory,
+      title: s.title,
+      status: s.status as StorylineStatus,
+    }));
+
+    /**
+     * Opens a thread about this subject, adopts the open one, or reopens a closed one - and attaches
+     * the fact that prompted it.
+     *
+     * Three behaviours, each for a reason:
+     *
+     * - **Adopt by subject.** Threads opened before ids were derived carry a random uuid, so matching
+     *   the derived id alone would open a second thread about the same player or position. The
+     *   subject token is what finds them, which is why every category keeps a stable subject in its
+     *   title.
+     * - **Reopen rather than duplicate.** A closed thread whose exact condition has provably returned
+     *   (the same player's form drops again, the same role is thin again) is reopened, keeping its
+     *   evidence history. That history is the point: a second slump is more interesting than the
+     *   first, and only a compounding thread can say so.
+     * - **Never invent a subject.** The fact is always attached to a real thread id, whether it was
+     *   created, adopted or reopened.
+     */
+    const openOrAdoptThread = async (input: {
+      category: StorylineCategory;
+      discriminator: string;
+      title: string;
+      adoptBySubject?: string;
+      fact: EvidenceFact;
+      openingEventId?: string | null;
+    }): Promise<string> => {
+      const derivedId = deterministicStorylineId(careerId, input.category, input.discriminator);
+      const openMatch = knownThreads.find(
+        (thread) =>
+          thread.category === input.category &&
+          thread.status === "ACTIVE" &&
+          (input.adoptBySubject
+            ? thread.title.includes(input.adoptBySubject)
+            : thread.id === derivedId)
       );
-      if (!existing) {
-        const id = crypto.randomUUID();
-        // The position stays the first word on purpose: the resolve rule below finds a thread
-        // again by splitting the title and matching that first token.
-        const title = `${thinPos.position} depth: only ${thinPos.count} in the squad`;
-        const openedAt = new Date().toISOString();
-        await db.insert(storylines).values({
-          id,
+
+      if (openMatch) {
+        pending.push({ fact: input.fact, storylineId: openMatch.id });
+        return openMatch.id;
+      }
+
+      const now = new Date().toISOString();
+      await db
+        .insert(storylines)
+        .values({
+          id: derivedId,
           careerId,
-          title,
-          category: "SQUAD_DEPTH",
+          title: input.title,
+          category: input.category,
           status: "ACTIVE",
-          openedAt,
-          updatedAt: openedAt,
+          // The season this belongs to, which is what makes "its season has passed" answerable.
+          seasonNumber: currentSeason,
+          openedAt: now,
+          openingEventId: input.openingEventId ?? null,
+          updatedAt: now,
+        })
+        .onConflictDoNothing();
+
+      const existing = knownThreads.find((thread) => thread.id === derivedId);
+      if (existing) {
+        existing.status = "ACTIVE";
+        existing.title = input.title;
+        await db
+          .update(storylines)
+          .set({ status: "ACTIVE", title: input.title, resolvedAt: null, updatedAt: now })
+          .where(eq(storylines.id, derivedId));
+      } else {
+        knownThreads.push({
+          id: derivedId,
+          category: input.category,
+          title: input.title,
+          status: "ACTIVE",
         });
       }
-    }
 
-    // Resolve SQUAD_DEPTH storylines if depth threshold is restored
-    const thinPosSet = new Set(depthAnalysis.thinPositions.map((p) => p.position));
-    for (const active of activeStorylines) {
-      if (active.category === "SQUAD_DEPTH") {
-        const posMatch = active.title.split(" ")[0];
-        if (posMatch && !thinPosSet.has(posMatch)) {
-          const latestSigning = recentEvents.find((e) => e.eventType === "PLAYER_SIGNED");
-          await db
-            .update(storylines)
-            .set({
-              status: "RESOLVED",
-              resolvedAt: new Date().toISOString(),
-              resolvingEventId: latestSigning?.id ?? null,
-              updatedAt: new Date().toISOString(),
-            })
-            .where(eq(storylines.id, active.id));
-        }
-      }
+      pending.push({ fact: input.fact, storylineId: derivedId });
+      return derivedId;
+    };
+
+    // Rule 1: Squad Depth Gap Storylines
+    //
+    // Structural fact: one reading opens it, because a squad list is not a trend. The hysteresis is
+    // on the clear side instead - a role only counts as solved at DEPTH_SOLVED_AT - so the signing
+    // that fixes a gap does not close the thread on its way past, and a squad oscillating between
+    // one and two specialists does not open and resolve the same thread over and over.
+    const depthAnalysis = this.squadService.evaluateSquadDepth(squad);
+    for (const fact of squadDepthFacts(depthAnalysis.thinPositions)) {
+      const position = String(fact.payload.position);
+      await openOrAdoptThread({
+        category: "SQUAD_DEPTH",
+        discriminator: fact.entityId,
+        // The position stays the first word on purpose: it is the token that finds threads opened
+        // by the older, uuid-based rule.
+        title: `${position} depth: only ${String(fact.payload.count)} in the squad`,
+        adoptBySubject: position,
+        fact,
+      });
     }
 
     // Rule 1b: Contract Expiry Storylines
@@ -464,146 +537,434 @@ export class CareerService {
     // saying something changed, is noise rather than depth.
     const trendObservations = await this.developmentObservations(careerId);
 
-    const attachToProgressThread = async (fact: EvidenceFact) => {
-      const playerName = String(fact.payload.name);
-      // Reuse any active thread already about this player, matching the depth rule's approach, so
-      // a breakthrough detected elsewhere and a trend detected here do not become two threads.
-      const existing = activeStorylines.find(
-        (s) => s.category === "DEVELOPMENT" && s.title.includes(playerName)
-      );
-      let threadId = existing?.id;
-      if (!threadId) {
-        threadId = deterministicStorylineId(careerId, "DEVELOPMENT", fact.entityId);
-        const now = new Date().toISOString();
-        await db
-          .insert(storylines)
-          .values({
-            id: threadId,
-            careerId,
-            title: `${playerName} - player progress`,
-            category: "DEVELOPMENT",
-            status: "ACTIVE",
-            openedAt: now,
-            updatedAt: now,
-          })
-          .onConflictDoNothing();
+    // Breakthroughs the diff engine spotted, keyed by the save's own player id. The diff event and
+    // the snapshot comparison usually describe the same movement, so the breakthrough is used to
+    // *escalate* that movement rather than to state it a second time. The exception is a player with
+    // no earlier reading at all - a newly signed youngster - where the diff event is the only
+    // witness and is therefore the fact itself.
+    const breakthroughs = new Map<number, { delta: number; eventId: string; name: string }>();
+    for (const event of recentEvents) {
+      if (event.eventType !== "PLAYER_OVR_CHANGED") continue;
+      try {
+        const eventAny = event as unknown as Record<string, unknown>;
+        const rawPayload = eventAny.payloadJson ?? eventAny.payload;
+        const parsed: unknown =
+          typeof rawPayload === "string" ? JSON.parse(rawPayload) : rawPayload;
+        const payload = (parsed ?? {}) as {
+          isBreakthrough?: boolean;
+          delta?: number;
+          name?: string;
+          eaPlayerId?: number;
+        };
+        const isBreakthrough = payload.isBreakthrough ?? (payload.delta ?? 0) >= 3;
+        if (!isBreakthrough || typeof payload.eaPlayerId !== "number") continue;
+        breakthroughs.set(payload.eaPlayerId, {
+          delta: payload.delta ?? 0,
+          eventId: event.id,
+          name: payload.name || "Squad Player",
+        });
+      } catch {
+        /* an unreadable payload tells us nothing; the snapshot comparison still sees the move */
       }
-      pending.push({ fact, storylineId: threadId });
+    }
+
+    /** One DEVELOPMENT thread per player: a rating move, a position move and a breakthrough are one story. */
+    const attachToProgressThread = async (fact: EvidenceFact, openingEventId?: string | null) => {
+      const playerName = String(fact.payload.name);
+      await openOrAdoptThread({
+        category: "DEVELOPMENT",
+        discriminator: fact.entityId,
+        title: `${playerName} - player progress`,
+        adoptBySubject: playerName,
+        fact,
+        openingEventId,
+      });
     };
 
-    for (const fact of developmentFacts(trendObservations)) {
-      await attachToProgressThread(fact);
+    const movementCovered = new Set<number>();
+    const movementFacts = [
+      ...developmentFacts(trendObservations),
+      ...positionChangeFacts(trendObservations),
+    ];
+    for (const fact of movementFacts) {
+      const eaPlayerId = Number(fact.payload.eaPlayerId);
+      const breakthrough = Number.isFinite(eaPlayerId) ? breakthroughs.get(eaPlayerId) : undefined;
+      if (breakthrough) movementCovered.add(eaPlayerId);
+      await attachToProgressThread(
+        // A step the engine called a breakthrough is worth more than the same step it did not.
+        breakthrough ? { ...fact, weight: "SERIOUS" } : fact,
+        breakthrough?.eventId
+      );
     }
 
-    // Position moves read from the same snapshot pair, so this costs no extra query.
-    for (const fact of positionChangeFacts(trendObservations)) {
-      await attachToProgressThread(fact);
+    // Breakthroughs the snapshot comparison could not see, because the player had no earlier
+    // reading to compare against.
+    for (const [eaPlayerId, breakthrough] of breakthroughs) {
+      if (movementCovered.has(eaPlayerId)) continue;
+      const player = squad.find((candidate) => candidate.eaPlayerId === eaPlayerId);
+      await attachToProgressThread(
+        {
+          eventType: "PLAYER_DEVELOPED",
+          source: "DERIVED",
+          entityId: player?.id ?? `ea_${eaPlayerId}`,
+          key: `breakthrough:${breakthrough.eventId}`,
+          weight: "SERIOUS",
+          summary: `${breakthrough.name} has jumped ${breakthrough.delta} overall in one step.`,
+          payload: {
+            playerId: player?.id ?? `ea_${eaPlayerId}`,
+            eaPlayerId,
+            name: breakthrough.name,
+            delta: breakthrough.delta,
+            primaryPosition: player?.primaryPosition ?? null,
+          },
+        },
+        breakthrough.eventId
+      );
     }
 
-    // Rule 2: Breakthrough & Youth Development Storylines
-    for (const event of recentEvents) {
-      if (event.eventType === "PLAYER_OVR_CHANGED") {
-        try {
-          const eventAny = event as unknown as Record<string, unknown>;
-          const rawPayload = eventAny.payloadJson ?? eventAny.payload;
-          const parsed: unknown =
-            typeof rawPayload === "string" ? JSON.parse(rawPayload) : rawPayload;
-          const payload = (parsed ?? {}) as {
-            isBreakthrough?: boolean;
-            delta?: number;
-            name?: string;
-          };
-          if (payload.isBreakthrough || (payload.delta !== undefined && payload.delta >= 3)) {
-            const playerName = payload.name || "Squad Player";
-            const delta = payload.delta ?? 3;
-            const title = `Breakthrough Development: ${playerName} (+${delta} OVR)`;
-            const exists = existingStorylines.some((s) => s.title === title);
-            if (!exists) {
-              await db.insert(storylines).values({
-                id: crypto.randomUUID(),
-                careerId,
-                title,
-                category: "DEVELOPMENT",
-                status: "ACTIVE",
-                openedAt: new Date().toISOString(),
-                openingEventId: event.id,
-                updatedAt: new Date().toISOString(),
-              });
-            }
-          }
-        } catch {
-          /* ignore payload parse errors */
-        }
+    // Rule 1d: Form Storylines
+    //
+    // Trend fact: opened from the *movement* between two snapshots, never from the reading itself.
+    // In the reference save every fit senior player reads exactly 3, so a level-based rule would
+    // open either nothing or a thread for the entire first team - and against the 0-10 scale this
+    // file used to claim, it would have been the latter.
+    //
+    // A recovery is evidence, not a storyline: good form is not a decision the manager has to make,
+    // so PLAYER_FORM_STREAK only ever attaches to a thread that is already open.
+    for (const fact of formFacts(trendObservations)) {
+      const playerName = String(fact.payload.name);
+      if (fact.eventType === "PLAYER_FORM_SLUMP") {
+        await openOrAdoptThread({
+          category: "FORM",
+          discriminator: fact.entityId,
+          title: `${playerName} - form watch`,
+          adoptBySubject: playerName,
+          fact,
+        });
+      } else {
+        const open = knownThreads.find(
+          (thread) => thread.category === "FORM" && thread.title.includes(playerName)
+        );
+        if (open) pending.push({ fact, storylineId: open.id });
       }
     }
 
     // The evidence pass. Writes the facts gathered above and guarantees every thread carries at
-    // least its own opening fact, which is what turns the card's "Evidence (N)" control from dead
-    // chrome into something that opens.
+    // least its own opening fact, which is what makes a thread readable rather than a bare flag.
     await this.writeEvidence(careerId, pending);
 
-    // Fetch refreshed list with evidence event links
-    const allStorylines = await db
+    const threads = await db
       .select()
       .from(storylines)
       .where(eq(storylines.careerId, careerId))
       .orderBy(desc(storylines.updatedAt));
 
-    const storylineIds = allStorylines.map((s) => s.id);
+    const evidenceMap = await this.loadThreadEvidence(threads.map((thread) => thread.id));
+
+    // The lifecycle pass. Every category decides closure through the same precedence rule, so no
+    // category can quietly implement "answered beats dropped" differently to the others.
+    await this.closeAnsweredThreads(
+      careerId,
+      threads,
+      squad,
+      evidenceMap,
+      depthAnalysis,
+      recentEvents,
+      currentSeason
+    );
+
+    return threads.map((s) => {
+      // Composed on read, never stored: re-wording a card must not rewrite what was observed. The
+      // facts keep the sentences they were recorded with, and the composer only arranges them.
+      const facts = (evidenceMap[s.id] || []).map(toComposableFact);
+      const composed = composeStoryline(
+        {
+          // The thread's id seeds the wording: stable per thread, different between threads.
+          id: s.id,
+          category: s.category as StorylineCategory,
+          title: s.title,
+          status: s.status as StorylineStatus,
+        },
+        facts,
+        inGameDate
+      );
+
+      return {
+        id: s.id,
+        careerId: s.careerId,
+        title: composed.title,
+        body: composed.body,
+        severity: severityFor(s.category as StorylineCategory, facts, inGameDate),
+        severityReason: severityReason(s.category as StorylineCategory, facts, inGameDate),
+        openingTitle: s.title,
+        category: s.category as StorylineCategory,
+        status: s.status as StorylineStatus,
+        openedAt: s.openedAt,
+        // The clock is read here, on the server, rather than in the component: a render-time
+        // Date.now() is impure and would hydrate to a different number than the server rendered.
+        daysActive: Math.max(
+          1,
+          Math.floor((Date.now() - new Date(s.openedAt).getTime()) / 86_400_000)
+        ),
+        resolvedAt: s.resolvedAt,
+        openingEventId: s.openingEventId,
+        resolvingEventId: s.resolvingEventId,
+        updatedAt: s.updatedAt,
+        evidenceEvents: evidenceMap[s.id] || [],
+      };
+    });
+  }
+
+  /**
+   * Every fact attached to any of these threads, newest first.
+   *
+   * One query serves two readers: the lifecycle pass, which has to know who a thread is about, and
+   * the card, which shows the facts. Id is the tiebreak because every row written in one pass shares
+   * a timestamp, and an unstable sort would shuffle the list between renders.
+   */
+  private async loadThreadEvidence(
+    storylineIds: string[]
+  ): Promise<Record<string, DomainEvent[]>> {
     const evidenceMap: Record<string, DomainEvent[]> = {};
+    if (storylineIds.length === 0) return evidenceMap;
 
-    if (storylineIds.length > 0) {
-      const links = await db
-        .select({
-          storylineId: storylineEvents.storylineId,
-          event: careerEvents,
-        })
-        .from(storylineEvents)
-        .innerJoin(careerEvents, eq(storylineEvents.eventId, careerEvents.id))
-        .where(inArray(storylineEvents.storylineId, storylineIds))
-        // Newest first for the card. Id is the tiebreak because every row written in one pass
-        // shares a timestamp, and an unstable sort would shuffle the list between renders.
-        .orderBy(desc(careerEvents.timestamp), desc(careerEvents.id));
+    const links = await db
+      .select({
+        storylineId: storylineEvents.storylineId,
+        event: careerEvents,
+        // The save's own date at the snapshot a fact was filed against. Without it the best we can
+        // say is when we noticed a fact, which is not when it happened in the career.
+        inGameDate: careerSnapshots.inGameDate,
+      })
+      .from(storylineEvents)
+      .innerJoin(careerEvents, eq(storylineEvents.eventId, careerEvents.id))
+      .leftJoin(careerSnapshots, eq(careerEvents.snapshotId, careerSnapshots.id))
+      .where(inArray(storylineEvents.storylineId, storylineIds))
+      .orderBy(desc(careerEvents.timestamp), desc(careerEvents.id));
 
-      for (const link of links) {
-        if (!evidenceMap[link.storylineId]) {
-          evidenceMap[link.storylineId] = [];
-        }
-        evidenceMap[link.storylineId].push({
-          id: link.event.id,
-          careerId: link.event.careerId,
-          snapshotId: link.event.snapshotId || "",
-          // These columns are plain TEXT in SQLite, so they read back as `string`. Narrowing here is
-          // the honest cast: the values are only ever written from these very unions.
-          eventType: link.event.eventType as DomainEvent["eventType"],
-          source: link.event.source as DomainEvent["source"],
-          entityType: link.event.entityType as DomainEvent["entityType"],
-          entityId: link.event.entityId,
-          payloadJson: link.event.payloadJson,
-          timestamp: link.event.timestamp,
-        });
+    for (const link of links) {
+      if (!evidenceMap[link.storylineId]) {
+        evidenceMap[link.storylineId] = [];
       }
+      evidenceMap[link.storylineId].push({
+        id: link.event.id,
+        careerId: link.event.careerId,
+        snapshotId: link.event.snapshotId || "",
+        // These columns are plain TEXT in SQLite, so they read back as `string`. Narrowing here is
+        // the honest cast: the values are only ever written from these very unions.
+        eventType: link.event.eventType as DomainEvent["eventType"],
+        source: link.event.source as DomainEvent["source"],
+        entityType: link.event.entityType as DomainEvent["entityType"],
+        entityId: link.event.entityId,
+        payloadJson: link.event.payloadJson,
+        timestamp: link.event.timestamp,
+        inGameDate: link.inGameDate ?? null,
+      });
     }
 
-    return allStorylines.map((s) => ({
-      id: s.id,
-      careerId: s.careerId,
-      title: s.title,
-      category: s.category as StorylineCategory,
-      status: s.status as StorylineStatus,
-      openedAt: s.openedAt,
-      // The clock is read here, on the server, rather than in the component: a render-time
-      // Date.now() is impure and would hydrate to a different number than the server rendered.
-      daysActive: Math.max(
-        1,
-        Math.floor((Date.now() - new Date(s.openedAt).getTime()) / 86_400_000)
-      ),
-      resolvedAt: s.resolvedAt,
-      openingEventId: s.openingEventId,
-      resolvingEventId: s.resolvingEventId,
-      updatedAt: s.updatedAt,
-      evidenceEvents: evidenceMap[s.id] || [],
-    }));
+    // "Opened: Darcy." sitting beside the contract fact that opened it is the same information twice,
+    // so the bookkeeping row is dropped wherever the thread has real evidence to show instead. It is
+    // only suppressed here on the way out; the row itself is never deleted.
+    for (const [storylineId, events] of Object.entries(evidenceMap)) {
+      if (events.length <= 1) continue;
+      evidenceMap[storylineId] = events.filter((event) => event.eventType !== "STORYLINE_OPENED");
+    }
+
+    return evidenceMap;
+  }
+
+  /**
+   * Closes threads that are answered, or that can no longer be followed.
+   *
+   * One pass, one precedence rule (`resolveOverStale`), called for every category - which is the
+   * point of it: a copy of "an answer beats a drop" per category is a rule that drifts silently.
+   * When a thread closes, *why* is recorded as a career event with a deterministic id, so the
+   * timeline shows the lifecycle and re-running over unchanged data adds nothing.
+   *
+   * SEASON_OBJECTIVE threads are skipped on purpose: the season pass owns their lifecycle, and two
+   * owners for one status is how a thread ends up opened, staled and opened again.
+   */
+  private async closeAnsweredThreads(
+    careerId: string,
+    threads: (typeof storylines.$inferSelect)[],
+    squad: EnrichedPlayer[],
+    evidenceMap: Record<string, DomainEvent[]>,
+    depthAnalysis: SquadDepthAnalysis,
+    recentEvents: ParsedCareerEvent[],
+    currentSeason: number
+  ): Promise<void> {
+    const active = threads.filter((thread) => thread.status === "ACTIVE");
+    if (active.length === 0) return;
+
+    const snapshotId = await this.latestSnapshotId(careerId);
+    const career = await db
+      .select({ inGameDate: careers.inGameDate })
+      .from(careers)
+      .where(eq(careers.id, careerId))
+      .get();
+    const byPlayerRowId = new Map(squad.map((player) => [player.id, player]));
+    const byEaPlayerId = new Map(squad.map((player) => [player.eaPlayerId, player]));
+    const signingEventId = recentEvents.find((e) => e.eventType === "PLAYER_SIGNED")?.id ?? null;
+    const soldEventId = recentEvents.find((e) => e.eventType === "PLAYER_SOLD")?.id ?? null;
+
+    /** Who a thread is about, read back from the facts that opened it. Threads carry no entity column. */
+    const subjectOf = (storylineId: string) => {
+      for (const fact of evidenceMap[storylineId] ?? []) {
+        try {
+          const payload = JSON.parse(fact.payloadJson) as {
+            playerId?: unknown;
+            eaPlayerId?: unknown;
+          };
+          const playerId = typeof payload.playerId === "string" ? payload.playerId : null;
+          const eaPlayerId = typeof payload.eaPlayerId === "number" ? payload.eaPlayerId : null;
+          if (playerId || eaPlayerId) return { playerId, eaPlayerId };
+        } catch {
+          /* a fact we cannot read identifies nobody; keep looking */
+        }
+      }
+      return { playerId: null as string | null, eaPlayerId: null as number | null };
+    };
+
+    const playerFor = (storylineId: string) => {
+      const subject = subjectOf(storylineId);
+      return (
+        (subject.eaPlayerId !== null ? byEaPlayerId.get(subject.eaPlayerId) : undefined) ??
+        (subject.playerId !== null ? byPlayerRowId.get(subject.playerId) : undefined)
+      );
+    };
+
+    for (const thread of active) {
+      let decision: ReturnType<typeof resolveOverStale> = null;
+      let resolvingEventId: string | null = null;
+
+      if (thread.category === "SQUAD_DEPTH") {
+        // The subject is the first word of the title: the token the older rule wrote, which is why
+        // `openOrAdoptThread` adopts by it too.
+        const position = thread.title.split(" ")[0];
+        const count = depthAnalysis.positionMap[position]?.length ?? 0;
+        decision = resolveOverStale({ answered: count >= DEPTH_SOLVED_AT, unobservable: false });
+        resolvingEventId = signingEventId;
+      } else if (thread.category === "CONTRACT") {
+        const player = playerFor(thread.id);
+        if (!player) {
+          // Not in the squad any more: sold, released or retired. That is the answer to the thread
+          // rather than a reason to drop it - we saw how it ended, which is exactly what a manager
+          // would say about it.
+          decision = resolveOverStale({ answered: true, unobservable: false });
+          resolvingEventId = soldEventId;
+        } else {
+          const until = player.contractValidUntil;
+          // Two ways the situation can stop being news, and both matter:
+          //
+          //  - the deal has provably MOVED further out (the save's own field changed to a later
+          //    date), which is a renewal however it was agreed and whether or not anything logged it;
+          //  - or it now sits beyond the cleared window, which is the buffer's job: opening needs it
+          //    inside one year, clearing needs it more than two out.
+          const recorded = (evidenceMap[thread.id] ?? [])
+            .map((fact) => {
+              try {
+                const payload = JSON.parse(fact.payloadJson) as { contractValidUntil?: unknown };
+                return typeof payload.contractValidUntil === "number"
+                  ? payload.contractValidUntil
+                  : null;
+              } catch {
+                return null;
+              }
+            })
+            .filter((value): value is number => value !== null);
+          const earliestRecorded = recorded.length > 0 ? Math.min(...recorded) : null;
+
+          decision = resolveOverStale({
+            answered:
+              until !== null &&
+              ((earliestRecorded !== null && until > earliestRecorded) ||
+                until > currentSeason + CONTRACT_CLEARED_SEASONS),
+            unobservable: false,
+          });
+        }
+      } else if (thread.category === "FORM") {
+        const player = playerFor(thread.id);
+        const form = player?.form ?? null;
+        decision = resolveOverStale({
+          // Recovery is the answer, and it has to clear the *upper* threshold rather than merely
+          // stop being bad - that gap is the hysteresis that stops a wobbling reading flapping.
+          answered: form !== null && form >= FORM_RECOVERED_AT,
+          // If the player left the club the reading stopped, so there is nothing left to follow.
+          // Answered wins when both hold - that precedence is the whole points of the shared rule.
+          unobservable: !player,
+        });
+      } else if (thread.category === "DEVELOPMENT") {
+        const player = playerFor(thread.id);
+        // Nothing answers a progress thread yet, so the only closure is losing sight of the player.
+        decision = resolveOverStale({ answered: false, unobservable: !player });
+      }
+
+      if (!decision) continue;
+
+      const now = new Date().toISOString();
+      const closureEventId = storylineClosureEventId(careerId, thread.id, decision.status);
+      const closureEvent: DomainEvent = {
+        id: closureEventId,
+        careerId,
+        snapshotId: snapshotId ?? "",
+        eventType: decision.status === "RESOLVED" ? "STORYLINE_RESOLVED" : "STORYLINE_STALE",
+        source: "DERIVED",
+        // Mirrors the season pass, which is the only other writer of a lifecycle event.
+        entityType: "STORYLINE",
+        entityId: thread.id,
+        payloadJson: JSON.stringify({
+          careerId,
+          storylineId: thread.id,
+          title: thread.title,
+          category: thread.category,
+          summary:
+            decision.status === "RESOLVED"
+              ? `Answered: ${thread.title}.`
+              : `Dropped: ${thread.title} - it can no longer be followed.`,
+          reason: decision.reason,
+        }),
+        timestamp: now,
+        inGameDate: career?.inGameDate ?? null,
+      };
+
+      await db.insert(careerEvents).values({
+        id: closureEvent.id,
+        careerId,
+        snapshotId,
+        eventType: closureEvent.eventType,
+        source: closureEvent.source,
+        entityType: closureEvent.entityType,
+        entityId: closureEvent.entityId,
+        payloadJson: closureEvent.payloadJson,
+        timestamp: now,
+      }).onConflictDoNothing();
+
+      await db.insert(storylineEvents)
+        .values({ id: crypto.randomUUID(), storylineId: thread.id, eventId: closureEventId })
+        .onConflictDoNothing();
+
+      // The card should be able to say why a thread closed, so the closure is part of its evidence.
+      if (!evidenceMap[thread.id]) evidenceMap[thread.id] = [];
+      evidenceMap[thread.id].unshift(closureEvent);
+
+      // Prefer the career event a manager would point at - a signing, a sale - over our own note.
+      const resolvedBy = thread.resolvingEventId ?? resolvingEventId ?? closureEventId;
+      await db
+        .update(storylines)
+        .set({
+          status: decision.status,
+          resolvedAt: now,
+          resolvingEventId: resolvedBy,
+          updatedAt: now,
+        })
+        .where(eq(storylines.id, thread.id));
+
+      // Keep the in-memory row in step so the payload this call returns shows the new state.
+      thread.status = decision.status;
+      thread.resolvedAt = now;
+      thread.resolvingEventId = resolvedBy;
+      thread.updatedAt = now;
+    }
   }
 
   private async touchCareer(careerId: string): Promise<void> {
@@ -669,6 +1030,10 @@ export class CareerService {
         toPosition: row.primaryPosition,
         fromPositionCode: before.positionCode,
         toPositionCode: row.positionCode,
+        // Form is read on the same pass as the rating: same two rows, same comparison, and a form
+        // figure is only meaningful against the reading before it.
+        fromForm: before.form,
+        toForm: row.form,
       });
     }
 
@@ -713,6 +1078,9 @@ export class CareerService {
             storylineId,
             summary: fact.summary,
             ...fact.payload,
+            // After the spread on purpose: how much a fact weighs is the probe's judgement, and no
+            // payload key may quietly override it.
+            weight: fact.weight ?? "NOTABLE",
           }),
         })
         .onConflictDoNothing();
@@ -768,7 +1136,14 @@ export class CareerService {
       }
     }
 
+    // Threads that already carry evidence of their own. A thread opened *by* a fact does not also need
+    // a synthetic "Opened: ..." row: the row says nothing the fact does not, and it was what made
+    // every card read its own situation twice - once in the heading, once in the first evidence line.
+    const threadsWithEvidence = new Set(existingLinks.map((link) => link.storylineId));
+
     for (const thread of allThreads) {
+      if (threadsWithEvidence.has(thread.id)) continue;
+
       const existing = openedByThread.get(thread.id);
       const eventId = existing ?? storylineOpenedEventId(careerId, thread.id);
       if (linkedEvents.has(eventId)) continue;

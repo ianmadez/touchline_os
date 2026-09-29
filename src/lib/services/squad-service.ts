@@ -22,6 +22,16 @@ export interface EnrichedPlayer {
   wage: number;
   wageProvenance: Provenance;
   /**
+   * Player match form, read directly from save `teamplayerlinks.form`.
+   *
+   * SAVE fact. The schema declares this field 0-5 (`rangehigh="5"`), and 0 means the game recorded
+   * no reading - which is what every newgen in the reference save carries. Earlier comments here
+   * claimed a 0-10 scale; nothing consumed it, so no copy was wrong, but a consumer built on that
+   * scale would have called the entire first team a slump. Form is also flat across the fit players
+   * in a real save, so a single reading is not a signal: `formFacts` compares two snapshots.
+   */
+  form: number | null;
+  /**
    * The year the contract runs out, as the save records it. Null when the save omits the player.
    *
    * A SAVE fact written through unchanged - the evidence pass only compares it to the current
@@ -114,6 +124,7 @@ export class SquadService {
       const profile = profileMap.get(player.id);
       return {
         ...player,
+        form: player.form,
         // A user override wins, then the derived role. Falls back to UNKNOWN (not SUB) so an
         // unmapped code stays visible and fixable instead of masquerading as a real substitute.
         primaryPosition: profile?.primaryPosition || player.primaryPosition || UNKNOWN_POSITION,
@@ -183,6 +194,7 @@ export class SquadService {
       birthdate: p.birthdate,
       wage: p.wage,
       wageProvenance: p.wageProvenance as Provenance,
+      form: p.form,
       contractValidUntil: p.contractValidUntil,
       injury: p.injury,
       isYouthProspect: p.isYouthProspect,

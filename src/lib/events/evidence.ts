@@ -2,11 +2,10 @@
  * Storyline evidence.
  *
  * A storyline is only a container. What makes it worth reading is the set of facts sitting inside
- * it, and until now nothing ever put anything in one: `storyline_events` was declared, indexed and
- * joined, but never written to, so every story read as a bare flag with a dead "Evidence (N)"
- * control. This module is the write half.
+ * it. This module is the write half of that (the probes, and the thresholds they are judged
+ * against); `compose.ts` is the read half (how a set of facts becomes a sentence on a card).
  *
- * Two rules hold it together.
+ * Three rules hold it together.
  *
  * 1. **Every fact has a deterministic identity.** The evidence event's primary key is a hash of
  *    what the fact *says*, not of when we noticed it. Running a probe again over unchanged data
@@ -18,14 +17,36 @@
  *    field, or a number this codebase derived from save data - and states it plainly. Nothing here
  *    guesses, and nothing here is written by a model.
  *
+ * 3. **Every category states its own gate, and opens and clears on different numbers.** The table
+ *    below is the contract, and the constants beside it are the machine-readable copy - they exist
+ *    so the open and clear thresholds can never be read apart from each other, which is how a
+ *    buffer quietly turns back into a single boundary:
+ *
+ *    | category         | opens on                          | readings | clears on                        |
+ *    | ---------------- | --------------------------------- | -------- | -------------------------------- |
+ *    | SQUAD_DEPTH      | a role below DEPTH_PROBLEM_BELOW  | 1        | DEPTH_SOLVED_AT, or a signing    |
+ *    | CONTRACT         | expiry within CONTRACT_RADAR      | 1        | player sold, expiry moved        |
+ *    |                  |                                   |          | further out, or expiry beyond    |
+ *    |                  |                                   |          | CONTRACT_CLEARED_SEASONS         |
+ *    | FORM             | a drop to FORM_SLUMP_AT across    | 2        | a reading at FORM_RECOVERED_AT,  |
+ *    |                  | two snapshots                     |          | or the player leaving            |
+ *    | TACTICAL         | an empty or mis-filled slot       | 1        | the slot is filled correctly     |
+ *    | DEVELOPMENT      | an OVR or position move           | 2        | a later move redresses it        |
+ *    | SEASON_OBJECTIVE | the season pass, not this module  | -        | the season transition            |
+ *
+ *    "Readings" is the minimum evidence to open: a squad list or a contract date is a structural
+ *    fact and one reading is enough, while a form figure or a rating is a trend and needs something
+ *    to be a trend *against*. Nothing opens on a single reading of a value it is calling movement.
+ *
  * A probe is deliberately small: it answers "what do we know that bears on this thread?" and
  * returns plain facts. Deciding how alarming they are, and how to phrase the thread, happens later
  * and separately (see `composeStoryline`), so re-wording a card never rewrites history.
  */
 import { createHash } from "crypto";
-import type { Provenance } from "@/lib/db/schema";
-import type { EnrichedPlayer } from "@/lib/services/squad-service";
-import { UNKNOWN_POSITION } from "@/lib/parser/interface";
+import type { Provenance } from "../db/schema";
+import type { EnrichedPlayer } from "../services/squad-service";
+import type { PitchSlotAssignment } from "../services/tactics-service";
+import { UNKNOWN_POSITION } from "../parser/interface";
 
 /**
  * The spine event types evidence is allowed to use.
@@ -38,7 +59,12 @@ export type EvidenceEventType =
   | "STORYLINE_OPENED"
   | "PLAYER_CONTRACT_EXPIRING"
   | "PLAYER_DEVELOPED"
-  | "PLAYER_POSITION_CHANGED";
+  | "PLAYER_POSITION_CHANGED"
+  | "PLAYER_FORM_SLUMP"
+  | "PLAYER_FORM_STREAK"
+  | "PLAYER_OUT_OF_POSITION"
+  | "TACTICAL_SLOT_UNASSIGNED"
+  | "SQUAD_DEPTH_THIN";
 
 /** A single thing we know, in a form that can be stored and shown without further interpretation. */
 export interface EvidenceFact {
@@ -54,6 +80,53 @@ export interface EvidenceFact {
   /** One plain sentence, safe to render as-is. No jargon, no template placeholders. */
   summary: string;
   payload: Record<string, unknown>;
+  /**
+   * How much this single fact moves the needle, set by the probe that observed it.
+   *
+   * The severity composer reads this, so urgency is never decided by a category name - it is
+   * decided by what we actually know. A contract already in its final year is SERIOUS; one that
+   * still has a season of room is NOTABLE. Omitted means NOTABLE.
+   */
+  weight?: EvidenceWeight;
+}
+
+export type EvidenceWeight = "NOTABLE" | "SERIOUS";
+
+/**
+ * Who wins when a thread could both be answered and be dropped.
+ *
+ * One rule, written once and called by every category, because four copies of a precedence check
+ * drift apart silently. The rule: **an observed fact that answers a thread always beats a reason to
+ * drop it.** A contract thread whose player was sold is resolved - it was dealt with, we saw it -
+ * not dropped. "Dropped" is for threads we can no longer follow at all, never for ones we can.
+ */
+export function resolveOverStale(input: {
+  /** A fact we observed that answers the thread: a signing, a renewal, a recovery, a sale. */
+  answered: boolean;
+  /** A reason the thread can no longer be followed: the player left, the reading stopped. */
+  unobservable: boolean;
+}): { status: "RESOLVED" | "STALE"; reason: string } | null {
+  if (input.answered) return { status: "RESOLVED", reason: "answered" };
+  if (input.unobservable) return { status: "STALE", reason: "unobservable" };
+  return null;
+}
+
+/**
+ * Deterministic id for a thread's closing fact, so a re-run cannot file it twice.
+ *
+ * Status is part of the id: a thread that is resolved and later dropped (or the reverse) has two
+ * genuinely different facts to record, and both belong in its history.
+ */
+export function storylineClosureEventId(
+  careerId: string,
+  storylineId: string,
+  status: "RESOLVED" | "STALE"
+): string {
+  const digest = createHash("sha1")
+    .update(["close", careerId, storylineId, status].join("|"))
+    .digest("hex")
+    .slice(0, 24);
+  return `evt_ev_${digest}`;
 }
 
 /**
@@ -88,6 +161,70 @@ export function storylineOpenedEventId(careerId: string, storylineId: string): s
 export const CONTRACT_RADAR_SEASONS = 1;
 
 /**
+ * Where a contract thread stops being news again - the resolve side of its buffer.
+ *
+ * The open threshold and the resolve threshold are deliberately different numbers. A thread opens
+ * when a deal is inside one year, and only clears on the window alone once it is beyond two. If both
+ * used the same number, a contract sitting exactly on the boundary would open and resolve on
+ * alternate syncs, and the manager would watch a card flicker for a whole year.
+ *
+ * The buffer is not the only way out: the evaluator also clears the thread when the save's own date
+ * has provably moved further out, because a renewal of a single year is still a renewal. Without
+ * that, the buffer would swallow exactly the case it is most likely to see.
+ */
+export const CONTRACT_CLEARED_SEASONS = CONTRACT_RADAR_SEASONS + 1;
+
+/**
+ * Squad depth: a role is a problem below two players, and only considered solved at three.
+ *
+ * Structural fact (one reading opens it - a squad list is not a trend). The gap between the two
+ * numbers is the buffer: with one reading resolving it, a squad that dips to one specialist and
+ * then signs a second would open and resolve the same thread repeatedly.
+ */
+export const DEPTH_PROBLEM_BELOW = 2;
+export const DEPTH_SOLVED_AT = DEPTH_PROBLEM_BELOW + 1;
+
+/**
+ * The save's own form scale, and where a thread opens and clears on it.
+ *
+ * `teamplayerlinks.form` is declared INTEGER with `rangehigh="5"` in `fifa_ng_db-meta.xml`, and the
+ * reference implementation labels 1-5 (Awful/Poor/Okay/Good/Excellent) with 0 meaning the game has
+ * no reading for that player at all - which is what our five newgens carry. Earlier comments in
+ * this codebase described a 0-10 scale, which would have flagged almost every senior player as
+ * being in a "severe slump" the moment anything consumed it.
+ *
+ * Trend fact (two readings needed - a level on its own says nothing). It is not merely that a
+ * single reading is thin evidence: in the reference save every fit senior player reads exactly 3,
+ * so a level-based rule would either never fire or fire for the entire first team. The movement is
+ * the signal, which is why FORM is opened from the snapshot comparison rather than from the value.
+ */
+export const FORM_SCALE_MAX = 5;
+export const FORM_SLUMP_AT = 2;
+export const FORM_RECOVERED_AT = 4;
+
+/** The save's own wording for each form reading, mirroring the reference implementation. */
+export const FORM_GRADE_LABELS: Record<number, string> = {
+  1: "awful",
+  2: "poor",
+  3: "okay",
+  4: "good",
+  5: "excellent",
+};
+
+/**
+ * A usable form reading, or null.
+ *
+ * 0 and anything outside 1-5 is not a reading: the save uses 0 for "no reading recorded", which is
+ * what every newgen in the reference save carries. Treating it as a very bad form score would
+ * invent a slump out of missing data.
+ */
+function readFormGrade(value: number | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  if (!Number.isInteger(value) || value < 1 || value > FORM_SCALE_MAX) return null;
+  return value;
+}
+
+/**
  * Contracts running out inside the radar window.
  *
  * Provenance is SAVE: `contractValidUntil` is read from the save file and written through
@@ -112,6 +249,8 @@ export function contractExpiryFacts(
       // The year is part of the key: if the contract is renewed to a later date, that is a new
       // fact and deserves its own row rather than overwriting the old one.
       key: `contract:${until}`,
+      // A deal already in its final season is a decision that has to be made now, not next summer.
+      weight: seasonsLeft <= 0 ? "SERIOUS" : "NOTABLE",
       summary:
         seasonsLeft <= 0
           ? `${player.name}'s contract has reached its final year (${until}).`
@@ -128,6 +267,156 @@ export function contractExpiryFacts(
   }
 
   return facts;
+}
+
+/**
+ * Form movement between the two most recent snapshots.
+ *
+ * Opens nothing on its own. The probe reports both directions and the evaluator decides: a drop is
+ * a thread, a recovery is the evidence that closes one. See the FORM constants above for the scale
+ * and for why the level alone is not evidence.
+ */
+export function formFacts(observations: DevelopmentObservation[]): EvidenceFact[] {
+  const facts: EvidenceFact[] = [];
+
+  for (const observation of observations) {
+    const from = readFormGrade(observation.fromForm);
+    const to = readFormGrade(observation.toForm);
+    if (from === null || to === null || to === from) continue;
+
+    const name = observation.name;
+    const grade = FORM_GRADE_LABELS[to] ?? String(to);
+
+    if (to < from && to <= FORM_SLUMP_AT) {
+      facts.push({
+        eventType: "PLAYER_FORM_SLUMP",
+        source: "SAVE",
+        entityId: observation.playerId,
+        // The whole movement is the key, so a later further drop is a new fact rather than a
+        // rewrite of this one.
+        key: `form_drop:${from}->${to}@${observation.toSnapshot}`,
+        weight: to <= 1 ? "SERIOUS" : "NOTABLE",
+        summary: `${name}'s form has dropped to ${grade} (${to}/${FORM_SCALE_MAX}).`,
+        payload: {
+          playerId: observation.playerId,
+          eaPlayerId: observation.eaPlayerId,
+          name,
+          fromForm: from,
+          toForm: to,
+          formScaleMax: FORM_SCALE_MAX,
+          fromSnapshot: observation.fromSnapshot,
+          toSnapshot: observation.toSnapshot,
+          primaryPosition: observation.toPosition,
+        },
+      });
+      continue;
+    }
+
+    if (to > from && to >= FORM_RECOVERED_AT) {
+      facts.push({
+        eventType: "PLAYER_FORM_STREAK",
+        source: "SAVE",
+        entityId: observation.playerId,
+        key: `form_rise:${from}->${to}@${observation.toSnapshot}`,
+        summary: `${name}'s form has recovered to ${grade} (${to}/${FORM_SCALE_MAX}).`,
+        payload: {
+          playerId: observation.playerId,
+          eaPlayerId: observation.eaPlayerId,
+          name,
+          fromForm: from,
+          toForm: to,
+          formScaleMax: FORM_SCALE_MAX,
+          fromSnapshot: observation.fromSnapshot,
+          toSnapshot: observation.toSnapshot,
+          primaryPosition: observation.toPosition,
+        },
+      });
+    }
+  }
+
+  return facts;
+}
+
+/**
+ * Out-of-position starting XI players and unassigned starting slots.
+ */
+export function tacticalFacts(
+  squad: EnrichedPlayer[],
+  tacticsSlots: PitchSlotAssignment[]
+): EvidenceFact[] {
+  const facts: EvidenceFact[] = [];
+  const playerMap = new Map(squad.map((p) => [p.id, p]));
+
+  for (const slot of tacticsSlots) {
+    if (!slot.playerId) {
+      facts.push({
+        eventType: "TACTICAL_SLOT_UNASSIGNED",
+        source: "USER",
+        entityId: `slot_${slot.slotIndex}`,
+        key: `unassigned_slot:${slot.slotIndex}_${slot.role}`,
+        summary: `Starting XI slot #${slot.slotIndex + 1} (${slot.label || slot.role}) has no player assigned.`,
+        payload: {
+          slotIndex: slot.slotIndex,
+          role: slot.role,
+          label: slot.label,
+        },
+      });
+      continue;
+    }
+
+    const player = playerMap.get(slot.playerId);
+    if (!player) continue;
+
+    const naturalPos = player.primaryPosition;
+    if (
+      naturalPos &&
+      naturalPos !== slot.role &&
+      naturalPos !== "SUB" &&
+      naturalPos !== UNKNOWN_POSITION
+    ) {
+      facts.push({
+        eventType: "PLAYER_OUT_OF_POSITION",
+        source: "DERIVED",
+        entityId: player.id,
+        key: `out_of_pos:${slot.slotIndex}_${slot.role}_${naturalPos}`,
+        summary: `${player.name} (${naturalPos}) is deployed out of position at ${slot.label || slot.role}.`,
+        payload: {
+          playerId: player.id,
+          eaPlayerId: player.eaPlayerId,
+          name: player.name,
+          naturalPosition: naturalPos,
+          assignedSlotRole: slot.role,
+          slotLabel: slot.label,
+          slotIndex: slot.slotIndex,
+        },
+      });
+    }
+  }
+
+  return facts;
+}
+
+/**
+ * Squad depth gap facts for thin positions.
+ */
+export function squadDepthFacts(
+  thinPositions: Array<{ position: string; count: number }>
+): EvidenceFact[] {
+  return thinPositions.map((thin) => ({
+    eventType: "SQUAD_DEPTH_THIN",
+    source: "DERIVED",
+    entityId: `depth_${thin.position}`,
+    key: `depth_thin:${thin.position}_${thin.count}`,
+    // Nobody at all in a position is sharper than one specialist left covering it.
+    weight: thin.count === 0 ? "SERIOUS" : "NOTABLE",
+    summary: `${thin.position} depth is critically thin with only ${thin.count} player${
+      thin.count === 1 ? "" : "s"
+    } available.`,
+    payload: {
+      position: thin.position,
+      count: thin.count,
+    },
+  }));
 }
 
 /**
@@ -151,6 +440,14 @@ export interface DevelopmentObservation {
   /** The save's own position codes. The comparison uses these, not the labels. */
   fromPositionCode: number | null;
   toPositionCode: number | null;
+  /**
+   * The save's form reading on each side (1-5), or null when it recorded none.
+   *
+   * Read on the same pass as the rating because it is the same comparison and the same two rows -
+   * form movement is only meaningful against the reading before it.
+   */
+  fromForm: number | null;
+  toForm: number | null;
 }
 
 /**

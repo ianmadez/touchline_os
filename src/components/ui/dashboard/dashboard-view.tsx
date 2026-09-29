@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import { ParsedCareerEvent } from "@/lib/services/event-service";
 import { PitchSlotAssignment } from "@/lib/services/tactics-service";
@@ -11,12 +11,31 @@ import type { SeasonState } from "@/lib/services/season-service";
 import {
   categoryLabel,
   eventLabel,
+  severityLabel,
   statusLabel,
   storylineDestination,
   storylineDestinationLabel,
 } from "@/lib/ui/labels";
 import { formatEventDate, provenanceLabel, summariseEvent } from "@/lib/ui/events";
-import { SeasonPanel } from "./season-panel";
+
+/** Colour by category - what a thread is about. */
+const CATEGORY_COLOURS: Record<string, string> = {
+  SQUAD_DEPTH: "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30",
+  CONTRACT: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
+  FORM: "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30",
+  TACTICAL: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30",
+  DEVELOPMENT: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
+  SEASON_OBJECTIVE: "bg-slate-500/15 text-slate-600 dark:text-slate-300 border-slate-500/30",
+};
+
+/** Colour by severity - how much it wants attention. Composed server-side from the evidence. */
+const SEVERITY_COLOURS: Record<string, string> = {
+  WATCH: "bg-slate-500/15 text-slate-600 dark:text-slate-300 border-slate-500/30",
+  WARNING: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
+  CRITICAL: "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30",
+};
+
+const SEVERITY_RANK: Record<string, number> = { CRITICAL: 2, WARNING: 1, WATCH: 0 };
 
 interface DashboardViewProps {
   careerId: string;
@@ -32,6 +51,8 @@ interface DashboardViewProps {
   tacticsSlots: PitchSlotAssignment[];
   onNavigateTab: (tab: AppTab) => void;
   onSelectPlayer: (player: EnrichedPlayer) => void;
+  /** Opens the thread's evidence view - the one permitted level below the dashboard. */
+  onOpenStoryline: (storylineId: string) => void;
 }
 
 export function DashboardView({
@@ -48,8 +69,8 @@ export function DashboardView({
   tacticsSlots,
   onNavigateTab,
   onSelectPlayer,
+  onOpenStoryline,
 }: DashboardViewProps) {
-  const [expandedStorylineId, setExpandedStorylineId] = useState<string | null>(null);
 
   // 1. Unassigned / Flagged Players
   const unassignedPlayers = players.filter((p) => !p.userProfile?.assignedRole);
@@ -97,6 +118,14 @@ export function DashboardView({
 
   const displayEvents = recentEvents.slice(0, 5);
 
+  // "What matters right now" has to be in that order: the loudest thread first, then the most
+  // recently moved. Ordering by update time alone answers "what changed", not "what matters".
+  const orderedStorylines = [...storylines].sort(
+    (a, b) =>
+      (SEVERITY_RANK[b.severity] ?? 0) - (SEVERITY_RANK[a.severity] ?? 0) ||
+      b.updatedAt.localeCompare(a.updatedAt)
+  );
+
   return (
     <div className="space-y-6">
       {/* Hero Operational Banner */}
@@ -128,14 +157,47 @@ export function DashboardView({
         </div>
       </div>
 
-      {/* Season, board objective and promotion outlook. Full width: it is the context every
-          card below it reads against. */}
+      {/* Season Summary & Quick Navigation Banner */}
       {seasonState && careerId && (
-        <SeasonPanel
-          careerId={careerId}
-          seasonState={seasonState}
-          onSeasonChange={onSeasonChange ?? (() => {})}
-        />
+        <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 backdrop-blur-xl shadow-xl flex flex-wrap items-center justify-between gap-4">
+          <div className="space-y-1 min-w-0">
+            <div className="flex items-center gap-2 text-[10px] font-sub uppercase font-bold text-[#E11D48] dark:text-[#FF8C7A] tracking-wider">
+              <span>Season {seasonState.outlook?.seasonNumber ?? season} Objective</span>
+              <span>•</span>
+              <span className="text-slate-500 dark:text-slate-400">
+                {seasonState.outlook?.gamesPlayed ?? 0} Matches Played
+              </span>
+            </div>
+            <h2 className="font-heading text-lg text-slate-900 dark:text-slate-100 uppercase tracking-wide truncate">
+              {seasonState.objectivePair?.user?.text ??
+                (seasonState.objectivePair?.save?.saveObjectiveCode !== null && seasonState.objectivePair?.save?.saveObjectiveCode !== undefined
+                  ? `Save Objective Code: ${seasonState.objectivePair.save.saveObjectiveCode}`
+                  : "Target Top 6 Finish")}
+            </h2>
+            <div className="flex items-center gap-4 text-xs font-sub text-slate-600 dark:text-slate-400 pt-0.5">
+              <span>
+                Projected: <strong className="text-amber-600 dark:text-amber-400 font-bold">{seasonState.outlook?.projectedPoints ?? "—"} PTS</strong>
+              </span>
+              <span>•</span>
+              <span>
+                Pace: <strong className="text-slate-900 dark:text-slate-100 font-bold">{seasonState.outlook?.pointsPerGame ? seasonState.outlook.pointsPerGame.toFixed(2) : "—"} PPG</strong>
+              </span>
+              <span>•</span>
+              <span>
+                Current Standings: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{seasonState.outlook?.loggedPosition ? `${seasonState.outlook.loggedPosition}th` : "Logged"}</strong>
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab("SEASON")}
+            className="px-5 py-2.5 bg-slate-900 dark:bg-slate-100 hover:bg-[#E11D48] dark:hover:bg-[#FF8C7A] text-white dark:text-slate-900 hover:text-white font-sub font-bold text-xs uppercase tracking-wider rounded-xl transition-colors shadow-md cursor-pointer shrink-0 flex items-center gap-2"
+          >
+            <span>View Season Hub</span>
+            <span className="text-sm">→</span>
+          </button>
+        </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -155,18 +217,9 @@ export function DashboardView({
 
             {storylines.length > 0 ? (
               <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
-                {storylines.map((story) => {
-                  const isExpanded = expandedStorylineId === story.id;
+                {orderedStorylines.map((story) => {
                   const destination = storylineDestination(story.category);
-
-                  const categoryColors: Record<string, string> = {
-                    SQUAD_DEPTH: "bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30",
-                    CONTRACT: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
-                    FORM: "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30",
-                    TACTICAL: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30",
-                    DEVELOPMENT: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
-                    SEASON_OBJECTIVE: "bg-slate-500/15 text-slate-600 dark:text-slate-300 border-slate-500/30",
-                  };
+                  const facts = story.evidenceEvents ?? [];
 
                   return (
                     <div
@@ -178,10 +231,17 @@ export function DashboardView({
                           <div className="flex items-center gap-2 min-w-0">
                             <span
                               className={`shrink-0 text-[10px] font-sub font-bold px-2 py-0.5 rounded-md border ${
-                                categoryColors[story.category] || categoryColors.SQUAD_DEPTH
+                                CATEGORY_COLOURS[story.category] || CATEGORY_COLOURS.SQUAD_DEPTH
                               }`}
                             >
                               {categoryLabel(story.category)}
+                            </span>
+                            <span
+                              className={`shrink-0 text-[10px] font-sub font-bold px-2 py-0.5 rounded-md border ${
+                                SEVERITY_COLOURS[story.severity] ?? SEVERITY_COLOURS.WATCH
+                              }`}
+                            >
+                              {severityLabel(story.severity)}
                             </span>
                             <span className="text-[10px] font-sub text-slate-400 truncate">
                               {story.status === "ACTIVE"
@@ -189,69 +249,42 @@ export function DashboardView({
                                 : statusLabel(story.status)}
                             </span>
                           </div>
-                          {story.evidenceEvents && story.evidenceEvents.length > 0 && (
-                            <button
-                              onClick={() => setExpandedStorylineId(isExpanded ? null : story.id)}
-                              aria-expanded={isExpanded}
-                              className="shrink-0 min-h-10 px-2 text-xs font-sub text-slate-500 dark:text-slate-400 hover:text-[#E11D48] dark:hover:text-[#FF8C7A] font-semibold transition-colors cursor-pointer"
-                            >
-                              {isExpanded
-                                ? "Hide evidence"
-                                : `Evidence (${story.evidenceEvents.length})`}
-                            </button>
-                          )}
                         </div>
 
-                        {/* The whole title is the affordance: a card you cannot act on is decoration. */}
+                        {/* The whole card is the affordance, and it opens the thread rather than a tab:
+                            a card you cannot act on is decoration. */}
                         <button
                           type="button"
-                          onClick={() => onNavigateTab(destination)}
+                          onClick={() => onOpenStoryline(story.id)}
                           className="w-full text-left cursor-pointer"
-                          title={`Go to ${destination.toLowerCase()}`}
+                          title="Open the evidence"
                         >
                           <h3 className="font-heading text-sm text-slate-900 dark:text-slate-100 tracking-wide group-hover:text-[#E11D48] dark:group-hover:text-[#FF8C7A] transition-colors">
                             {story.title}
                           </h3>
-                          <span className="mt-1 inline-block text-[11px] font-sub font-semibold text-slate-500 dark:text-slate-400 group-hover:text-[#E11D48] dark:group-hover:text-[#FF8C7A] transition-colors">
-                            {storylineDestinationLabel(story.category)} →
-                          </span>
+                          <p className="mt-1 font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 line-clamp-2">
+                            {story.body}
+                          </p>
                         </button>
 
-                        {isExpanded && story.evidenceEvents && (
-                          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-1.5 animate-fade-in-up">
-                            <span className="text-[10px] font-sub font-bold uppercase tracking-wider text-slate-400">
-                              What we know
-                            </span>
-                            {/* The fact itself, not a category word. A row that only says
-                                "Contract running out" tells the manager nothing they could act on. */}
-                            {story.evidenceEvents.map((evt) => (
-                              <div
-                                key={evt.id}
-                                className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1"
-                              >
-                                <p className="text-xs text-slate-700 dark:text-slate-300">
-                                  {/*
-                                    The opening row is composed here rather than read from the
-                                    stored payload. What the event records is that this thread
-                                    opened; the sentence is presentation, and reading it back from
-                                    storage would let the card's heading and its own opening line
-                                    drift apart the moment one of them was reworded.
-                                  */}
-                                  {evt.eventType === "STORYLINE_OPENED"
-                                    ? `Opened: ${story.title}.`
-                                    : summariseEvent(evt)}
-                                </p>
-                                <div className="flex items-center gap-1.5 text-[10px] font-sub text-slate-400">
-                                  <span>{provenanceLabel(evt.source)}</span>
-                                  <span aria-hidden="true">·</span>
-                                  <span>{eventLabel(evt.eventType)}</span>
-                                  <span aria-hidden="true">·</span>
-                                  <span>{formatEventDate(evt.timestamp)}</span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <div className="flex items-center justify-between gap-3 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => onOpenStoryline(story.id)}
+                            className="min-h-10 font-sub text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:text-[#E11D48] dark:hover:text-[#FF8C7A] transition-colors cursor-pointer"
+                          >
+                            {facts.length} fact{facts.length === 1 ? "" : "s"} on this thread →
+                          </button>
+                          {/* The destination stays one click away: some threads want the squad screen
+                              more than they want another paragraph. */}
+                          <button
+                            type="button"
+                            onClick={() => onNavigateTab(destination)}
+                            className="min-h-10 font-sub text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:text-[#E11D48] dark:hover:text-[#FF8C7A] transition-colors cursor-pointer"
+                          >
+                            {storylineDestinationLabel(story.category)} →
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );

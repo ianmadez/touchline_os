@@ -363,7 +363,21 @@ async function initDatabase() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_league_teams_career_id ON league_teams(career_id);
-    CREATE UNIQUE INDEX IF NOT EXISTS uq_league_teams_career_team ON league_teams(career_id, team_id);  `);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_league_teams_career_team ON league_teams(career_id, team_id);
+
+    -- 18. LEAGUE CATALOGUE (the save's own leagueid -> the competition's real name)
+    -- Career-scoped like every other table here: a Creation-Zone league can exist in two careers
+    -- under the same id, and a global key would silently merge them into whichever synced last.
+    CREATE TABLE IF NOT EXISTS leagues (
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      league_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      level INTEGER,
+      country_id INTEGER,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (career_id, league_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_leagues_career_id ON leagues(career_id);  `);
 
   // Auto-migration checks for existing databases
   const alterStatements = [

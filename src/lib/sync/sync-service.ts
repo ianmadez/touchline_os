@@ -13,6 +13,7 @@ import {
   careerObjectives,
   leaguePositions,
   leagueTeams,
+  leagues,
   transferDeals,
 } from "../db/schema";
 import { SaveCandidate, UNKNOWN_POSITION, type SeasonHistoryRow } from "../parser/interface";
@@ -70,6 +71,9 @@ export interface SyncResult {
  * v10: our division is persisted club by club into `league_teams` - names from `teams`, order and
  * form from `leagueteamlinks`. The debrief screen offers those clubs as opponents instead of a
  * free-text box, and a picked club keeps a stable id rather than a spelling.
+ *
+ * No bump for the league catalogue: it is written before the hash check (see the `leagues` upsert),
+ * so a save that has not changed still repopulates it, and no career row derives anything from it.
  */
 export const SYNC_PIPELINE_VERSION = "10";
 
@@ -159,6 +163,39 @@ export class SyncService {
             updatedAt: new Date().toISOString(),
           })
           .where(eq(careers.id, careerId))
+          .run();
+      }
+
+      // --- League catalogue (a SAVE fact, career-scoped) ------------------------------------
+      //
+      // `leagues.leaguename` is the save's own leagueid -> competition-name table. It has always been
+      // decoded on every parse, but reached only one diagnostics fact, so `season_history.league_id`
+      // arrived on screen as a raw foreign key ("Division 14"). Persisting it here is what lets any
+      // surface resolve a league id the same way, without re-parsing or re-deriving a map.
+      //
+      // Deliberately BEFORE the snapshot hash check below: the catalogue is reference data, not
+      // derived career state, so an unchanged save still gets it written and an existing database
+      // self-heals on its next sync. That is also why this needs no SYNC_PIPELINE_VERSION bump - it
+      // creates no snapshot and emits no event, so the NO_CHANGE invariant is untouched.
+      for (const league of rawData.leagueDirectory) {
+        tx.insert(leagues)
+          .values({
+            careerId,
+            leagueId: league.leagueId,
+            name: league.name,
+            level: league.level,
+            countryId: league.countryId,
+            updatedAt: new Date().toISOString(),
+          })
+          .onConflictDoUpdate({
+            target: [leagues.careerId, leagues.leagueId],
+            set: {
+              name: league.name,
+              level: league.level,
+              countryId: league.countryId,
+              updatedAt: new Date().toISOString(),
+            },
+          })
           .run();
       }
 

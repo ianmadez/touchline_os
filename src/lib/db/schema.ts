@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const provenanceEnum = ["SAVE", "USER", "DERIVED", "AI"] as const;
@@ -434,6 +434,49 @@ export const storylineEvents = sqliteTable(
     ),
   })
 );
+
+// ============================================================================
+// 18. LEAGUE CATALOGUE (the save's own `leagueid` -> the competition's real name)
+// ============================================================================
+
+/**
+ * `leagues.leaguename` - EA's own id -> competition-name table, mirrored per career.
+ *
+ * This table exists because the save resolves competitions and this app did not: both
+ * `career_managerhistory` and `leagueteamlinks` carry a bare `leagueid`, and every screen that showed
+ * one printed the foreign key ("Division 14"). The parser has always decoded the catalogue on each
+ * parse; the sync now persists it here, so any surface - this season table today, rivals, standings
+ * and scouting later - resolves a league id the same way instead of re-deriving one.
+ *
+ * Career-scoped like every other table in this schema: two careers can each hold a Creation-Zone
+ * league under the same id, and a global key would silently merge them into whichever synced last.
+ *
+ * `name` is stored EXACTLY as the save spells it ("England Championship (2)"). Wording is a display
+ * concern and lives in `src/lib/ui/leagues.ts`, so this row stays a faithful SAVE fact. A league the
+ * save gives no name for is simply absent - callers fall back to the id rather than a guess.
+ */
+export const leagues = sqliteTable(
+  "leagues",
+  {
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    /** `leagues.leagueid` - the save's own identifier, referenced by season and club rows. */
+    leagueId: integer("league_id").notNull(),
+    /** The save's raw competition name. Never reformatted, never invented. */
+    name: text("name").notNull(),
+    /** `leagues.level` (0-7): the tier the save itself records for this competition. */
+    level: integer("level"),
+    countryId: integer("country_id"),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.careerId, table.leagueId] }),
+    careerIdx: index("idx_leagues_career_id").on(table.careerId),
+  })
+);
+
+export type LeagueCatalogRow = typeof leagues.$inferSelect;
 
 // ============================================================================
 // 17. LEAGUE TEAMS (our division, club by club - ORDER and FORM only)

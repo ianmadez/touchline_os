@@ -13,6 +13,7 @@ export type AppTab =
   | "LANDING"
   | "PORTAL"
   | "DASHBOARD"
+  | "SEASON"
   | "SQUAD"
   | "TACTICS"
   | "TIMELINE"
@@ -23,6 +24,7 @@ export const APP_TABS: readonly AppTab[] = [
   "LANDING",
   "PORTAL",
   "DASHBOARD",
+  "SEASON",
   "SQUAD",
   "TACTICS",
   "TIMELINE",
@@ -49,6 +51,14 @@ export interface TouchlineSession {
   clubName: string;
   clubLogoUrl: string;
   managerName: string;
+  /**
+   * The storyline whose evidence view is open, if any.
+   *
+   * Level-2 detail lives in the shell rather than at a route, so this field is what lets a refresh
+   * land back on the thread the manager was reading instead of dropping them on the dashboard.
+   * Cleared when the view closes.
+   */
+  openStorylineId: string | null;
 }
 
 export const DEFAULT_SESSION: TouchlineSession = {
@@ -63,6 +73,7 @@ export const DEFAULT_SESSION: TouchlineSession = {
   clubName: "",
   clubLogoUrl: "",
   managerName: "",
+  openStorylineId: null,
 };
 
 export function isAppTab(value: unknown): value is AppTab {
@@ -108,6 +119,7 @@ export function readSession(): TouchlineSession | null {
       clubName: asString(candidate.clubName),
       clubLogoUrl: asString(candidate.clubLogoUrl),
       managerName: asString(candidate.managerName),
+      openStorylineId: asNullableString(candidate.openStorylineId),
     };
   } catch {
     return null;

@@ -32,10 +32,16 @@ import {
   type PositionInference,
   type RecordReconciliation,
 } from "./league-model-service";
+import { LeagueService, leagueNameOf, type LeagueDirectory } from "./league-service";
 
 export interface SeasonRecord {
   season: number;
   leagueId: number | null;
+  /**
+   * The save's own name for the competition that season, resolved through the league catalogue, or
+   * null when the save has no name for the id. Carried unformatted - the screen decides the wording.
+   */
+  leagueName: string | null;
   gamesPlayed: number | null;
   wins: number | null;
   draws: number | null;
@@ -106,11 +112,15 @@ export interface SeasonState {
   };
 }
 
-function toRecord(row: typeof seasonHistory.$inferSelect): SeasonRecord {
+function toRecord(
+  row: typeof seasonHistory.$inferSelect,
+  leagueDirectory: LeagueDirectory
+): SeasonRecord {
   const tablePosition = row.tablePosition ?? 0;
   return {
     season: row.season,
     leagueId: row.leagueId,
+    leagueName: leagueNameOf(leagueDirectory, row.leagueId),
     gamesPlayed: row.gamesPlayed,
     wins: row.wins,
     draws: row.draws,
@@ -129,14 +139,20 @@ function toRecord(row: typeof seasonHistory.$inferSelect): SeasonRecord {
 
 export class SeasonService {
   private leagueModel = new LeagueModelService();
+  private leagues = new LeagueService();
 
   async getSeasonHistory(careerId: string): Promise<SeasonRecord[]> {
-    const rows = await db
-      .select()
-      .from(seasonHistory)
-      .where(eq(seasonHistory.careerId, careerId))
-      .orderBy(asc(seasonHistory.season));
-    return rows.map(toRecord);
+    // One round trip each, in parallel: the season rows are the fact, the catalogue is what makes
+    // their `league_id` mean something. A missing catalogue leaves every `leagueName` null.
+    const [rows, leagueDirectory] = await Promise.all([
+      db
+        .select()
+        .from(seasonHistory)
+        .where(eq(seasonHistory.careerId, careerId))
+        .orderBy(asc(seasonHistory.season)),
+      this.leagues.getDirectory(careerId),
+    ]);
+    return rows.map((row) => toRecord(row, leagueDirectory));
   }
 
   /** Retrospective seasons, newest first. */

@@ -10,6 +10,8 @@ import { PlayerDrawer } from "@/components/ui/squad/player-drawer";
 import { LandingFooter } from "@/components/ui/landing/landing-footer";
 import { Pitch2D } from "@/components/ui/squad/pitch-2d";
 import { DashboardView } from "@/components/ui/dashboard/dashboard-view";
+import { SeasonView } from "@/components/ui/season/season-view";
+import { StorylineEvidence } from "@/components/ui/dashboard/storyline-evidence";
 import { DebriefView } from "@/components/ui/debrief/debrief-view";
 import { SettingsView, Diagnostics, ActionResult } from "@/components/ui/settings/settings-view";
 import { SquadTableSkeleton } from "@/components/ui/skeleton";
@@ -138,6 +140,9 @@ export default function TouchlineApp() {
   const [saveScanComplete, setSaveScanComplete] = useState(false);
   const [squad, setSquad] = useState<EnrichedPlayer[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<EnrichedPlayer | null>(null);
+  // The storyline whose evidence view is open. Kept in the session as well, so a refresh lands
+  // back on the thread instead of dropping the manager on the dashboard.
+  const [selectedStorylineId, setSelectedStorylineId] = useState<string | null>(null);
   const [tacticsSlots, setTacticsSlots] = useState<PitchSlotAssignment[]>([]);
   const [formationId, setFormationId] = useState<string>(DEFAULT_SESSION.formationId);
   const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocType>(null);
@@ -278,6 +283,9 @@ export default function TouchlineApp() {
           setActiveTab("DASHBOARD");
           setDisplayedTab("DASHBOARD");
           setBootPhase("app");
+          // Reopen the thread the manager was reading, if it still exists. A stale id resolves to
+          // null and simply shows nothing - it is never an error.
+          setSelectedStorylineId(session?.openStorylineId ?? null);
           patchSession({
             careerId: data.careerId ?? null,
             onboardingComplete: true,
@@ -675,6 +683,17 @@ export default function TouchlineApp() {
       .catch((error: Error) => setAppError(error.message));
   };
 
+  /**
+   * Closes the evidence view and forgets it in the session.
+   *
+   * Stable across renders because the view subscribes to it for its Escape handler; a new function
+   * every render would make that subscription churn for no reason.
+   */
+  const handleCloseStoryline = useCallback(() => {
+    setSelectedStorylineId(null);
+    patchSession({ openStorylineId: null });
+  }, []);
+
   const handleSaveTactics = (nextFormationId: string, nextSlots: PitchSlotAssignment[]) => {
     setFormationId(nextFormationId);
     setTacticsSlots(nextSlots);
@@ -1004,6 +1023,18 @@ export default function TouchlineApp() {
             tacticsSlots={tacticsSlots}
             onNavigateTab={(tab) => switchTab(tab)}
             onSelectPlayer={(player) => setSelectedPlayer(player)}
+            onOpenStoryline={(storylineId) => {
+              setSelectedStorylineId(storylineId);
+              patchSession({ openStorylineId: storylineId });
+            }}
+          />
+        )}
+
+        {displayedTab === "SEASON" && (
+          <SeasonView
+            careerId={careerId ?? ""}
+            seasonState={seasonState}
+            onSeasonChange={setSeasonState}
           />
         )}
 
@@ -1111,6 +1142,18 @@ export default function TouchlineApp() {
         valuation={selectedPlayer ? valuations[selectedPlayer.eaPlayerId] : undefined}
         onClose={() => setSelectedPlayer(null)}
         onSaveProfile={handleSavePlayerProfile}
+      />
+
+      {/* Mounted beside the tab wrapper, not inside it: the wrapper is keyed by tab, so anything
+          rendered within would be torn down and re-animated on every tab change. */}
+      <StorylineEvidence
+        key={selectedStorylineId ?? "no-storyline"}
+        storyline={storylines.find((story) => story.id === selectedStorylineId) ?? null}
+        onClose={handleCloseStoryline}
+        onNavigateTab={(tab) => {
+          handleCloseStoryline();
+          switchTab(tab);
+        }}
       />
 
       {displayedTab === "LANDING" ? (

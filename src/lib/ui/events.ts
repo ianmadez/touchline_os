@@ -55,6 +55,9 @@ function readPayload(evt: ParsedCareerEvent | DomainEvent): Record<string, unkno
 export function summariseEvent(evt: ParsedCareerEvent | DomainEvent): string {
   const payload = readPayload(evt);
   const name = typeof payload.name === "string" ? payload.name : "Player";
+  // Every member of the union now has a case of its own, so the default branch below sees `never`.
+  // The raw string is what a row written by a future rule falls back to until it gets copy.
+  const rawType = String((evt as { eventType: string }).eventType);
 
   switch (evt.eventType) {
     case "CAREER_INITIALIZED":
@@ -96,11 +99,16 @@ export function summariseEvent(evt: ParsedCareerEvent | DomainEvent): string {
     case "PLAYER_CONTRACT_EXPIRING":
     case "PLAYER_DEVELOPED":
     case "PLAYER_POSITION_CHANGED":
+    case "PLAYER_FORM_SLUMP":
+    case "PLAYER_FORM_STREAK":
+    case "PLAYER_OUT_OF_POSITION":
+    case "TACTICAL_SLOT_UNASSIGNED":
+    case "SQUAD_DEPTH_THIN":
       return typeof payload.summary === "string"
         ? payload.summary
         : `${eventLabel(evt.eventType)} recorded.`;
     default:
-      return `${eventLabel(evt.eventType)} recorded.`;
+      return `${eventLabel(rawType)} recorded.`;
   }
 }
 

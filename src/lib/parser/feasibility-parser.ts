@@ -18,6 +18,7 @@ import {
   type FactCategory,
   type FieldValue,
   type IncompleteName,
+  type LeagueEntry,
   type MatchResult,
   type ParseOptions,
   type Row,
@@ -1042,6 +1043,31 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     const managerInfo = (extractedTables["career_managerinfo"] as Row[]) ?? [];
     const managerPref = (extractedTables["career_managerpref"] as Row[]) ?? [];
     const managerHistory = (extractedTables["career_managerhistory"] as Row[]) ?? [];
+
+    // The save's own league catalogue: `leagueid` -> the competition's real name. Built HERE, before
+    // anything that carries a bare league id, because both the identity facts below and every
+    // `career_managerhistory` season row need it. It used to be built after the season rows and
+    // reach exactly one diagnostics fact, which is why a league id rendered as "Division 14"
+    // everywhere it mattered while the name sat decoded and unused in memory.
+    //
+    // A league the save gives no name for is left out rather than stored as an empty string (one row
+    // in a real save has an empty `leaguename`), so callers can tell "unknown" from "named".
+    const leagueRows = (extractedTables["leagues"] as Row[]) ?? [];
+    const leagueNameById = new Map<number, string>();
+    const leagueDirectory: LeagueEntry[] = [];
+    for (const league of leagueRows) {
+      const leagueId = num(league, "leagueid");
+      const name = str(league, "leaguename");
+      if (leagueId === null || !name) continue;
+      leagueNameById.set(leagueId, name);
+      leagueDirectory.push({
+        leagueId,
+        name,
+        level: num(league, "level"),
+        countryId: num(league, "countryid"),
+      });
+    }
+
     // One row per season, kept whole and in season order. Every reader that indexed [0] silently
     // reported season 1's figures for the entire career, so nothing downstream should re-derive
     // this by hand.
@@ -1069,19 +1095,12 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         bigSellPlayerName: str(row, "bigsellplayername"),
       }));
     const teams = (extractedTables["teams"] as Row[]) ?? [];
-    const leagues = (extractedTables["leagues"] as Row[]) ?? [];
     const leagueTeamLinks = (extractedTables["leagueteamlinks"] as Row[]) ?? [];
 
     const teamById = new Map<number, Row>();
     for (const team of teams) {
       const id = num(team, "teamid");
       if (id !== null) teamById.set(id, team);
-    }
-    const leagueNameById = new Map<number, string>();
-    for (const league of leagues) {
-      const id = num(league, "leagueid");
-      const name = str(league, "leaguename");
-      if (id !== null && name) leagueNameById.set(id, name);
     }
     const leagueOfTeam = new Map<number, number>();
     for (const link of leagueTeamLinks) {
@@ -1464,6 +1483,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       fixtures,
       matchResults: results,
       seasonHistory,
+      leagueDirectory,
       presignedDeals,
       warnings,
       parseMs: Math.round(performance.now() - startedAt),

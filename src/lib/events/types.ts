@@ -1,4 +1,6 @@
 import { Provenance, StorylineCategory, StorylineStatus } from "../db/schema";
+import type { EvidenceEventType } from "./evidence";
+import type { Severity } from "./compose";
 
 export type CoreEventType =
   | "CAREER_INITIALIZED"
@@ -81,12 +83,25 @@ export interface DomainEvent {
   id: string;
   careerId: string;
   snapshotId: string;
-  eventType: CoreEventType;
+  /**
+   * Anything that can be read back out of `career_events`, which stores the spine events and the
+   * storyline evidence side by side. The two unions stay separate where they are declared - the
+   * evidence types must never join `CoreEventType`, or the sync engine's event budget would quietly
+   * acquire members - but a row read back from the table can be either.
+   */
+  eventType: CoreEventType | EvidenceEventType;
   source: Provenance;
   entityType: "CAREER" | "PLAYER" | "FINANCE" | "SQUAD" | "MATCH" | "STORYLINE" | "EVIDENCE";
   entityId: string;
   payloadJson: string;
   timestamp?: string;
+  /**
+   * The save's own date at the snapshot this was filed against, when it has one.
+   *
+   * Resolved by joining the snapshot, because an evidence row carries only the real time we noticed
+   * the fact - which is not the same question as when it happened in the career.
+   */
+  inGameDate?: string | null;
 }
 
 export interface StorylineOpenedPayload extends BaseEventPayload {
@@ -106,7 +121,19 @@ export interface StorylineResolvedPayload extends BaseEventPayload {
 export interface StorylineItem {
   id: string;
   careerId: string;
+  /** The rendered headline: composed from the facts on the thread, never the stored opening label. */
   title: string;
+  /** The rendered report. Assembled at read time from the facts' own stored sentences. */
+  body: string;
+  /** Derived from the accumulated evidence on every read, never stored and never set by hand. */
+  severity: Severity;
+  /** One line explaining the severity, or null when it needs no explaining (a plain watch). */
+  severityReason: string | null;
+  /**
+   * The label the thread was opened with, kept for the record and for adoption by subject.
+   * The card shows `title`; this is what the history actually said.
+   */
+  openingTitle: string;
   category: StorylineCategory;
   status: StorylineStatus;
   openedAt: string;

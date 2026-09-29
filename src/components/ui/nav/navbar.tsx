@@ -60,6 +60,7 @@ export function Navbar({
     // onboarding wizard again after they have already completed it.
     ...(isOnboardingComplete ? [] : [{ id: "PORTAL" as AppTab, label: "Portal" }]),
     { id: "DASHBOARD", label: "Dashboard" },
+    { id: "SEASON", label: "Season" },
     { id: "SQUAD", label: "Squad" },
     { id: "TACTICS", label: "Tactics" },
     { id: "DEBRIEF", label: "Debrief" },
