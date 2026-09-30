@@ -23,7 +23,7 @@ interface ParseSaveRequest {
  * POST /api/parse-save
  * Body: { savePath?, saveId?, onboarding? }
  *
- * Reads the local FC25 save, runs the parser + deterministic diff sync, persists the
+ * Reads the local EA SPORTS FC save, runs the parser + deterministic diff sync, persists the
  * snapshot/cache, then returns the full hydrated career payload (squad + tactics).
  */
 export async function POST(request: Request) {
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
         {
           success: false,
           error:
-            "No FC25 career save found at that location. Re-scan saves and select one of the detected files.",
+            "No EA SPORTS FC career save found at that location. Re-scan saves and select one of the detected files.",
         },
         { status: 404 }
       );

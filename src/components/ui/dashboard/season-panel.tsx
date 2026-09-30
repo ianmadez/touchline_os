@@ -13,10 +13,15 @@ interface SeasonPanelProps {
 /**
  * The season so far, the board objective, and where the manager says they are.
  *
- * Provenance is shown rather than implied: the record comes from the save, the projection is
- * derived from it, and the league position is the manager's own entry because the save keeps no
- * live table for our division. Where the entry disagrees with the save's own record, both are
- * shown - the disagreement is the useful part.
+ * Provenance is shown rather than implied: the record comes from the save, and the league position
+ * is the manager's own entry because the save keeps no live table for our division. Where the entry
+ * disagrees with the save's own record, both are shown - the disagreement is the useful part.
+ *
+ * The record's numbers are labelled for what they verifiably are. `career_managerhistory` keeps one
+ * W/D/L/points/goals set per season and it spans every competition, so every figure in the tiles
+ * below is an all-competition total - never league form. There is deliberately no projected-points
+ * figure any more: it would divide an all-competition rate into league games remaining, and the
+ * save's `gamesPlayed` is not a league count either.
  */
 export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPanelProps) {
   const outlook = seasonState.outlook;
@@ -48,7 +53,9 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
   }
 
   const perGame =
-    outlook.pointsPerGame === null ? "—" : outlook.pointsPerGame.toFixed(2);
+    outlook.allCompetitionPointsPerGame === null
+      ? "—"
+      : outlook.allCompetitionPointsPerGame.toFixed(2);
 
   const submit = async (payload: Record<string, unknown>) => {
     setSaving(true);
@@ -88,11 +95,11 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: "Played", value: String(outlook.gamesPlayed) },
-          { label: "Points", value: String(outlook.points) },
-          { label: "Per Game", value: perGame },
+          { label: "Played · all comps", value: String(outlook.gamesPlayed) },
+          { label: "Points · save's total", value: String(outlook.points) },
+          { label: "Points per match", value: perGame },
           {
-            label: "Goal Diff",
+            label: "Goal diff · all comps",
             value: `${outlook.goalDifference > 0 ? "+" : ""}${outlook.goalDifference}`,
           },
         ].map((stat) => (
@@ -110,17 +117,16 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
         ))}
       </div>
 
-      {outlook.projectedPoints !== null && outlook.gamesRemaining !== null && (
-        <p className="text-xs text-slate-600 dark:text-slate-400">
-          <span className="font-sub font-bold text-slate-700 dark:text-slate-300 tabular-nums">
-            {outlook.projectedPoints} points
-          </span>{" "}
-          if this rate holds over the {outlook.gamesRemaining} games left
-          <span className="ml-1 text-[10px] font-sub font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
-            Projected
-          </span>
-        </p>
-      )}
+      {/* Why there is no projection, and what the record above actually covers. Said once here
+          rather than left as a gap to guess at, and deliberately competition-agnostic: the app runs
+          against saves from any country, so no league or cup is ever named in this copy. */}
+      <p className="text-xs text-slate-600 dark:text-slate-400">
+        The save keeps one combined record per season. It counts every match the club played, in
+        every competition it entered — not league matches alone — and not every competition awards
+        points, so the points figure is the save&apos;s own running total for the season. Nothing is
+        projected from these numbers: a rate built over mixed competitions cannot be applied to the
+        league games still to play.
+      </p>
 
       {/* Two objective tracks, side by side and never merged. */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-800/60">
@@ -188,6 +194,9 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
                   </span>
                 </p>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400">{inference.explanation}</p>
+                {inference.caveat && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400">{inference.caveat}</p>
+                )}
               </>
             ) : (
               <p className="text-sm text-slate-500 dark:text-slate-400 italic">

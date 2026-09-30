@@ -325,7 +325,7 @@ async function initDatabase() {
     );
     CREATE INDEX IF NOT EXISTS idx_career_objectives_career_id ON career_objectives(career_id);
     CREATE INDEX IF NOT EXISTS idx_career_objectives_status ON career_objectives(status);
-    CREATE UNIQUE INDEX IF NOT EXISTS uq_career_objectives_career_season_source ON career_objectives(career_id, season_year, source);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_career_objectives_career_season_source ON career_objectives(career_id, season_number, source);
     -- 16. TRANSFER DEALS (observed prices)
     CREATE TABLE IF NOT EXISTS transfer_deals (
       id TEXT PRIMARY KEY,
@@ -377,7 +377,35 @@ async function initDatabase() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (career_id, league_id)
     );
-    CREATE INDEX IF NOT EXISTS idx_leagues_career_id ON leagues(career_id);  `);
+    CREATE INDEX IF NOT EXISTS idx_leagues_career_id ON leagues(career_id);
+
+    -- 19. WITHIN-SEASON PROGRESS (matchday-by-matchday series for the trend chart)
+    -- Append-only like every other history table: one row per (season, matchday), upserted when a
+    -- later sync reports the same matchday with fresher figures.
+    CREATE TABLE IF NOT EXISTS season_progress (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      snapshot_id TEXT REFERENCES career_snapshots(id) ON DELETE SET NULL,
+      season_number INTEGER NOT NULL,
+      matchday INTEGER NOT NULL,
+      in_game_date TEXT,
+      points INTEGER NOT NULL DEFAULT 0,
+      table_position INTEGER,
+      table_position_high INTEGER,
+      played INTEGER NOT NULL DEFAULT 0,
+      wins INTEGER NOT NULL DEFAULT 0,
+      draws INTEGER NOT NULL DEFAULT 0,
+      losses INTEGER NOT NULL DEFAULT 0,
+      goals_for INTEGER NOT NULL DEFAULT 0,
+      goals_against INTEGER NOT NULL DEFAULT 0,
+      form TEXT,
+      provenance TEXT NOT NULL DEFAULT 'DERIVED',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_season_progress_career_id ON season_progress(career_id);
+    CREATE INDEX IF NOT EXISTS idx_season_progress_snapshot_id ON season_progress(snapshot_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_season_progress_career_season_matchday ON season_progress(career_id, season_number, matchday);
+  `);
 
   // Auto-migration checks for existing databases
   const alterStatements = [

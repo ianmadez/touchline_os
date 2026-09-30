@@ -301,7 +301,7 @@ export const managerOnboardingProfiles = sqliteTable(
     personalObjective: text("personal_objective"),
     /**
      * Manager-supplied club badge - either an uploaded image as a data URL or a remote link.
-     * Always USER provenance: the save carries no badge asset, so this is never parsed from FC25.
+     * Always USER provenance: the save carries no badge asset, so this is never parsed from the save.
      */
     clubLogoUrl: text("club_logo_url"),
     provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
@@ -534,6 +534,12 @@ export const leagueTeams = sqliteTable(
 // for the entire career, so the whole table is mirrored here instead. `tablePosition` is 0 or null
 // until the season completes, which makes it the save's only reliable "season has ended" signal -
 // there is no SEASON_ENDED flag anywhere in the file.
+//
+// IMPORTANT: the save keeps ONE W/D/L/points/goals set per season and it covers every competition
+// together - the league plus its cups. Seasons 1 and 2 here report 55 and 56 games for a 24-club,
+// 46-game division. Those columns are therefore all-competition facts and must be labelled as such
+// wherever they are shown, without naming any specific competition (the app runs against saves from
+// any country). `table_position` is the only league-specific column.
 
 export const seasonHistory = sqliteTable(
   "season_history",
@@ -544,6 +550,7 @@ export const seasonHistory = sqliteTable(
       .references(() => careers.id, { onDelete: "cascade" }),
     season: integer("season").notNull(),
     leagueId: integer("league_id"),
+    /** Every match played, in every competition the club entered. Never league-only. */
     gamesPlayed: integer("games_played"),
     wins: integer("wins"),
     draws: integer("draws"),
@@ -617,6 +624,11 @@ export const leaguePositions = sqliteTable(
      * forward-looking number the file carries about the table, so it seeds the inference.
      */
     projectedBest: integer("projected_best"),
+    /**
+     * Points and games are the save's ALL-COMPETITION record at the moment the position was logged,
+     * not a league record - the save carries no league-only counterpart. Stored as read; the model
+     * that consumes them states the mismatch in its caveat. See `season_history` above.
+     */
     points: integer("points"),
     played: integer("played"),
     goalDifference: integer("goal_difference"),
@@ -728,3 +740,46 @@ export const transferDeals = sqliteTable(
     ),
   })
 );
+
+// ============================================================================
+// 19. WITHIN-SEASON PROGRESS (Matchday-by-Matchday Series for Trend Charts)
+// ============================================================================
+
+export const seasonProgress = sqliteTable(
+  "season_progress",
+  {
+    id: text("id").primaryKey(), // ${careerId}_s${seasonNumber}_m${matchday}
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    snapshotId: text("snapshot_id").references(() => careerSnapshots.id, {
+      onDelete: "set null",
+    }),
+    seasonNumber: integer("season_number").notNull(),
+    matchday: integer("matchday").notNull(),
+    inGameDate: text("in_game_date"),
+    points: integer("points").notNull().default(0),
+    tablePosition: integer("table_position"),
+    tablePositionHigh: integer("table_position_high"),
+    played: integer("played").notNull().default(0),
+    wins: integer("wins").notNull().default(0),
+    draws: integer("draws").notNull().default(0),
+    losses: integer("losses").notNull().default(0),
+    goalsFor: integer("goals_for").notNull().default(0),
+    goalsAgainst: integer("goals_against").notNull().default(0),
+    form: text("form"),
+    provenance: text("provenance", { enum: provenanceEnum }).notNull().default("DERIVED"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_season_progress_career_id").on(table.careerId),
+    snapshotIdx: index("idx_season_progress_snapshot_id").on(table.snapshotId),
+    uniqueMatchdayProgress: uniqueIndex("uq_season_progress_career_season_matchday").on(
+      table.careerId,
+      table.seasonNumber,
+      table.matchday
+    ),
+  })
+);
+
+export type SeasonProgressRow = typeof seasonProgress.$inferSelect;

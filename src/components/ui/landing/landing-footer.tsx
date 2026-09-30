@@ -63,7 +63,7 @@ export function LandingFooter({ onOpenLegal }: LandingFooterProps) {
             <ul className="space-y-2 font-sub text-xs text-slate-600 dark:text-slate-300">
               <li>
                 <a
-                  href="https://github.com/ianmadez"
+                  href="https://github.com/ianmadez/touchline_os"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:text-[#E11D48] transition-colors flex items-center gap-1.5"
@@ -83,15 +83,15 @@ export function LandingFooter({ onOpenLegal }: LandingFooterProps) {
               Support Development
             </h4>
             <p className="font-sans text-xs text-slate-600 dark:text-slate-300">
-              TouchlineOS is local-first and open source. Consider supporting project maintenance:
+              TouchlineOS is local-first and open source. Donations are appreciated and will go towards supporting project maintenance:
             </p>
             <a
-              href="https://buymeacoffee.com"
+              href="https://ko-fi.com/ianmadezoss"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-amber-400 hover:bg-amber-300 text-slate-950 font-sub text-xs font-bold uppercase rounded-xl transition-[background-color,transform] shadow-xs hover:scale-[1.02] active:scale-[0.96]"
             >
-              ☕ Buy Me a Coffee
+              Support Development (Ko-Fi)
             </a>
           </div>
         </div>

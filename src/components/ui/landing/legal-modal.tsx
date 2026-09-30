@@ -39,7 +39,7 @@ export function LegalModal({ activeDoc, onClose }: LegalModalProps) {
                   1. Acceptance of Terms
                 </h3>
                 <p>
-                  By launching or accessing TouchlineOS, you agree to these Terms of Service. TouchlineOS is an independent, open-source companion software designed to read local career save files from EA SPORTS FC 25.
+                  By launching or accessing TouchlineOS, you agree to these Terms of Service. TouchlineOS is an independent, open-source companion software designed to read local career save files from EA SPORTS FC titles.
                 </p>
               </div>
 
@@ -48,7 +48,7 @@ export function LegalModal({ activeDoc, onClose }: LegalModalProps) {
                   2. Read-Only Local Guarantee
                 </h3>
                 <p>
-                  TouchlineOS operates exclusively as a read-only parsing tool. It never modifies, writes to, or alters your EA SPORTS FC 25 save files. You acknowledge that TouchlineOS holds zero liability for save file corruption caused by third-party tools or external game crashes.
+                  TouchlineOS operates exclusively as a read-only parsing tool. It never modifies, writes to, or alters your EA SPORTS FC save files. You acknowledge that TouchlineOS holds zero liability for save file corruption caused by third-party tools or external game crashes.
                 </p>
               </div>
 

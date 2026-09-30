@@ -1,11 +1,15 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import type { ParsedCareerEvent } from "@/lib/services/event-service";
 import type { LeagueTeamSummary } from "@/lib/services/career-service";
 import { resultLabel, venueLabel } from "@/lib/ui/labels";
 import { MatchContribution } from "@/lib/events/types";
+import {
+  evaluateMatchAnomalies,
+  DebriefHistoryPayload,
+} from "@/lib/events/debrief-anomalies";
 
 interface DebriefViewProps {
   careerId: string | null;
@@ -34,6 +38,7 @@ interface DebriefHistory {
   standoutPlayerName?: string;
   contributions?: MatchContribution[];
   weaknessIdentified?: string;
+  managerReflection?: string;
   matchDate?: string | null;
   leagueSnapshot?: {
     opponentPosition?: number | null;
@@ -41,6 +46,7 @@ interface DebriefHistory {
     ownPosition?: number | null;
     ownPoints?: number | null;
   };
+  dynamicPrompts?: Array<{ id: string; question: string; answer: string }>;
 }
 
 /** 1 -> "1st". Used only for the opponent list, where a bare number reads as a count. */
@@ -149,11 +155,34 @@ function ScoreBox({
   );
 }
 
+/**
+ * The opponent's name, from the two primitives it is actually a function of.
+ *
+ * Kept as a plain module-level function so the form and the anomaly pass below cannot drift: the
+ * memo that evaluates anomalies has to list the raw inputs (the typed name, the picked club id and
+ * the league list) rather than a value derived from them, because React Compiler refuses to
+ * preserve a manual memoization whose dependency was computed off a prop through
+ * `Array.prototype.filter`/`find` - it reports that as `preserve-manual-memoization`.
+ */
+function resolveOpponentName(
+  typedOpponent: string,
+  teams: LeagueTeamSummary[],
+  selectedTeamId: string
+): string {
+  if (typedOpponent) return typedOpponent;
+  return teams.find(
+    (team) => !team.isOwnClub && String(team.teamId) === selectedTeamId
+  )?.name ?? "";
+}
+
+/** A stable empty value, so `leagueTeams = []` cannot hand the memo a new array every render. */
+const NO_LEAGUE_TEAMS: LeagueTeamSummary[] = [];
+
 export function DebriefView({
   careerId,
   players,
   recentEvents,
-  leagueTeams = [],
+  leagueTeams = NO_LEAGUE_TEAMS,
   clubName = "",
   inGameDate = null,
   onDebriefSubmitted,
@@ -174,6 +203,7 @@ export function DebriefView({
   const [contributionAssists, setContributionAssists] = useState<number>(0);
   const [weaknessIdentified, setWeaknessIdentified] = useState("");
   const [managerReflection, setManagerReflection] = useState("");
+  const [dynamicAnswers, setDynamicAnswers] = useState<Record<string, string>>({});
   // The league picture at kick-off. Every one of these is the manager reading the table, because
   // the save holds no rival record for our division at all - see the note on the API payload.
   const [opponentPosition, setOpponentPosition] = useState<string>("");
@@ -205,7 +235,7 @@ export function DebriefView({
   const selectedTeam = selectableTeams.find((team) => String(team.teamId) === opponentTeamId);
   // A typed name wins, so a club outside the division can still be recorded.
   const typedOpponent = opponent.trim();
-  const opponentLabel = typedOpponent || selectedTeam?.name || "";
+  const opponentLabel = resolveOpponentName(typedOpponent, leagueTeams, opponentTeamId);
 
   const hasOpponent = typedOpponent.length > 0 || Boolean(selectedTeam);
 
@@ -237,6 +267,51 @@ export function DebriefView({
 
   // Filter existing match debriefs from activity spine
   const pastDebriefs = recentEvents.filter((evt) => evt.eventType === "MATCH_DEBRIEF");
+
+  const pastDebriefsPayloads = useMemo(() => {
+    return pastDebriefs.map((evt) => {
+      try {
+        return (typeof evt.payload === "string" ? JSON.parse(evt.payload) : evt.payload) as DebriefHistoryPayload;
+      } catch {
+        return {} as DebriefHistoryPayload;
+      }
+    });
+  }, [pastDebriefs]);
+
+  const playerNamesById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const p of players) {
+      map[p.id] = p.name;
+    }
+    return map;
+  }, [players]);
+
+  const activeAnomalies = useMemo(() => {
+    return evaluateMatchAnomalies(
+      pastDebriefsPayloads,
+      {
+        ourScore,
+        theirScore,
+        // Re-derived here rather than read from `opponentLabel` above, so every entry in the
+        // dependency list below is a prop, a piece of state or another memo - the only kinds of
+        // value React Compiler can prove stable when it checks this memo.
+        opponent: resolveOpponentName(opponent.trim(), leagueTeams, opponentTeamId),
+        contributions,
+        standoutPlayerIds,
+      },
+      playerNamesById
+    );
+  }, [
+    pastDebriefsPayloads,
+    ourScore,
+    theirScore,
+    opponent,
+    opponentTeamId,
+    leagueTeams,
+    contributions,
+    standoutPlayerIds,
+    playerNamesById,
+  ]);
 
   const toggleStandout = (playerId: string) => {
     setStandoutPlayerIds((prev) =>
@@ -291,6 +366,14 @@ export function DebriefView({
       .filter((p) => standoutPlayerIds.includes(p.id))
       .map((p) => p.name);
 
+    const dynamicPrompts = activeAnomalies
+      .map((a) => ({
+        id: a.id,
+        question: a.question,
+        answer: (dynamicAnswers[a.id] || "").trim(),
+      }))
+      .filter((p) => p.answer.length > 0);
+
     try {
       const res = await fetch("/api/debrief", {
         method: "POST",
@@ -318,6 +401,7 @@ export function DebriefView({
           contributions,
           weaknessIdentified,
           managerReflection,
+          dynamicPrompts,
         }),
       });
 
@@ -335,6 +419,7 @@ export function DebriefView({
       setOpponentPoints("");
       setWeaknessIdentified("");
       setManagerReflection("");
+      setDynamicAnswers({});
       setStandoutPlayerIds([]);
       setContributions([]);
       setContributionPlayerId("");
@@ -639,6 +724,63 @@ export function DebriefView({
 
           {/* Tactical Questions */}
           <div className="space-y-4">
+            {/* Match Focus Points */}
+            {activeAnomalies.length > 0 && (
+              <div className="p-4 rounded-xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 space-y-3 animate-fade-in-up">
+                <div className="flex items-center justify-between">
+                  <span className="font-sub text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                    Match Focus Points
+                  </span>
+                  <span className="font-sub text-[10px] uppercase font-bold text-amber-600 dark:text-amber-500">
+                    Based on recent form &amp; trends
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {activeAnomalies.map((anomaly) => (
+                    <div
+                      key={anomaly.id}
+                      className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-sub text-xs font-bold text-slate-900 dark:text-slate-100">
+                          {anomaly.title}
+                        </span>
+                        <span
+                          className={`text-[10px] font-sub font-bold uppercase px-2 py-0.5 rounded ${
+                            anomaly.tone === "rose"
+                              ? "bg-rose-500/15 text-rose-600 dark:text-rose-400"
+                              : anomaly.tone === "amber"
+                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                              : anomaly.tone === "emerald"
+                              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                              : "bg-sky-500/15 text-sky-600 dark:text-sky-400"
+                          }`}
+                        >
+                          {anomaly.badgeText}
+                        </span>
+                      </div>
+                      <p className="font-sans text-xs text-slate-600 dark:text-slate-300">
+                        {anomaly.question}
+                      </p>
+                      <textarea
+                        rows={2}
+                        placeholder={anomaly.placeholder}
+                        value={dynamicAnswers[anomaly.id] || ""}
+                        onChange={(e) =>
+                          setDynamicAnswers((prev) => ({
+                            ...prev,
+                            [anomaly.id]: e.target.value,
+                          }))
+                        }
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#E11D48]"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
@@ -986,6 +1128,16 @@ export function DebriefView({
                         <p className="text-slate-600 dark:text-slate-400 italic">
                           Weakness: {payload.weaknessIdentified}
                         </p>
+                      )}
+                      {payload.dynamicPrompts && payload.dynamicPrompts.length > 0 && (
+                        <div className="pt-1 space-y-1 border-t border-slate-200 dark:border-slate-800/60">
+                          {payload.dynamicPrompts.map((dp, idx) => (
+                            <p key={idx} className="text-slate-700 dark:text-slate-300">
+                              <span className="font-bold text-amber-600 dark:text-amber-400">Probe: </span>
+                              {dp.answer}
+                            </p>
+                          ))}
+                        </div>
                       )}
                     </div>
                   </div>

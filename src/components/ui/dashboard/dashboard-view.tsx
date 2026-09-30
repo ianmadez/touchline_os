@@ -47,7 +47,6 @@ interface DashboardViewProps {
   recentEvents: ParsedCareerEvent[];
   storylines?: StorylineItem[];
   seasonState?: SeasonState | null;
-  onSeasonChange?: (next: SeasonState) => void;
   tacticsSlots: PitchSlotAssignment[];
   onNavigateTab: (tab: AppTab) => void;
   onSelectPlayer: (player: EnrichedPlayer) => void;
@@ -65,7 +64,6 @@ export function DashboardView({
   recentEvents,
   storylines = [],
   seasonState = null,
-  onSeasonChange,
   tacticsSlots,
   onNavigateTab,
   onSelectPlayer,
@@ -165,7 +163,7 @@ export function DashboardView({
               <span>Season {seasonState.outlook?.seasonNumber ?? season} Objective</span>
               <span>•</span>
               <span className="text-slate-500 dark:text-slate-400">
-                {seasonState.outlook?.gamesPlayed ?? 0} Matches Played
+                {seasonState.outlook?.gamesPlayed ?? 0} matches played
               </span>
             </div>
             <h2 className="font-heading text-lg text-slate-900 dark:text-slate-100 uppercase tracking-wide truncate">
@@ -175,16 +173,29 @@ export function DashboardView({
                   : "Target Top 6 Finish")}
             </h2>
             <div className="flex items-center gap-4 text-xs font-sub text-slate-600 dark:text-slate-400 pt-0.5">
+              {/* The record and the league position are different universes, so they are labelled
+                  apart rather than listed as one run of figures. */}
               <span>
-                Projected: <strong className="text-amber-600 dark:text-amber-400 font-bold">{seasonState.outlook?.projectedPoints ?? "—"} PTS</strong>
+                Save&apos;s record · all competitions:{" "}
+                <strong className="text-amber-600 dark:text-amber-400 font-bold">
+                  {seasonState.outlook?.points ?? "—"} pts
+                </strong>{" "}
+                ·{" "}
+                <strong className="text-slate-900 dark:text-slate-100 font-bold">
+                  {seasonState.outlook?.allCompetitionPointsPerGame
+                    ? seasonState.outlook.allCompetitionPointsPerGame.toFixed(2)
+                    : "—"}{" "}
+                  per match
+                </strong>
               </span>
               <span>•</span>
               <span>
-                Pace: <strong className="text-slate-900 dark:text-slate-100 font-bold">{seasonState.outlook?.pointsPerGame ? seasonState.outlook.pointsPerGame.toFixed(2) : "—"} PPG</strong>
-              </span>
-              <span>•</span>
-              <span>
-                Current Standings: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{seasonState.outlook?.loggedPosition ? `${seasonState.outlook.loggedPosition}th` : "Logged"}</strong>
+                League position:{" "}
+                <strong className="text-emerald-600 dark:text-emerald-400 font-bold">
+                  {seasonState.outlook?.loggedPosition
+                    ? `${seasonState.outlook.loggedPosition}${seasonState.outlook.loggedPosition === 1 ? "st" : "th"}`
+                    : "Logged"}
+                </strong>
               </span>
             </div>
           </div>

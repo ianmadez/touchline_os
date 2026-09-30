@@ -24,8 +24,10 @@ import {
   careers,
   leaguePositions,
   seasonHistory,
+  seasonProgress,
   storylines,
   type ObjectiveStatus,
+  type SeasonProgressRow,
 } from "../db/schema";
 import {
   LeagueModelService,
@@ -42,6 +44,16 @@ export interface SeasonRecord {
    * null when the save has no name for the id. Carried unformatted - the screen decides the wording.
    */
   leagueName: string | null;
+  /**
+   * Every field from `gamesPlayed` through `goalsAgainst` is an ALL-COMPETITION total.
+   *
+   * `career_managerhistory` keeps exactly one W/D/L/points/goals set per season and it covers every
+   * competition together - the league plus whichever cups the club's own division feeds into. The app
+   * runs against saves from any country, so no competition is ever named in code or in copy.
+   * Verified arithmetically on our reference save: seasons 1 and 2 report 55 and 56 games for a
+   * 24-club division that plays 46, and `wins + draws + losses` equals `gamesPlayed` exactly in all
+   * three seasons. These numbers must never be presented as league form.
+   */
   gamesPlayed: number | null;
   wins: number | null;
   draws: number | null;
@@ -49,7 +61,13 @@ export interface SeasonRecord {
   points: number | null;
   goalsFor: number | null;
   goalsAgainst: number | null;
-  /** Final league position. 0 or null means the season is still in progress. */
+  /**
+   * Final league position - the one league-only value in the row.
+   *
+   * 0 or null means the season is still in progress. It is a league placing and has no arithmetic
+   * relationship to the all-competition points total above, so the two must never be multiplied,
+   * divided or reconciled with one another.
+   */
   tablePosition: number | null;
   leagueObjective: number | null;
   leagueObjectiveResult: number | null;
@@ -63,17 +81,28 @@ export interface SeasonOutlook {
   seasonNumber: number;
   /** Display-only label, derived from the career's current year. Never used as a key. */
   seasonLabel: string;
+  /**
+   * ALL-COMPETITION totals, exactly as the save records them. See `SeasonRecord` for the proof.
+   *
+   * There is deliberately no projected-points figure here any more. The old one was
+   * `points + (points / gamesPlayed) * (2 * (leagueSize - 1) - gamesPlayed)`: an all-competition
+   * numerator over an all-competition denominator, extended over a count of LEAGUE games that was
+   * itself wrong because `gamesPlayed` is not a league count. Two independent mismatches cannot be
+   * cancelled by a caveat, so the number is gone until a genuine league-only numerator exists.
+   */
   gamesPlayed: number;
   points: number;
   goalsFor: number;
   goalsAgainst: number;
   goalDifference: number;
-  /** Null with no games played - a rate needs games behind it. */
-  pointsPerGame: number | null;
-  leagueSize: number | null;
-  gamesRemaining: number | null;
-  /** Points-per-game extended over the games left. Null when there is no rate or no size. */
-  projectedPoints: number | null;
+  /**
+   * The save's own points total divided by every match played, in every competition. Null with no
+   * matches - a rate needs matches behind it.
+   *
+   * Not a league rate, and not a per-match reward either: not every competition awards points at
+   * all, so this is the save's own season bookkeeping averaged over its matches.
+   */
+  allCompetitionPointsPerGame: number | null;
   loggedPosition: number | null;
   loggedPositionDisputed: boolean;
 }
@@ -95,6 +124,8 @@ export interface ObjectiveTrack {
 export interface SeasonState {
   seasons: SeasonRecord[];
   outlook: SeasonOutlook | null;
+  /** Within-season matchday-by-matchday progress series for trend charts. */
+  progressSeries: SeasonProgressRow[];
   /** USER and SAVE tracks for the same season, side by side. Either may be absent. */
   objectivePair: {
     seasonNumber: number | null;
@@ -175,7 +206,8 @@ export class SeasonService {
   /** The calendar year a season ordinal corresponds to, for display only. */
   private labelFor(season: number, latestSeason: number, currentYear: number | null): string {
     if (currentYear === null) return `Season ${season}`;
-    return `Season ${currentYear - (latestSeason - season)}`;
+    const baseYear = currentYear - (latestSeason - season);
+    return `Season ${season} (${baseYear}/${(baseYear + 1).toString().slice(-2)})`;
   }
 
   async getOutlook(careerId: string): Promise<SeasonOutlook | null> {
@@ -186,19 +218,10 @@ export class SeasonService {
     const career = await db.select().from(careers).where(eq(careers.id, careerId)).get();
     const gamesPlayed = latest.gamesPlayed ?? 0;
     const points = latest.points ?? 0;
-    const pointsPerGame = gamesPlayed > 0 ? points / gamesPlayed : null;
-
-    // A division of N clubs plays 2 x (N - 1) games, so the games left follow from the size the sync
-    // counted out of `leagueteamlinks`.
-    const leagueSize = career?.leagueSize ?? null;
-    const gamesRemaining =
-      leagueSize === null || leagueSize < 2
-        ? null
-        : Math.max(0, 2 * (leagueSize - 1) - gamesPlayed);
-    const projectedPoints =
-      pointsPerGame === null || gamesRemaining === null
-        ? null
-        : Math.round(points + pointsPerGame * gamesRemaining);
+    // The save's own record spans every competition, so this is an all-competition rate - not a
+    // league rate. No projection is derived from it: extending it over league games remaining would
+    // multiply a contaminated rate by a contaminated games-left count (see `SeasonOutlook`).
+    const allCompetitionPointsPerGame = gamesPlayed > 0 ? points / gamesPlayed : null;
 
     const logged = await db
       .select()
@@ -215,10 +238,7 @@ export class SeasonService {
       goalsFor: latest.goalsFor ?? 0,
       goalsAgainst: latest.goalsAgainst ?? 0,
       goalDifference: (latest.goalsFor ?? 0) - (latest.goalsAgainst ?? 0),
-      pointsPerGame,
-      leagueSize,
-      gamesRemaining,
-      projectedPoints,
+      allCompetitionPointsPerGame,
       loggedPosition: latestLogged?.position ?? null,
       loggedPositionDisputed: latestLogged?.disputed ?? false,
     };
@@ -249,6 +269,81 @@ export class SeasonService {
     });
   }
 
+  /** Fetch within-season progress series for a specific season ordinal. */
+  async getSeasonProgress(careerId: string, seasonNumber?: number): Promise<SeasonProgressRow[]> {
+    const seasons = await this.getSeasonHistory(careerId);
+    const targetSeason = seasonNumber ?? seasons.at(-1)?.season;
+    if (!targetSeason) return [];
+
+    return db
+      .select()
+      .from(seasonProgress)
+      .where(and(eq(seasonProgress.careerId, careerId), eq(seasonProgress.seasonNumber, targetSeason)))
+      .orderBy(asc(seasonProgress.matchday));
+  }
+
+  /** Record or update a matchday progress entry in the season series. */
+  async recordMatchdayProgress(
+    careerId: string,
+    input: {
+      seasonNumber: number;
+      matchday: number;
+      inGameDate?: string | null;
+      points: number;
+      tablePosition?: number | null;
+      tablePositionHigh?: number | null;
+      played: number;
+      wins: number;
+      draws: number;
+      losses: number;
+      goalsFor: number;
+      goalsAgainst: number;
+      form?: string | null;
+    }
+  ): Promise<void> {
+    const id = `${careerId}_s${input.seasonNumber}_m${input.matchday}`;
+    const snapshotId = await this.latestSnapshotId(careerId);
+
+    await db
+      .insert(seasonProgress)
+      .values({
+        id,
+        careerId,
+        snapshotId,
+        seasonNumber: input.seasonNumber,
+        matchday: input.matchday,
+        inGameDate: input.inGameDate ?? null,
+        points: input.points,
+        tablePosition: input.tablePosition ?? null,
+        tablePositionHigh: input.tablePositionHigh ?? null,
+        played: input.played,
+        wins: input.wins,
+        draws: input.draws,
+        losses: input.losses,
+        goalsFor: input.goalsFor,
+        goalsAgainst: input.goalsAgainst,
+        form: input.form ?? null,
+        provenance: "DERIVED",
+      })
+      .onConflictDoUpdate({
+        target: [seasonProgress.careerId, seasonProgress.seasonNumber, seasonProgress.matchday],
+        set: {
+          snapshotId,
+          inGameDate: input.inGameDate ?? null,
+          points: input.points,
+          tablePosition: input.tablePosition ?? null,
+          tablePositionHigh: input.tablePositionHigh ?? null,
+          played: input.played,
+          wins: input.wins,
+          draws: input.draws,
+          losses: input.losses,
+          goalsFor: input.goalsFor,
+          goalsAgainst: input.goalsAgainst,
+          form: input.form ?? null,
+        },
+      });
+  }
+
   /**
    * The two tracks for the current season, side by side.
    *
@@ -260,10 +355,12 @@ export class SeasonService {
     const objectives = await this.getObjectives(careerId);
     const currentSeason = seasons.at(-1)?.season ?? null;
     const forSeason = objectives.filter((o) => o.id.includes(`_s${currentSeason}_`));
+    const progressSeries = currentSeason ? await this.getSeasonProgress(careerId, currentSeason) : [];
 
     return {
       seasons,
       outlook: await this.getOutlook(careerId),
+      progressSeries,
       objectivePair: {
         seasonNumber: currentSeason,
         user: forSeason.find((o) => o.source === "USER") ?? null,
@@ -312,6 +409,11 @@ export class SeasonService {
    * USER data. It is cross-checked against what the save genuinely gives us, our own club's points
    * and games, and a mismatch is recorded as a flag rather than used to overwrite what was typed.
    * A disagreement is information, not an error to silently correct.
+   *
+   * The cross-check is deliberately soft, because the save's record it compares against counts every
+   * competition: cup games dilute that rate, so a mismatch can mean "the save's overall record looks
+   * different from your league placing" rather than anything being wrong with either figure. The
+   * note says so in as many words.
    */
   async logUserPosition(
     careerId: string,
@@ -331,10 +433,10 @@ export class SeasonService {
       // cannot realistically be bottom-half, and one averaging 0.7 cannot realistically be top six.
       if (perGame >= 1.6 && position > 8) {
         disputed = true;
-        note = `The save has you on ${points} points from ${gamesPlayed} games (${rate} per game), which usually sits higher than ${position}.`;
+        note = `The save's overall record is ${points} points from ${gamesPlayed} matches (${rate} per match across all competitions), which usually sits higher than ${position}.`;
       } else if (perGame <= 0.7 && position <= 6) {
         disputed = true;
-        note = `The save has you on ${points} points from ${gamesPlayed} games (${rate} per game), which usually sits lower than ${position}.`;
+        note = `The save's overall record is ${points} points from ${gamesPlayed} matches (${rate} per match across all competitions), which usually sits lower than ${position}.`;
       }
     }
 
@@ -394,7 +496,7 @@ export class SeasonService {
           // The one objective type that can be judged mechanically, because it carries a target.
           const met = (season.tablePosition ?? Number.MAX_SAFE_INTEGER) <= objective.targetPosition;
           status = met ? "MET" : "MISSED";
-          outcome = `Finished ${season.tablePosition} - the target was ${objective.targetPosition} or better.`;
+          outcome = `Finished ${season.tablePosition}, target was ${objective.targetPosition} or better.`;
         } else if (objective.source === "SAVE") {
           // The save's result code has no decoded meaning, so it is recorded verbatim and the
           // objective is closed without a verdict rather than guessed at.

@@ -205,10 +205,10 @@ export function OnboardingWizard({
           {saveCandidates.length === 0 && (
             <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-950/40 p-6 text-center space-y-2">
               <p className="font-heading text-sm text-slate-900 dark:text-slate-100 uppercase">
-                {saveScanComplete ? "No FC25 save detected" : "Scanning for local saves…"}
+                {saveScanComplete ? "No EA SPORTS FC save detected" : "Scanning for local saves…"}
               </p>
               <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                TouchlineOS reads manager careers from EA FC 25 settings folders and from{" "}
+                TouchlineOS reads manager careers from your EA SPORTS FC settings folders and from{" "}
                 <code className="font-mono text-slate-900 dark:text-slate-100">data/saves/</code>.
               </p>
               {onRescan && (

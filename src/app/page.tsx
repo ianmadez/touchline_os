@@ -99,22 +99,23 @@ export default function TouchlineApp() {
    * rather than queueing, so a rapid sequence of clicks still ends on the last tab chosen.
    */
   const switchTab = (next: AppTab) => {
-    setActiveTab(next);
+    // An onboarded manager must never be routed back into the setup wizard.
+    const effectiveNext = next === "PORTAL" && isOnboardingComplete ? "DASHBOARD" : next;
+
+    setActiveTab(effectiveNext);
     // LANDING and PORTAL sit outside the app shell, so arriving there re-arms the entry splash.
-    // Without this, the entered flag latched on the first entry and every later landing -> app
-    // transition skipped the splash entirely.
-    if (next === "LANDING" || next === "PORTAL") {
+    if (effectiveNext === "LANDING" || effectiveNext === "PORTAL") {
       setHasEntered(false);
-      setBootPhase(next === "LANDING" ? "landing" : "portal");
-      setDisplayedTab(next);
+      setBootPhase(effectiveNext === "LANDING" ? "landing" : "portal");
+      setDisplayedTab(effectiveNext);
       setTabPhase("in");
       return;
     }
     setBootPhase("app");
-    if (next === displayedTab) return;
+    if (effectiveNext === displayedTab) return;
 
     if (prefersReducedMotion()) {
-      setDisplayedTab(next);
+      setDisplayedTab(effectiveNext);
       setTabPhase("in");
       return;
     }
@@ -122,7 +123,7 @@ export default function TouchlineApp() {
     setTabPhase("out");
     if (tabSwapTimeout.current !== null) window.clearTimeout(tabSwapTimeout.current);
     tabSwapTimeout.current = window.setTimeout(() => {
-      setDisplayedTab(next);
+      setDisplayedTab(effectiveNext);
       setTabPhase("in");
       tabSwapTimeout.current = null;
     }, TAB_FADE_OUT_MS);
@@ -279,9 +280,15 @@ export default function TouchlineApp() {
         if (res.ok && data.success) {
           applyHydration(data);
           setIsOnboardingComplete(true);
-          // A stored career means setup is already done, so land on the dashboard.
-          setActiveTab("DASHBOARD");
-          setDisplayedTab("DASHBOARD");
+          // Restore the stored active tab if valid for the app shell, defaulting to DASHBOARD.
+          const restoredTab =
+            session?.activeTab &&
+            session.activeTab !== "LANDING" &&
+            session.activeTab !== "PORTAL"
+              ? session.activeTab
+              : "DASHBOARD";
+          setActiveTab(restoredTab);
+          setDisplayedTab(restoredTab);
           setBootPhase("app");
           // Reopen the thread the manager was reading, if it still exists. A stale id resolves to
           // null and simply shows nothing - it is never an error.
@@ -345,6 +352,16 @@ export default function TouchlineApp() {
       managerName: careerInfo.managerName,
     });
   }, [isRestoring, careerId, activeTab, theme, isOnboardingComplete, formationId, careerInfo]);
+
+  // Safety guard: if onboarding is marked complete while PORTAL is displayed, route immediately to DASHBOARD.
+  useEffect(() => {
+    if (isOnboardingComplete && (displayedTab === "PORTAL" || activeTab === "PORTAL")) {
+      setActiveTab("DASHBOARD");
+      setDisplayedTab("DASHBOARD");
+      setBootPhase("app");
+      setHasEntered(true);
+    }
+  }, [isOnboardingComplete, displayedTab, activeTab]);
 
   // Applies the stored preference, and while it is "system" follows OS changes live.
   useEffect(() => {
@@ -991,15 +1008,18 @@ export default function TouchlineApp() {
             saveCandidate={saveCandidates[0] || null}
             noSaveDetected={saveScanComplete && saveCandidates.length === 0}
             onRescan={() => void loadSaveCandidates()}
-            onEnterPortal={() =>
-              // The wizard is a one-time setup step: an already set-up manager goes to the dashboard,
-              // never back into onboarding.
-              switchTab(isOnboardingComplete ? "DASHBOARD" : "PORTAL")
-            }
+            onEnterPortal={() => {
+              if (isOnboardingComplete) {
+                setHasEntered(true);
+                switchTab("DASHBOARD");
+              } else {
+                switchTab("PORTAL");
+              }
+            }}
           />
         )}
 
-        {displayedTab === "PORTAL" && (
+        {displayedTab === "PORTAL" && !isOnboardingComplete && (
           <OnboardingWizard
             saveCandidates={saveCandidates}
             saveScanComplete={saveScanComplete}
@@ -1019,7 +1039,6 @@ export default function TouchlineApp() {
             recentEvents={timeline}
             storylines={storylines}
             seasonState={seasonState}
-            onSeasonChange={setSeasonState}
             tacticsSlots={tacticsSlots}
             onNavigateTab={(tab) => switchTab(tab)}
             onSelectPlayer={(player) => setSelectedPlayer(player)}

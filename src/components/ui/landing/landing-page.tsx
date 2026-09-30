@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Image from "next/image";
 import { SaveCandidate } from "@/lib/parser/interface";
 
 interface LandingPageProps {
@@ -36,7 +37,7 @@ export function LandingPage({
     },
     {
       q: "Where do I find my EA SPORTS FC save file on my computer?",
-      a: "TouchlineOS auto-detects your save directory upon launch! By default, EA FC 25 saves reside in C:\\Users\\YourName\\AppData\\Local\\EA SPORTS FC 25\\settings\\ or inside your Documents folder.",
+      a: "TouchlineOS auto-detects your save folder on launch. It checks the places EA SPORTS FC writes careers to — a settings folder inside your Documents (in an FC 25 or FC 26 folder, including OneDrive Documents) and AppData\\Local\\EA SPORTS FC 25 or 26 — then lists every career save it finds.",
     },
     {
       q: "Do I need any programming or technical knowledge to use this?",
@@ -100,8 +101,8 @@ export function LandingPage({
           <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-md mb-5 text-center space-y-2">
             <span className="font-sub text-xs text-slate-500 dark:text-slate-400 block">
               {noSaveDetected
-                ? "No FC25 career save detected on this machine yet"
-                : "Scanning local FC25 save directory..."}
+                ? "No EA SPORTS FC career save detected on this machine yet"
+                : "Scanning for EA SPORTS FC career saves..."}
             </span>
             {noSaveDetected && onRescan && (
               <button
@@ -143,7 +144,7 @@ export function LandingPage({
               Connect Save
             </h3>
             <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              Point TouchlineOS to your local FC25 save folder. Our bridge reads squad rosters, contracts, and finances cleanly.
+              Point TouchlineOS at your EA SPORTS FC save folder. Our bridge reads squad rosters, contracts, and finances cleanly.
             </p>
           </div>
 
@@ -205,12 +206,14 @@ export function LandingPage({
               </p>
             </div>
 
-            <div className="w-full h-60 sm:h-72 rounded-2xl bg-slate-900 dark:bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 font-sub text-xs uppercase">
+            <div className="relative w-full h-60 sm:h-72 rounded-2xl bg-slate-900 dark:bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 font-sub text-xs uppercase">
               {bentoImages.snapshots ? (
-                <img
+                <Image
                   src={bentoImages.snapshots}
                   alt="Snapshot Audit View"
-                  className="w-full h-full object-cover rounded-2xl"
+                  fill
+                  sizes="(min-width: 768px) 33vw, 100vw"
+                  className="object-cover"
                 />
               ) : (
                 <span>[ Image Slot: Snapshot Audit View ]</span>
@@ -229,12 +232,14 @@ export function LandingPage({
               </p>
             </div>
 
-            <div className="w-full h-60 sm:h-72 rounded-2xl bg-slate-900 dark:bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 font-sub text-xs uppercase">
+            <div className="relative w-full h-60 sm:h-72 rounded-2xl bg-slate-900 dark:bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 font-sub text-xs uppercase">
               {bentoImages.pitch ? (
-                <img
+                <Image
                   src={bentoImages.pitch}
                   alt="2D Pitch Canvas"
-                  className="w-full h-full object-cover rounded-2xl"
+                  fill
+                  sizes="(min-width: 768px) 33vw, 100vw"
+                  className="object-cover"
                 />
               ) : (
                 <span>[ Image Slot: 2D Pitch Canvas ]</span>
@@ -253,12 +258,14 @@ export function LandingPage({
               </p>
             </div>
 
-            <div className="w-full h-44 rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 dark:text-slate-500 font-sub text-xs uppercase">
+            <div className="relative w-full h-44 rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 dark:text-slate-500 font-sub text-xs uppercase">
               {bentoImages.notebook ? (
-                <img
+                <Image
                   src={bentoImages.notebook}
                   alt="Player Card Assessment"
-                  className="w-full h-full object-cover rounded-2xl"
+                  fill
+                  sizes="(min-width: 768px) 33vw, 100vw"
+                  className="object-cover"
                 />
               ) : (
                 <span>[ Image Slot: Player Assessment ]</span>
@@ -266,23 +273,25 @@ export function LandingPage({
             </div>
           </div>
 
-          {/* Card 4: FC25 Save Bridge (4 cols) */}
+          {/* Card 4: Save Bridge (4 cols) */}
           <div className="md:col-span-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xl hover:border-rose-300 dark:hover:border-rose-500/60 transition-all flex flex-col justify-between">
             <div className="mb-4">
               <h3 className="font-heading text-lg text-slate-900 dark:text-slate-100 uppercase mb-2">
-                FC25 Save Bridge
+                Save Bridge
               </h3>
               <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                 Auto-detects local save directories and extracts factual squad data, player overall ratings, and wages.
               </p>
             </div>
 
-            <div className="w-full h-44 rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 dark:text-slate-500 font-sub text-xs uppercase">
+            <div className="relative w-full h-44 rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 dark:text-slate-500 font-sub text-xs uppercase">
               {bentoImages.bridge ? (
-                <img
+                <Image
                   src={bentoImages.bridge}
                   alt="Save Bridge Picker"
-                  className="w-full h-full object-cover rounded-2xl"
+                  fill
+                  sizes="(min-width: 768px) 33vw, 100vw"
+                  className="object-cover"
                 />
               ) : (
                 <span>[ Image Slot: Save Bridge ]</span>
@@ -301,12 +310,14 @@ export function LandingPage({
               </p>
             </div>
 
-            <div className="w-full h-44 rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 dark:text-slate-500 font-sub text-xs uppercase">
+            <div className="relative w-full h-44 rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 dark:text-slate-500 font-sub text-xs uppercase">
               {bentoImages.youth ? (
-                <img
+                <Image
                   src={bentoImages.youth}
                   alt="Youth Prospect Tracker"
-                  className="w-full h-full object-cover rounded-2xl"
+                  fill
+                  sizes="(min-width: 768px) 33vw, 100vw"
+                  className="object-cover"
                 />
               ) : (
                 <span>[ Image Slot: Youth Tracker ]</span>
@@ -325,12 +336,14 @@ export function LandingPage({
               </p>
             </div>
 
-            <div className="w-full h-44 rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 dark:text-slate-500 font-sub text-xs uppercase">
+            <div className="relative w-full h-44 rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 dark:text-slate-500 font-sub text-xs uppercase">
               {bentoImages.events ? (
-                <img
+                <Image
                   src={bentoImages.events}
                   alt="Event Timeline Feed"
-                  className="w-full h-full object-cover rounded-2xl"
+                  fill
+                  sizes="(min-width: 768px) 66vw, 100vw"
+                  className="object-cover"
                 />
               ) : (
                 <span>[ Image Slot: Event Timeline Feed ]</span>
@@ -367,7 +380,7 @@ export function LandingPage({
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-left">
           <div className="border-l-2 border-[#E11D48] pl-4">
             <span className="font-sub text-[10px] text-[#E11D48] font-bold uppercase tracking-wider block">
-              Phase 0 - 4 (Active MVP)
+              Phase 0 - 7 (Active MVP)
             </span>
             <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mt-0.5 mb-1">
               The Solid Core
@@ -460,7 +473,7 @@ export function LandingPage({
           Ready To Command Your Save?
         </h2>
         <p className="font-sans text-slate-300 text-sm max-w-lg mx-auto mb-6">
-          Connect your FC25 save file and experience persistent, intelligent career tracking today.
+          Connect your EA SPORTS FC save file and experience persistent, intelligent career tracking today.
         </p>
         <button
           onClick={onEnterPortal}

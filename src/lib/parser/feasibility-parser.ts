@@ -1005,6 +1005,38 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       }
     }
 
+    // Schema drift is reported, never quietly absorbed. The meta XML is not necessarily the one that
+    // shipped with this save - EA is free to add, rename or reorder career columns between titles -
+    // and a table or field the meta does not know would otherwise decode with its values read off
+    // the wrong names. Both facts are already collected for the report; pushing them onto `warnings`
+    // is what makes them visible, because `warnings` is the channel that reaches the user.
+    if (meta !== null) {
+      const missingTables = [...new Set(unknownTables)];
+      if (missingTables.length > 0) {
+        warnings.push(
+          `Schema drift: ${missingTables.length} table(s) in this save are not in the meta XML (${missingTables
+            .slice(0, 5)
+            .join(", ")}${missingTables.length > 5 ? ", ..." : ""}), so they were not decoded.`
+        );
+      }
+      // Only tables the meta DOES know: an unknown table is already reported above, and its fields
+      // would otherwise be listed a second time under a name that does not exist.
+      const driftedFields = tableStats.filter(
+        (stat) => stat.tableName !== null && stat.unknownFields.length > 0
+      );
+      if (driftedFields.length > 0) {
+        const shown = driftedFields
+          .slice(0, 3)
+          .map((stat) => `${stat.tableName ?? stat.shortName} (${stat.unknownFields.length} field(s))`)
+          .join(", ");
+        warnings.push(
+          `Schema drift: ${driftedFields.length} table(s) carry fields the meta XML does not name (${shown}${
+            driftedFields.length > 3 ? ", ..." : ""
+          }), so those columns cannot be named and their values may be misread.`
+        );
+      }
+    }
+
     const extractedTables: Record<string, unknown[]> = {};
 
     const decodeTable = (
@@ -1189,7 +1221,16 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         return clubId !== null && num(row, "teamid") === clubId;
       },
     });
-    const growth = decodeTable("career_playergrowthuserseason", {
+    // Decoded for the feasibility report only: `decodeTable` is what registers a table in
+    // `extractedTables`/`decodedTables`, so the rows themselves were never read. They are a
+    // per-player attribute sheet (37 fields - `overall` plus every face stat), which is NOT what
+    // the DEVELOPMENT storyline reads: that compares one player across two `player_snapshots`
+    // (`CareerService.developmentObservations`). Nothing consumes this table today, and wiring it
+    // in would change where rating movement is sourced from, so it is parked deliberately rather
+    // than deleted or quietly used. Note the separate `career_playerlastgrowth` table - the one the
+    // reference implementation named as the real injury source - is ~21k rows in the save and is
+    // still not decoded by this parser at all.
+    decodeTable("career_playergrowthuserseason", {
       limit: Math.max(this.options.rowLimit, 60),
       filter: (row) => {
         const id = num(row, "playerid");
@@ -1382,7 +1423,17 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         } satisfies PresignedDeal;
       })
       .filter((deal): deal is PresignedDeal => deal !== null);
-    const events = decodeTable("persistent_events", { limit: Math.max(this.options.rowLimit, 200) });
+    // The save's own dated event log: 4 rows in the save we hold, so NOT empty, and not the
+    // `mlop`/`mrni` fixture ledger (those are the blob readers below, which return null here). The
+    // rows - `eventid`, `eventdate`, `team1id`, `team2id`, `player1id` - are a candidate feed for
+    // the Timeline and are unused today, so this notes them rather than removing the decode: the
+    // call is what registers the table in the feasibility report.
+    //
+    // It is also NOT a date source in practice, whatever `DATE_SOURCES` says: the in-game date is
+    // computed further up (see `latestDate`), and `career_playermatchratinghistory`,
+    // `career_presignedcontract` and this table are all decoded below that point, so today only
+    // `career_playercontract.last_status_change_date` can feed it.
+    decodeTable("persistent_events", { limit: Math.max(this.options.rowLimit, 200) });
 
     facts.push({
       provenance: SAVE_PROVENANCE,

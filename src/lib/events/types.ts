@@ -68,7 +68,7 @@ export interface FinanceChangedPayload extends BaseEventPayload {
 /**
  * A manager-logged goals/assists contribution for a single player in a single match.
  *
- * FC25 career saves expose no per-match event data (no scorers, no assist minutes), so every
+ * EA SPORTS FC career saves expose no per-match event data (no scorers, no assist minutes), so every
  * value here is USER provenance - an observation the manager recorded, never a parsed fact.
  * AI layers must treat it as read-only input, never as something to regenerate.
  */

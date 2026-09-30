@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { CoreEventType, DomainEvent } from "./types";
+import { DomainEvent } from "./types";
 import { Provenance } from "../db/schema";
 
 export interface SnapshotStateRecord {

@@ -308,6 +308,13 @@ export interface SquadEntry {
  * That table holds ONE ROW PER SEASON, not one row per career, which is why every reader that
  * indexed [0] reported season 1's figures forever. `tablePosition` is 0 until the season completes,
  * which makes it the save's only reliable "the season has ended" signal.
+ *
+ * It also holds exactly ONE W/D/L/points/goals set per season, and that set spans EVERY competition
+ * the club entered - the league plus its cups - so it is not league form. Verified arithmetically:
+ * seasons 1 and 2 report 55 and 56 games for a 24-club (46-game) division, and
+ * `wins + draws + losses` equals `gamesPlayed` in all three seasons. So everything from `gamesPlayed`
+ * to `goalsAgainst` must never be described as league form; `tablePosition` is the only
+ * league-specific value here.
  */
 export interface SeasonHistoryRow {
   season: number | null;
@@ -319,7 +326,7 @@ export interface SeasonHistoryRow {
   points: number | null;
   goalsFor: number | null;
   goalsAgainst: number | null;
-  /** Final league position. 0 means the season is still in progress. */
+  /** Final league position - the only league-specific value in the row. 0 = still in progress. */
   tablePosition: number | null;
   /** EA's own board objective for that season, and the result against it. SAVE-sourced. */
   leagueObjective: number | null;

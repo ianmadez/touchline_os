@@ -2,11 +2,7 @@
 
 import React, { useState } from "react";
 import Image from "next/image";
-import {
-  FORMATIONS_REGISTRY,
-  getFormationById,
-  PitchPositionSlot,
-} from "@/lib/tactics/formations";
+import { FORMATIONS_REGISTRY, getFormationById } from "@/lib/tactics/formations";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import { PitchSlotAssignment } from "@/lib/services/tactics-service";
 

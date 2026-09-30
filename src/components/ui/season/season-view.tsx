@@ -4,6 +4,7 @@ import React, { useMemo, useState } from "react";
 import type { SeasonState, SeasonRecord } from "@/lib/services/season-service";
 import { leagueLabel } from "@/lib/ui/leagues";
 import { SeasonPanel } from "@/components/ui/dashboard/season-panel";
+import { SeasonVaultView } from "./season-vault-view";
 
 interface SeasonViewProps {
   careerId: string;
@@ -11,7 +12,7 @@ interface SeasonViewProps {
   onSeasonChange: (next: SeasonState) => void;
 }
 
-type SubTab = "OUTLOOK" | "CHARTS";
+type SubTab = "OUTLOOK" | "CHARTS" | "VAULT";
 
 // Two independent sample-size gates, deliberately not the same number or the same name as the
 // league model's own MIN_OBSERVATIONS_FOR_MODEL: that one governs the position-inference band,
@@ -20,9 +21,12 @@ const MIN_SEASONS_FOR_TREND = 2;
 
 export function SeasonView({ careerId, seasonState, onSeasonChange }: SeasonViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>("OUTLOOK");
+  const [selectedVaultSeason, setSelectedVaultSeason] = useState<number | null>(null);
 
   const outlook = seasonState?.outlook ?? null;
-  const seasons = seasonState?.seasons ?? [];
+  // Memoised so the `??` fallback cannot hand `completedSeasons` a fresh empty array on every
+  // render, which would make its dependency change even when nothing about the season did.
+  const seasons = useMemo(() => seasonState?.seasons ?? [], [seasonState?.seasons]);
   const completedSeasons = useMemo(() => seasons.filter((s) => s.complete), [seasons]);
   const unreadableDebriefs = seasonState?.table.reconciliation.fromDebriefs.unreadable ?? 0;
 
@@ -40,18 +44,18 @@ export function SeasonView({ careerId, seasonState, onSeasonChange }: SeasonView
         </div>
 
         <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 dark:border-slate-800 dark:bg-slate-950">
-          {(["OUTLOOK", "CHARTS"] as const).map((tab) => (
+          {(["OUTLOOK", "CHARTS", "VAULT"] as const).map((tab) => (
             <button
               key={tab}
               type="button"
               onClick={() => setActiveSubTab(tab)}
-              className={`cursor-pointer rounded-lg px-5 py-2 text-xs font-sub font-bold uppercase tracking-wider transition-colors ${
+              className={`cursor-pointer rounded-lg px-4 py-2 text-xs font-sub font-bold uppercase tracking-wider transition-all ${
                 activeSubTab === tab
                   ? "bg-[#E11D48] text-white shadow-sm shadow-rose-600/20"
                   : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
               }`}
             >
-              {tab === "OUTLOOK" ? "Outlook & Records" : "Trends"}
+              {tab === "OUTLOOK" ? "Outlook & Records" : tab === "CHARTS" ? "Matchday & Trends" : "Season Vault"}
             </button>
           ))}
         </div>
@@ -76,9 +80,19 @@ export function SeasonView({ careerId, seasonState, onSeasonChange }: SeasonView
 
         {activeSubTab === "CHARTS" && (
           <div className="space-y-6">
+            <MatchdayTrajectoryChart progressSeries={seasonState?.progressSeries ?? []} />
             <PointsBySeasonChart seasons={completedSeasons} current={outlook} />
             <FinishBySeasonChart seasons={completedSeasons} />
           </div>
+        )}
+
+        {activeSubTab === "VAULT" && (
+          <SeasonVaultView
+            careerId={careerId}
+            seasons={seasons}
+            selectedSeason={selectedVaultSeason}
+            onSelectSeason={setSelectedVaultSeason}
+          />
         )}
       </div>
     </div>
@@ -113,7 +127,9 @@ function SeasonHistoryTable({
             Managerial Record
           </h2>
           <p className="text-xs font-sub text-slate-500 dark:text-slate-400">
-            Every season the save has recorded, in the order it happened.
+            Every season the save has recorded, in the order it happened. Played, W-D-L and goals are
+            its totals across every competition; points are the save&apos;s own season total, and only
+            the finish is a league placing.
           </p>
         </div>
         <span className="rounded border border-[#E11D48]/30 bg-[#E11D48]/15 px-2.5 py-1 text-xs font-sub font-bold text-[#E11D48] dark:text-[#FF8C7A]">
@@ -126,13 +142,13 @@ function SeasonHistoryTable({
           <thead>
             <tr className="border-b border-slate-200 text-[10px] uppercase text-slate-400 dark:border-slate-800">
               <th className="px-3 py-2.5">Season</th>
-              <th className="px-3 py-2.5">League</th>
-              <th className="px-3 py-2.5">P</th>
-              <th className="px-3 py-2.5">W-D-L</th>
-              <th className="px-3 py-2.5">GF:GA</th>
-              <th className="px-3 py-2.5">GD</th>
-              <th className="px-3 py-2.5">PTS</th>
-              <th className="px-3 py-2.5">Finish</th>
+              <th className="px-3 py-2.5">Division</th>
+              <th className="px-3 py-2.5">P*</th>
+              <th className="px-3 py-2.5">W-D-L*</th>
+              <th className="px-3 py-2.5">GF:GA*</th>
+              <th className="px-3 py-2.5">GD*</th>
+              <th className="px-3 py-2.5">PTS*</th>
+              <th className="px-3 py-2.5">League finish</th>
               <th className="px-3 py-2.5 text-right">Status</th>
             </tr>
           </thead>
@@ -176,6 +192,17 @@ function SeasonHistoryTable({
         </table>
       </div>
 
+      {/* `*` because the save keeps ONE combined record per season: these are not league figures.
+          No competition is ever named here - the app runs against saves from any country, so naming
+          "the FA Cup" or "the EFL Trophy" would be wrong for most of them. */}
+      <p className="text-[11px] font-sub text-slate-500 dark:text-slate-400">
+        <span className="font-bold">*</span> One combined record per season: every match played, in
+        whichever competitions the club entered. Not every competition awards points, so the points
+        column is the save&apos;s own season total. Only{" "}
+        <span className="font-bold">League finish</span> is a league placing, and it is not derived
+        from the columns beside it.
+      </p>
+
       {unreadableDebriefs > 0 && (
         <p className="text-[11px] font-sub text-slate-500 dark:text-slate-400">
           {unreadableDebriefs} logged debrief{unreadableDebriefs === 1 ? "" : "s"} could not be read for a
@@ -196,6 +223,98 @@ function SeasonHistoryTable({
 // benchmark lines are drawn here — those thresholds aren't configured anywhere yet.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Matchday Trajectory Series (Option A)
+// ---------------------------------------------------------------------------
+
+function MatchdayTrajectoryChart({ progressSeries }: { progressSeries: NonNullable<SeasonState["progressSeries"]> }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+
+  if (progressSeries.length === 0) {
+    return (
+      <EmptyCard
+        title="No matchday progress recorded this season"
+        body="As you log debriefs or sync save snapshots across matchdays, your within-season trajectory will plot here in real time."
+      />
+    );
+  }
+
+  const maxPoints = Math.max(...progressSeries.map((p) => p.points), 1);
+  const activePoint = hoveredIndex !== null ? progressSeries[hoveredIndex] : progressSeries.at(-1);
+
+  return (
+    <ChartCard
+      title="Matchday Trajectory & Form"
+      subtitle="Within-season cumulative points acceleration and position tracking across synced matchdays."
+    >
+      <div className="space-y-4">
+        {/* Interactive Tooltip Card */}
+        {activePoint && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200/60 bg-white p-3 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center gap-3">
+              <span className="rounded bg-rose-500/10 px-2 py-0.5 text-xs font-bold text-rose-600 dark:text-rose-400">
+                Matchday {activePoint.matchday}
+              </span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {activePoint.inGameDate ? new Date(activePoint.inGameDate).toLocaleDateString() : "Date unrecorded"}
+              </span>
+            </div>
+            <div className="flex items-center gap-4 text-xs font-sub">
+              <div>
+                <span className="text-slate-400">Record: </span>
+                <span className="font-bold text-slate-800 dark:text-slate-200">
+                  {activePoint.wins}W - {activePoint.draws}D - {activePoint.losses}L
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400">PTS: </span>
+                <span className="font-bold text-rose-600 dark:text-rose-400">{activePoint.points}</span>
+              </div>
+              {activePoint.tablePosition && (
+                <div>
+                  <span className="text-slate-400">Pos: </span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                    #{activePoint.tablePosition}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Interactive Visual Series */}
+        <div className="flex h-44 items-end gap-2 px-1 pt-4">
+          {progressSeries.map((p, idx) => {
+            const heightPct = Math.max(8, (p.points / maxPoints) * 100);
+            const isHovered = hoveredIndex === idx;
+
+            return (
+              <div
+                key={p.id}
+                onMouseEnter={() => setHoveredIndex(idx)}
+                onMouseLeave={() => setHoveredIndex(null)}
+                className="group relative flex h-full flex-1 cursor-pointer flex-col items-center justify-end"
+              >
+                <div
+                  className={`w-full rounded-t transition-all duration-150 ${
+                    isHovered
+                      ? "bg-rose-500 shadow-md shadow-rose-500/30 scale-x-110"
+                      : "bg-rose-500/70 hover:bg-rose-500/90"
+                  }`}
+                  style={{ height: `${heightPct}%` }}
+                />
+                <span className="mt-1.5 text-[9px] font-sub text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-200">
+                  M{p.matchday}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </ChartCard>
+  );
+}
+
 function PointsBySeasonChart({
   seasons,
   current,
@@ -203,14 +322,17 @@ function PointsBySeasonChart({
   seasons: SeasonRecord[];
   current: SeasonState["outlook"];
 }) {
+  const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
+
   const bars = [
-    ...seasons.map((s) => ({ label: `S${s.season}`, points: s.points ?? 0, projected: false })),
+    ...seasons.map((s) => ({ label: `S${s.season}`, points: s.points ?? 0, live: false, raw: s })),
     ...(current
       ? [
           {
             label: `S${current.seasonNumber} (live)`,
-            points: current.projectedPoints ?? current.points,
-            projected: current.projectedPoints !== null,
+            points: current.points,
+            live: true,
+            raw: null,
           },
         ]
       : []),
@@ -230,34 +352,52 @@ function PointsBySeasonChart({
   return (
     <ChartCard
       title="Points by Season"
-      subtitle="Final points for completed seasons; the live season shows its points-per-game projection, tagged as such."
+      subtitle="Final points for completed seasons, and points so far this season. Hover any bar to highlight totals."
     >
       <div className="flex h-56 items-end gap-4 px-2">
-        {bars.map((b) => (
-          <div key={b.label} className="flex h-full flex-1 flex-col items-center">
-            {/* Fixed-height rail, then a flex track that fills what is left. The bar's percentage
-                height resolves against the TRACK: a percentage needs a parent with a definite
-                height, and the old column here was sized to its own content (number + label), so
-                every bar computed against nothing and rendered empty. */}
-            <span className="h-5 shrink-0 text-[11px] font-sub font-bold leading-5 tabular-nums text-slate-700 dark:text-slate-200">
-              {b.points}
-              {b.projected && <span className="ml-1 text-[9px] font-normal text-amber-600 dark:text-amber-400">projected</span>}
-            </span>
-            <div className="flex min-h-0 w-full flex-1 items-end justify-center">
-              <div
-                className={`w-full rounded-t-md ${b.projected ? "bg-amber-500/70" : "bg-[#E11D48]"}`}
-                style={{ height: `${Math.max(6, (b.points / max) * 100)}%` }}
-              />
+        {bars.map((b) => {
+          const isHovered = hoveredLabel === b.label;
+          return (
+            <div
+              key={b.label}
+              onMouseEnter={() => setHoveredLabel(b.label)}
+              onMouseLeave={() => setHoveredLabel(null)}
+              className="group flex h-full flex-1 cursor-pointer flex-col items-center"
+            >
+              <span className={`h-5 shrink-0 text-[11px] font-sub font-bold leading-5 tabular-nums transition-colors ${
+                isHovered ? "text-rose-600 dark:text-rose-400 scale-110" : "text-slate-700 dark:text-slate-200"
+              }`}>
+                {b.points}
+                {b.live && (
+                  <span className="ml-1 text-[9px] font-normal text-amber-600 dark:text-amber-400">
+                    so far
+                  </span>
+                )}
+              </span>
+              <div className="flex min-h-0 w-full flex-1 items-end justify-center">
+                <div
+                  className={`w-full rounded-t-md transition-all duration-200 ${
+                    b.live
+                      ? isHovered ? "bg-amber-500 shadow-md shadow-amber-500/20" : "bg-amber-500/70"
+                      : isHovered ? "bg-[#E11D48] shadow-md shadow-rose-600/30 scale-x-105" : "bg-[#E11D48]/80"
+                  }`}
+                  style={{ height: `${Math.max(6, (b.points / max) * 100)}%` }}
+                />
+              </div>
+              <span className="mt-2 shrink-0 text-[10px] font-sub uppercase text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-200">
+                {b.label}
+              </span>
             </div>
-            <span className="mt-2 shrink-0 text-[10px] font-sub uppercase text-slate-400">{b.label}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </ChartCard>
   );
 }
 
 function FinishBySeasonChart({ seasons }: { seasons: SeasonRecord[] }) {
+  const [hoveredSeason, setHoveredSeason] = useState<number | null>(null);
+
   if (seasons.length < MIN_SEASONS_FOR_TREND) {
     return (
       <EmptyCard
@@ -271,21 +411,36 @@ function FinishBySeasonChart({ seasons }: { seasons: SeasonRecord[] }) {
   const worst = Math.max(...positions, 1);
 
   return (
-    <ChartCard title="Finishing Position by Season" subtitle="Lower is better — bars are scaled to your worst finish on record.">
+    <ChartCard title="Finishing Position by Season" subtitle="Lower is better — bars are scaled to your worst finish on record. Hover to inspect.">
       <div className="flex h-48 items-end gap-4 px-2">
         {seasons.map((s) => {
           const pos = s.tablePosition ?? 0;
           const heightPct = pos > 0 ? Math.max(6, ((worst - pos + 1) / worst) * 100) : 6;
+          const isHovered = hoveredSeason === s.season;
+
           return (
-            <div key={s.season} className="flex h-full flex-1 flex-col items-center">
-              <span className="h-5 shrink-0 text-[11px] font-sub font-bold leading-5 tabular-nums text-slate-700 dark:text-slate-200">
+            <div
+              key={s.season}
+              onMouseEnter={() => setHoveredSeason(s.season)}
+              onMouseLeave={() => setHoveredSeason(null)}
+              className="group flex h-full flex-1 cursor-pointer flex-col items-center"
+            >
+              <span className={`h-5 shrink-0 text-[11px] font-sub font-bold leading-5 tabular-nums transition-colors ${
+                isHovered ? "text-emerald-600 dark:text-emerald-400 scale-110" : "text-slate-700 dark:text-slate-200"
+              }`}>
                 {pos > 0 ? `${pos}${ordinalSuffix(pos)}` : "—"}
               </span>
-              {/* Same fix as the points chart: the percentage needs the track's definite height. */}
               <div className="flex min-h-0 w-full flex-1 items-end justify-center">
-                <div className="w-full rounded-t-md bg-emerald-500/70" style={{ height: `${heightPct}%` }} />
+                <div
+                  className={`w-full rounded-t-md transition-all duration-200 ${
+                    isHovered ? "bg-emerald-500 shadow-md shadow-emerald-500/30 scale-x-105" : "bg-emerald-500/70"
+                  }`}
+                  style={{ height: `${heightPct}%` }}
+                />
               </div>
-              <span className="mt-2 shrink-0 text-[10px] font-sub uppercase text-slate-400">S{s.season}</span>
+              <span className="mt-2 shrink-0 text-[10px] font-sub uppercase text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-200">
+                S{s.season}
+              </span>
             </div>
           );
         })}
