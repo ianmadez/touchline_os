@@ -1,17 +1,16 @@
 # TouchlineOS
 
-A local-first companion app for EA SPORTS FC Career Mode. It automatically reads and saves your actual save file, keeps an honest, immutable record of your career, and layers deterministic advice, storylines and season intelligence on top — without ever inventing a fact the save didn't give it.
+A local-first companion app for EA SPORTS FC Career Mode. It automatically reads and saves your actual save file, keeps an honest, immutable record of your career, and layers deterministic advice, storylines and season intelligence on top, without ever inventing a fact the save didn't give it.
 
-> Built and tested against **EA SPORTS FC 25** Manager Career saves.
+> Built and tested against **EA SPORTS FC 25** Manager Career saves, should work fine with EAFC 26.
 
-![Portal / landing screen](./docs/screenshots/portal.png)
-*Placeholder — replace with a screenshot of the Portal / save-sync landing screen.*
+<img width="1917" height="935" alt="image" src="https://github.com/user-attachments/assets/055151fc-34f9-4c72-acd9-53feb5e822e8" />
 
 ---
 
 ## What this is
 
-Career Mode gives you a squad, a league table, and a save file that quietly loses context every time you close the game. TouchlineOS sits beside it and remembers what happened, in your own words where the save can't tell you, and in the save's own words where it can — and it never blurs the two.
+As a Career Mode - Manager Career player I've always struggled with immersion especially as the years went on and the charm of older FIFA games faded away. I tried getting into tracking in my phone's notepad, a book, and those really-confusing looking excel templates that are basically a second job, and none worked for me. I looked into other companion apps and none really felt like ME, you know? So, I built TouchlineOS, the normal game gives you your squad, a league table, and a save file that quietly loses context every time you close the game. TouchlineOS sits beside it as a semi-autonomous layer and remembers what happened, in your own words where the save can't tell you, and in the save's own words where it can, and it never blurs the two.
 
 Every value stored anywhere in the app carries a provenance:
 
@@ -28,8 +27,8 @@ Nothing downstream is allowed to present a `DERIVED` estimate as a `SAVE` fact, 
 
 ## Core principles
 
-- **Immutable history.** Every sync creates a new snapshot. Nothing is ever overwritten — a diff engine compares snapshots and emits events onto a permanent spine (`career_events`). Re-syncing an unchanged save produces zero new events, every time, verified.
-- **Deterministic first, AI last.** Every advisory, storyline, and inference in the app today is plain code — thresholds, arithmetic, and comparisons — with zero LLM involvement. The architecture is built so an AI narration layer can be added later purely as an *interpreter* of this data, never as its source.
+- **Immutable history.** Every sync creates a new snapshot. Nothing is ever overwritten. A diff engine compares snapshots and emits events onto a permanent spine (`career_events`). Re-syncing an unchanged save produces zero new events, every time, verified.
+- **Deterministic first, AI last.** Every advisory, storyline, and inference in the app today is plain code, thresholds, arithmetic, and comparisons, all with zero LLM involvement. The architecture is built so an AI narration layer can be added later purely as an *interpreter* of this data, never as its source.
 - **No silent guessing.** If a field can't be reliably read from the save (transfer values, wages, a board objective's meaning, a live league table), the app either derives a labeled estimate with a visible band, asks the manager directly, or states plainly that it doesn't know — never all three collapsed into one confident-looking fact.
 - **Football language, not database language.** No jargon, no internal field names, no "provenance" badges. The distinction between a save fact and a manager's own note is made in plain football language throughout the UI.
 
@@ -38,55 +37,48 @@ Nothing downstream is allowed to present a `DERIVED` estimate as a `SAVE` fact, 
 ## Feature tour
 
 ### Save sync & snapshots
-Simple as pointing TouchlineOS at your save file. Each sync produces a new immutable snapshot and a diff against the last one — you get a plain-English summary of what changed (transfers, squad changes, contract events) every time you sync.
+Simple as pointing TouchlineOS at your save file, which it tries to automatically detect. Each sync produces a new immutable snapshot and a diff against the last one, you get a plain-English summary of what changed (transfers, squad changes, contract events) every time you sync.
 
-![Sync review](./docs/screenshots/sync-review.png)
-*Placeholder — sync summary screen.*
+<img width="500" height="261" alt="image" src="https://github.com/user-attachments/assets/db366d38-8f0d-4a88-89a2-bc3921d1cd58" />
 
 ### Squad
-Your full roster, read straight from the save — OVR, potential, age, position, contract, form, jersey number — plus a manager's-eye layer you control yourself: assigned role, trust level, and importance marker (untouchable / key player / rotation / surplus). Faces are fetched automatically for real squad players, not youth, with a clean initials-disc fallback for anyone without one.
+Your full roster is read straight from the save: OVR, potential, age, position, contract, form, jersey number + a manager's-eye layer you control yourself: assigned role, trust level, and importance marker (untouchable / key player / rotation / surplus). Faces are fetched automatically for real squad players, not youth, with a clean initials-disc fallback for anyone without one.
 
-![Squad table](./docs/screenshots/squad.png)
-*Placeholder — squad table view.*
+<img width="1915" height="931" alt="Screenshot 2026-09-29 214404" src="https://github.com/user-attachments/assets/62186272-9ffd-4b5f-8329-12938ebf50e1" />
 
 ### Tactics
 A pitch view with click-to-assign player placement per formation. Role changes are logged as real events, feeding the storyline engine below.
 
-![Tactics board](./docs/screenshots/tactics.png)
-*Placeholder — tactics pitch view.*
+<img width="1917" height="937" alt="Screenshot 2026-09-29 214435" src="https://github.com/user-attachments/assets/57374c7c-8d5d-4105-8fd7-6fecafa40b0b" />
 
 ### Season & Campaign Hub
 Season-by-season record, pulled directly from the save, alongside a manager-set objective and the save's own board objective shown side by side — never merged, never silently overwritten by one another. Where the save's own fields are known to be unreliable or ambiguous (league position, competition scope), the app is explicit about it rather than presenting a guess as fact.
 
-![Season panel](./docs/screenshots/season.png)
-*Placeholder — Campaign Hub / Season panel.*
+<img width="1540" height="815" alt="Screenshot 2026-09-30 163154" src="https://github.com/user-attachments/assets/77b0a9b4-4237-48aa-9018-cc11612b2348" />
 
-![Season charts](./docs/screenshots/charts.png)
-*Placeholder — season trend charts.*
+<img width="1531" height="806" alt="image" src="https://github.com/user-attachments/assets/0d75ec9e-fc93-4c89-a20f-5927e3298493" />
 
 ### Timeline
 A chronological feed built entirely from the event spine — plain, legible sentences generated from what actually happened, not a narrative library.
 
-![Timeline](./docs/screenshots/timeline.png)
-*Placeholder — career timeline.*
+<img width="542" height="386" alt="image" src="https://github.com/user-attachments/assets/8eed5d65-559e-4a67-a89b-019a047ba81a" />
 
 ### Storylines
-The deterministic advisor's flagship feature: threads that open on a real trigger (e.g. thin depth at a position) and *compound* — every subsequent sync or debrief can add further evidence to an already-open thread, rather than firing a single static flag. Threads resolve when a manager action genuinely addresses them (a signing, a renewal) and go stale when nothing does. Every thread's full evidence trail is reviewable on its own subpage.
+The deterministic advisor's flagship feature: threads that open on a real trigger (e.g. thin depth at a position) and *compound*, every subsequent sync or debrief can add further evidence to an already-open thread, rather than firing a single static flag. Threads resolve when a manager action genuinely addresses them (a signing, a renewal) and go stale when nothing does. Every thread's full evidence trail is reviewable on its own subpage.
 
-![Storyline evidence](./docs/screenshots/storyline.png)
-*Placeholder — a storyline card and its evidence subpage.*
+<img width="637" height="521" alt="image" src="https://github.com/user-attachments/assets/a16ca56c-9d35-46a0-8a23-5a9701994e68" />
 
 ### Match Debrief
 Log a result and answer a handful of context-aware follow-up questions. The question set isn't static — it's driven by an anomaly engine that looks at your rolling recent form (defensive leaks, goal droughts, big wins/losses, a player in hot form, a recurring weakness resurfacing) and only asks about what's actually notable, with the wording varying naturally match to match rather than repeating the same template.
 
-![Match debrief](./docs/screenshots/debrief.png)
-*Placeholder — match debrief screen.*
+<img width="1462" height="812" alt="image" src="https://github.com/user-attachments/assets/f4d70517-8649-49c3-84e1-373ed059d3c4" />
+
+<img width="1455" height="640" alt="image" src="https://github.com/user-attachments/assets/6cdc6ff1-6ce9-4da6-8ac8-ef12a0f163a2" />
 
 ### Settings
-Sync behavior, theme, and career/data management, kept honest — no controls for features that don't exist yet.
+Sync behavior, theme, and career/data management, all kept honest, there are no controls for features that don't exist yet.
 
-![Settings](./docs/screenshots/settings.png)
-*Placeholder — settings screen.*
+<img width="981" height="773" alt="image" src="https://github.com/user-attachments/assets/10bffd2f-99ba-4999-a65d-8a7dc177fde3" />
 
 ---
 
@@ -141,8 +133,7 @@ The result is always shown as a **band**, with its basis and evidence count stat
 ## What's deliberately not here yet
 
 - No AI/LLM layer. Every insight in the app today is deterministic code.
-- No transfer market / scouting module.
-- No youth academy tracking beyond what the save itself exposes.
+- No deep youth academy tracking beyond what the save itself exposes.
 - No cloud sync, no accounts, no multi-device support — this is a single-machine personal tool by design.
 
 ---
@@ -163,4 +154,7 @@ Point the app at your FC Career save when prompted on first launch. Nothing is u
 
 ## A note on honesty
 
-Several features in this app exist specifically *because* something was found to be unreliable, ambiguous, or simply absent in the save — and the honest answer was judged more valuable than a confident-looking guess. Wages and transfer values are shown as bands with a stated confidence level, never a bare number. Board objectives the save can't decode are shown as undecoded rather than captioned with an invented meaning. Season totals are labeled for what they verifiably are (all-competition figures, not league-only) rather than mislabeled for what would look tidier. This isn't a limitation apologized for in a footnote — it's the design.
+Several features in this app exist specifically *because* something was found to be unreliable, ambiguous, or simply absent in the save, and the honest answer was judged more valuable than a confident-looking guess. Wages and transfer values are shown as bands with a stated confidence level, never a bare number. Board objectives the save can't decode are shown as undecoded rather than captioned with an invented meaning. Season totals are labeled for what they verifiably are (all-competition figures, not league-only) rather than mislabeled for what would look tidier. This isn't a limitation apologized for in a footnote but it's the design. Thank you and enjoy TouchlineOS 
+
+## Donations
+[![Donate](https://shields.io)](https://ko-fi.com/ianmadezoss)
