@@ -579,16 +579,15 @@ export function SettingsView({
             </p>
 
             <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
-              Import adds a career from one of those files and refuses if it is already here — it is
-              one-way, one-time, and nothing moves on its own. It carries the nine tables the export
-              writes; a career that already exists is left alone rather than partly overwritten, so
-              delete it first if you mean to replace it.
+              Import reads one of those files and rebuilds that career here — every table it owns,
+              one-way and one-time, with nothing moving on its own. If the same career is already
+              here it is replaced outright, so what you end up with is exactly what you exported.
             </p>
           </Section>
 
           <Section
             title="Reset Career Data"
-            description="Permanently deletes the active career, every snapshot, all timeline events, squad notes and tactics — nine tables, with no undo."
+            description="Permanently deletes the active career and everything that belongs to it — every snapshot, squad note, timeline event, storyline, scouting target, finance record and league table. There is no undo."
           >
             <label className="block font-sub text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
               Type{" "}

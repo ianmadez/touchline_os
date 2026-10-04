@@ -13,6 +13,8 @@
     "db:init": "tsx scripts/init-db.ts",
     "sync:test": "tsx scripts/test-sync.ts",
     "services:test": "tsx scripts/test-phase3.ts",
+    "transfer:test": "tsx scripts/test-transfer.ts",
+    "saves:test": "tsx scripts/test-save-source.ts",
     "import:faces": "tsx scripts/import-faces.ts",
     "db:tables": "tsx scripts/db-tables.ts"
   },

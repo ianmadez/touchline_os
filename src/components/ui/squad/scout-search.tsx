@@ -42,15 +42,48 @@ const STRATEGY_ICONS: Record<ScoutStrategy, React.ReactNode> = {
   VALUE: <IconWallet className="h-4 w-4" />,
 };
 
-const POSITION_OPTIONS = [
-  { value: "", label: "Select a position" },
-  { value: "GK", label: "Goalkeeper" },
-  { value: "DEF", label: "Defenders" },
-  { value: "MID", label: "Midfielders" },
-  { value: "ATT", label: "Attackers" },
-  { value: "CB", label: "CB only" },
-  { value: "CM", label: "CM only" },
-  { value: "ST", label: "ST only" },
+/**
+ * Plain-language names for the game's positions, keyed by the code the save uses.
+ *
+ * The vocabulary is the save format's own - `positionCodeToRole` in `lib/parser/interface.ts` - so
+ * this lists what the game actually fields rather than an approximation of it. `DEF`, `MID` and `ATT`
+ * are wider still: they are entries the search service expands into their roles.
+ */
+const POSITION_NAMES: Record<string, string> = {
+  GK: "Goalkeeper",
+  RB: "Right back",
+  RWB: "Right wing-back",
+  CB: "Centre back",
+  LB: "Left back",
+  LWB: "Left wing-back",
+  CDM: "Defensive midfield",
+  CM: "Central midfield",
+  CAM: "Attacking midfield",
+  RM: "Right midfield",
+  LM: "Left midfield",
+  RW: "Right winger",
+  LW: "Left winger",
+  CF: "Centre forward",
+  ST: "Striker",
+  DEF: "All defenders",
+  MID: "All midfielders",
+  ATT: "All attackers",
+};
+
+/**
+ * The position filter, in the order a manager scans a squad: keeper, back line, middle, front.
+ *
+ * Every position the game fields is offered, including ones nobody in a given save plays. An empty
+ * result for "LWB" is a true answer - this career has no left wing-backs - and leaving the position
+ * out would be this screen deciding what the manager is allowed to ask. The three group entries are
+ * expanded by the search service, so "All defenders" covers wing-backs and full-backs together.
+ */
+const POSITION_GROUPS: { label: string; values: readonly string[] }[] = [
+  { label: "Any position", values: ["", "DEF", "MID", "ATT"] },
+  { label: "Goalkeeper", values: ["GK"] },
+  { label: "Defence", values: ["RB", "RWB", "CB", "LB", "LWB"] },
+  { label: "Midfield", values: ["CDM", "CM", "CAM", "RM", "LM"] },
+  { label: "Attack", values: ["RW", "LW", "CF", "ST"] },
 ];
 
 const BUDGET_PRESETS = [10_000_000, 25_000_000, 50_000_000, 100_000_000];
@@ -244,7 +277,7 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
   const headerLine = useMemo(() => {
     if (!result) return "";
     const parts = [
-      position ? POSITION_OPTIONS.find((o) => o.value === position)?.label ?? position : "All positions",
+      position ? POSITION_NAMES[position] ?? position : "All positions",
       result.weights.label,
       result.budget !== null ? `Budget ${formatMoney(result.budget)}` : "No budget set",
     ];
@@ -363,10 +396,14 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
                 onChange={(event) => setPosition(event.target.value)}
                 className="mt-1 w-full cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-[#E11D48] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
               >
-                {POSITION_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
+                {POSITION_GROUPS.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.values.map((value) => (
+                      <option key={value || "all"} value={value}>
+                        {value === "" ? "All positions" : `${value} — ${POSITION_NAMES[value]}`}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </label>
@@ -455,7 +492,7 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
                 <table className="w-full border-collapse text-left">
                   <thead className="sticky top-0 bg-white/95 backdrop-blur dark:bg-slate-900/95">
                     <tr className="border-b border-slate-200 dark:border-slate-800">
-                      {["Rank", "Player", "OVR", "POT", "Age", "Value", "Fits", ""].map((heading, index) => (
+                      {["Rank", "Player", "Pos", "OVR", "POT", "Age", "Value", "Fits", ""].map((heading, index) => (
                         <th
                           key={`${heading}-${index}`}
                           className="px-4 py-2 font-sub text-[9px] font-bold uppercase tracking-wider text-slate-400"
@@ -500,6 +537,14 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
                               </span>
                             </>
                           )}
+                        </td>
+                        {/* The save's own position for this player, not a best-fit guess: without it
+                            a row is a rating with no idea what you are looking at. */}
+                        <td
+                          className="px-4 py-2.5 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300"
+                          title={POSITION_NAMES[row.primaryPosition] ?? row.primaryPosition}
+                        >
+                          {row.primaryPosition}
                         </td>
                         <td className="px-4 py-2.5 font-heading text-xs text-[#E11D48] tabular-nums dark:text-[#FF8C7A]">
                           {row.overallRating ?? "—"}

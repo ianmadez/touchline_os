@@ -1,8 +1,8 @@
 import { assetStore } from "../platform/asset-store";
 import {
   buildTransferPackage,
-  CareerAlreadyPresentError,
   importTransferPackage,
+  PartialBackupError,
   TransferPackageError,
 } from "../services/career-transfer-service";
 import { failed, ok, type OperationResult } from "./types";
@@ -51,8 +51,9 @@ export async function exportCareerToFile(
 /**
  * Applies a backup the user chose. One-time and user-initiated.
  *
- * A malformed file is the user's problem to see (400), not an internal failure (500), so the two
- * are kept apart here rather than collapsed into one generic error.
+ * A malformed file is the user's problem to see (400) and a backup that cannot be applied without
+ * destroying what it does not carry is a conflict (409), not an internal failure (500), so the
+ * three are kept apart here rather than collapsed into one generic error.
  */
 export async function importCareerFromFile(payload: unknown): Promise<OperationResult<unknown>> {
   try {
@@ -63,7 +64,7 @@ export async function importCareerFromFile(payload: unknown): Promise<OperationR
     if (error instanceof TransferPackageError) {
       return failed(400, error.message);
     }
-    if (error instanceof CareerAlreadyPresentError) {
+    if (error instanceof PartialBackupError) {
       return failed(409, error.message);
     }
     return failed(500, (error as Error).message ?? "Import failed.");

@@ -608,9 +608,11 @@ export default function TouchlineApp() {
       );
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`);
+      const counts = (data.counts ?? {}) as Record<string, number>;
+      const rows = Object.values(counts).reduce((total, value) => total + value, 0);
       return {
         ok: true,
-        message: `Exported ${data.counts.snapshots} snapshot(s) and ${data.counts.careerEvents} event(s) to ${data.fileName} (${(data.sizeBytes / 1024).toFixed(1)} KB).`,
+        message: `Exported ${data.fileName} — ${data.counts.career_snapshots} snapshot(s), ${data.counts.career_events} event(s), ${rows.toLocaleString()} rows across ${Object.keys(counts).length} tables (${(data.sizeBytes / (1024 * 1024)).toFixed(1)} MB).`,
       };
     } catch (error) {
       return { ok: false, message: (error as Error).message };
@@ -647,13 +649,11 @@ export default function TouchlineApp() {
       }
 
       const counts = (data.imported ?? {}) as Record<string, number>;
-      const summary = Object.entries(counts)
-        .filter(([, value]) => value > 0)
-        .map(([table, value]) => `${value} ${table}`)
-        .join(", ");
+      const tables = Object.values(counts).filter((value) => value > 0).length;
+      const rows = Object.values(counts).reduce((total, value) => total + value, 0);
       return {
         ok: true,
-        message: `Imported ${data.careerId}${summary ? ` — ${summary}` : ""}.`,
+        message: `${data.replaced ? "Replaced" : "Imported"} ${data.careerId} — ${tables} tables, ${rows.toLocaleString()} rows.`,
       };
     } catch (error) {
       return { ok: false, message: (error as Error).message };
@@ -1195,6 +1195,7 @@ export default function TouchlineApp() {
             saveCandidate={saveCandidates[0] || null}
             noSaveDetected={saveScanComplete && saveCandidates.length === 0}
             onRescan={() => void loadSaveCandidates()}
+            saveSourceMode={saveSourceMode}
             onEnterPortal={() => {
               if (isOnboardingComplete) {
                 setHasEntered(true);

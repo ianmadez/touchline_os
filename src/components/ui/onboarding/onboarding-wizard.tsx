@@ -11,6 +11,67 @@ const FORMATION_CATEGORY_LABELS: Record<FormationDefinition["category"], string>
   "3-at-the-back": "3-Defender Backlines",
 };
 
+/** The folder each game keeps its career files in, as the Run dialog needs it written. */
+const SAVE_FOLDERS = [
+  { game: "EA SPORTS FC 26", path: "%LOCALAPPDATA%\\EA SPORTS FC 26\\settings" },
+  { game: "EA SPORTS FC 25", path: "%LOCALAPPDATA%\\EA SPORTS FC 25\\settings" },
+];
+
+/**
+ * A folder path that copies itself when clicked.
+ *
+ * The point is that nobody should have to retype a path with two backslash-escaped folders in it into
+ * a Run box, so the whole row is the control rather than a path with a button beside it.
+ */
+function CopyableSaveFolder({ game, path }: { game: string; path: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(path);
+      setState("copied");
+      window.setTimeout(() => setState("idle"), 2000);
+    } catch {
+      // A refused clipboard (an insecure origin, a denied permission) is worth saying out loud
+      // rather than showing a tick that would be a lie.
+      setState("failed");
+      window.setTimeout(() => setState("idle"), 4000);
+    }
+  };
+
+  return (
+    <div className="text-left">
+      <span className="block font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">
+        {game}
+      </span>
+      <button
+        type="button"
+        onClick={() => void copy()}
+        title={`Copy ${path}`}
+        className="inline-flex items-start gap-1.5 max-w-full text-left rounded-lg px-2 py-1 -ml-2 border border-transparent hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-950/60 transition-colors cursor-pointer group"
+      >
+        <code className="font-mono text-[11px] text-slate-800 dark:text-slate-200 break-all">
+          {path}
+        </code>
+        {state === "copied" ? (
+          <svg className="w-3.5 h-3.5 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+          </svg>
+        ) : (
+          <svg className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400 dark:text-slate-500 group-hover:text-[#E11D48] dark:group-hover:text-[#FF8C7A]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+        )}
+      </button>
+      {state === "failed" && (
+        <span className="block font-sub text-[10px] text-amber-600 dark:text-amber-400">
+          Could not copy — select the text above instead.
+        </span>
+      )}
+    </div>
+  );
+}
+
 export interface OnboardingSubmission {
   selectedSave: SaveCandidate;
   managerName: string;
@@ -257,6 +318,39 @@ export function OnboardingWizard({
                       : "Re-scan save folders"}
                 </button>
               )}
+            </div>
+          )}
+
+          {/* Only where a save still has to be found: once one is selected, this is just noise. */}
+          {saveCandidates.length === 0 && (
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+              <p className="font-sub text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200 text-left">
+                Can&rsquo;t find your save file?
+              </p>
+              <p className="font-sans text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed text-left">
+                Press{" "}
+                <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200">
+                  Windows
+                </kbd>{" "}
+                +{" "}
+                <kbd className="font-mono text-[10px] px-1.5 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-200">
+                  R
+                </kbd>
+                , paste one of these into the box and press Enter. Your career is the file named{" "}
+                <code className="font-mono text-[10px] text-slate-900 dark:text-slate-100">
+                  ManagerCareer…
+                </code>{" "}
+                inside the{" "}
+                <code className="font-mono text-[10px] text-slate-900 dark:text-slate-100">
+                  settings
+                </code>{" "}
+                folder that opens. Click a path to copy it.
+              </p>
+              <div className="space-y-2">
+                {SAVE_FOLDERS.map((folder) => (
+                  <CopyableSaveFolder key={folder.game} game={folder.game} path={folder.path} />
+                ))}
+              </div>
             </div>
           )}
 

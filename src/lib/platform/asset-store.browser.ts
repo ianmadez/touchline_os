@@ -1,9 +1,11 @@
 /**
  * Asset store for the browser build.
  *
- * Faces are switched off for v1. Nothing is fetched and nothing is cached: `player-face.tsx` already
- * renders an initials disc when there is no image, so a build with no face pipeline degrades on its
- * own. A cache in OPFS is a real feature and a later decision, not a prerequisite for shipping.
+ * Faces are cached in OPFS rather than in `public/faces/`, because a static export has no folder to
+ * write into at runtime. Which players have a face, which ids the game generated and what the CDN
+ * counts as a sprite all come from `face-source.ts`, so this build resolves exactly the same faces the
+ * local build does - and picks up a new signing the same way, because the sync runs this over the
+ * whole squad every time and only requests the ones it does not already hold.
  *
  * Exports become a download. A page cannot write to a folder the user chose without a save picker,
  * and a download is the one thing every browser already does - it also puts the file exactly where
@@ -11,17 +13,44 @@
  *
  * This module is a build-time switch point, substituted for `./asset-store` by the browser target.
  */
+import { eq } from "drizzle-orm";
+import { db } from "../db/client";
+import { players } from "../db/schema";
+import { cacheFaces } from "../services/face-source";
+import {
+  hasCachedFace,
+  listCachedFaces,
+  readCachedFace,
+  writeCachedFace,
+} from "./face-store.browser";
 import type { AssetStore } from "./types";
 
 export const assetStore: AssetStore = {
-  faceExists: async () => false,
-  readFace: async () => null,
-  writeFace: async () => {
-    // Faces are disabled; there is nowhere for an image to go.
-  },
-  listFaces: async () => [],
-  refreshSquadFaces: async () => {
-    // Deliberately empty. The sync treats this as presentation, exactly as the desktop build does.
+  faceExists: async (eaPlayerId) => hasCachedFace(eaPlayerId),
+  readFace: async (eaPlayerId) => readCachedFace(eaPlayerId),
+  writeFace: async (eaPlayerId, bytes) => writeCachedFace(eaPlayerId, bytes),
+  listFaces: async () => listCachedFaces(),
+
+  /**
+   * Caches a face for everyone on the books, skipping anyone already held.
+   *
+   * The `players` table only ever holds the manager's own squad and youth, so scoping to a career is
+   * the whole of the "squad and youth only" rule - there is no wider roster to reach into. Newgens are
+   * skipped before any request is made.
+   */
+  refreshSquadFaces: async (careerId) => {
+    const squad = await db
+      .select({ eaPlayerId: players.eaPlayerId })
+      .from(players)
+      .where(eq(players.careerId, careerId));
+
+    await cacheFaces(
+      squad.map((row) => row.eaPlayerId),
+      {
+        has: hasCachedFace,
+        write: writeCachedFace,
+      }
+    );
   },
 
   writeExport: async (fileName, contents) => {

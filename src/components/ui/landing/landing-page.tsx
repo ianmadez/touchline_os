@@ -10,6 +10,11 @@ interface LandingPageProps {
   /** True once a scan finished and found no career save. */
   noSaveDetected?: boolean;
   onRescan?: () => void;
+  /**
+   * How this runtime gets a save, so the status block describes the right action: a page cannot scan
+   * folders, and telling someone to re-scan them would describe a control that does not exist.
+   */
+  saveSourceMode?: "folders" | "picker";
 }
 
 export function LandingPage({
@@ -17,6 +22,7 @@ export function LandingPage({
   onEnterPortal,
   noSaveDetected = false,
   onRescan,
+  saveSourceMode = "folders",
 }: LandingPageProps) {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
 
@@ -102,15 +108,19 @@ export function LandingPage({
           <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-md mb-5 text-center space-y-2">
             <span className="font-sub text-xs text-slate-500 dark:text-slate-400 block">
               {noSaveDetected
-                ? "No EA SPORTS FC career save detected on this machine yet"
-                : "Scanning for EA SPORTS FC career saves..."}
+                ? saveSourceMode === "picker"
+                  ? "No save file chosen yet"
+                  : "No EA SPORTS FC career save detected on this machine yet"
+                : saveSourceMode === "picker"
+                  ? "Choose your EA SPORTS FC career save to begin"
+                  : "Scanning for EA SPORTS FC career saves..."}
             </span>
             {noSaveDetected && onRescan && (
               <button
                 onClick={onRescan}
                 className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 font-sub text-[11px] uppercase tracking-wider text-slate-600 dark:text-slate-300 hover:border-[#E11D48] hover:text-[#E11D48] dark:hover:text-[#FF8C7A] transition-all cursor-pointer"
               >
-                Re-scan save folders
+                {saveSourceMode === "picker" ? "Choose save file…" : "Re-scan save folders"}
               </button>
             )}
           </div>
