@@ -7,10 +7,11 @@ import {
   AiProvider,
   CurrencySymbol,
   DebriefFrequency,
-  RealismLevel,
+  normaliseRealismLevel,
   SyncTrigger,
   WageFormat,
 } from "../settings-vocabulary";
+import { normalisePlaystyle } from "../playstyles";
 
 // Re-exported so server-side callers keep a single import site for the settings vocabulary.
 export * from "../settings-vocabulary";
@@ -22,7 +23,11 @@ function normaliseSettings(row: typeof appSettings.$inferSelect): AppSettings {
     saveDirectory: row.saveDirectory ?? "",
     syncTrigger: row.syncTrigger as SyncTrigger,
     debriefFrequency: row.debriefFrequency as DebriefFrequency,
-    realismLevel: row.realismLevel as RealismLevel,
+    // Rows written before the ladder was collapsed still hold REALISTIC/BALANCED/CASUAL. They are
+    // normalised on read rather than migrated in place, so an old database needs no migration step and
+    // heals itself the first time the setting is saved.
+    realismLevel: normaliseRealismLevel(row.realismLevel),
+    playstyle: normalisePlaystyle(row.playstyle),
     currencySymbol: row.currencySymbol as CurrencySymbol,
     wageFormat: row.wageFormat as WageFormat,
     aiProvider: row.aiProvider as AiProvider,
@@ -77,6 +82,10 @@ export class SettingsService {
         ? { debriefFrequency: patch.debriefFrequency }
         : {}),
       ...(patch.realismLevel !== undefined ? { realismLevel: patch.realismLevel } : {}),
+      // Added to this list the moment the field existed, or the write is silently dropped: the patch
+      // carries it, this whitelist never applies it, and the API still returns 200. That is exactly
+      // the failure the comment above describes, and it happened again here.
+      ...(patch.playstyle !== undefined ? { playstyle: patch.playstyle } : {}),
       ...(patch.currencySymbol !== undefined ? { currencySymbol: patch.currencySymbol } : {}),
       ...(patch.wageFormat !== undefined ? { wageFormat: patch.wageFormat } : {}),
       ...(patch.aiProvider !== undefined ? { aiProvider: patch.aiProvider } : {}),

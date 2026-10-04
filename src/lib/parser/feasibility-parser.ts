@@ -28,10 +28,12 @@ import {
   type SaveSearchLocation,
   type SaveSlotKind,
   type SeasonHistoryRow,
+  type YouthProspectRow,
   type PresignedDeal,
   type SlotFixture,
   type SpikeCareerData,
   type SquadEntry,
+  type WorldPlayerEntry,
   type TableStat,
 } from "./interface";
 
@@ -76,6 +78,81 @@ const IDENTITY_TABLES = [
 ];
 
 const REFERENCE_TABLES = ["teams", "leagues", "leagueteamlinks"];
+
+/** Hard ceiling on the world-pool decode. The reference save declares 21,166, so this is headroom. */
+const WORLD_POOL_LIMIT = 30_000;
+
+/**
+ * The columns a world-pool row needs - search fields plus the full dossier.
+ *
+ * A `players` row carries 137 columns, most of them appearance (hair, tattoos, boot codes). Naming
+ * what is wanted keeps 21,166 row objects small enough to hand around, and makes the projection
+ * below impossible to fat-finger into reading a column that was never taken.
+ */
+const WORLD_PLAYER_FIELDS: readonly string[] = [
+  "playerid",
+  /**
+   * Read so the pool can be restricted to men's football AT DECODE TIME.
+   *
+   * This product has no women's career mode, so those rows are wasted pool space and noise in every
+   * ranking. Measured on the reference save before relying on it: `players.gender` is a clean split
+   * (0 x 18,932, 1 x 2,234), and it agrees with two independent flags - `teams.gender` (1 for
+   * "Canada Women", "England Women") and `leagues.iswomencompetition` (1 for England WSL,
+   * Germany Frauen-Bundesliga, France Division 1 Feminine, USA NWSL, Spain Liga F Femenina,
+   * International Women, Rest of World Women).
+   *
+   * Worth knowing WHY this matters more than the row count suggests: women's clubs average 74 OVR
+   * against 68 for men's, so those 2,234 players dominated the top of every strategy's ranking while
+   * also being disproportionately unnamed. Excluding them fixes a ranking bias, not just noise.
+   */
+  "gender",
+  "overallrating",
+  "potential",
+  "birthdate",
+  "preferredposition1",
+  "contractvaliduntil",
+  "nationality",
+  "height",
+  "weight",
+  "preferredfoot",
+  "weakfootabilitytypecode",
+  "skillmoves",
+  "internationalrep",
+  "acceleration",
+  "sprintspeed",
+  "positioning",
+  "finishing",
+  "shotpower",
+  "longshots",
+  "volleys",
+  "penalties",
+  "vision",
+  "crossing",
+  "freekickaccuracy",
+  "shortpassing",
+  "longpassing",
+  "curve",
+  "agility",
+  "balance",
+  "reactions",
+  "ballcontrol",
+  "dribbling",
+  "composure",
+  "interceptions",
+  "headingaccuracy",
+  "defspe",
+  "standingtackle",
+  "slidingtackle",
+  "jumping",
+  "stamina",
+  "strength",
+  "aggression",
+  "gkdiving",
+  "gkhandling",
+  "gkkicking",
+  "gkpositioning",
+  "gkreflexes",
+];
 const SQUAD_TABLES = [
   "teamplayerlinks",
   "career_playercontract",
@@ -464,13 +541,25 @@ export function decodeRows(
   block: Buffer,
   header: TableHeader,
   meta: DbMeta,
-  options: { limit?: number | null; filter?: (row: Row) => boolean } = {}
+  options: {
+    limit?: number | null;
+    filter?: (row: Row) => boolean;
+    /**
+     * Write only these columns.
+     *
+     * Every column is still READ: the integer fields share a running bit-carry, so skipping a read
+     * would corrupt every field after it. The saving is a narrower row object, which is what matters
+     * at twenty thousand rows (137 keys -> ~45).
+     */
+    fields?: readonly string[];
+  } = {}
 ): RowRead {
   const tableName = header.tableName;
   if (tableName === null) throw new Error("cannot decode an unnamed table");
 
   const limit = options.limit ?? null;
   const filter = options.filter;
+  const keep = options.fields ? new Set(options.fields) : null;
   const fields = header.fields;
   const rangeLow = fields.map((f) => (f.known ? meta.fieldRange.get(tableName + f.key) ?? 0 : 0));
 
@@ -545,7 +634,7 @@ export function decodeRows(
           break;
       }
 
-      row[field.key] = value;
+      if (keep === null || keep.has(field.key)) row[field.key] = value;
     }
 
     reader.position = recordStart + header.recordSize;
@@ -1041,7 +1130,19 @@ export class FeasibilitySaveParser implements CareerDataProvider {
 
     const decodeTable = (
       tableName: string,
-      options: { limit?: number | null; filter?: (row: Row) => boolean } = {}
+      options: {
+        limit?: number | null;
+        filter?: (row: Row) => boolean;
+        fields?: readonly string[];
+        /**
+         * Take the rows and register NOTHING.
+         *
+         * `extractedTables` is folded into the sync payload hash, so a 21,166-row pool landing in it
+         * would make every sync serialise megabytes just to decide whether the save changed. The pool
+         * is handed back instead, and never stored there.
+         */
+        unregistered?: boolean;
+      } = {}
     ): Row[] => {
       const entries = tableIndex.get(tableName);
       if (!entries || meta === null) return [];
@@ -1059,8 +1160,10 @@ export class FeasibilitySaveParser implements CareerDataProvider {
           });
         }
       }
-      extractedTables[tableName] = rows;
-      decodedTables[tableName] = rows.length;
+      if (!options.unregistered) {
+        extractedTables[tableName] = rows;
+        decodedTables[tableName] = rows.length;
+      }
       return rows;
     };
 
@@ -1213,6 +1316,32 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       if (id !== null) squadPlayerIds.add(id);
     }
 
+    // ---- The academy ---------------------------------------------------------------------------
+    //
+    // Academy players are NOT in `teamplayerlinks`: they are unpromoted, so no row links them to the
+    // first team. Their ids also sit in a generated range (460xxx in the reference save) that appears
+    // in neither the squad nor the world pool. That is why the Youth tab could previously show the
+    // world squad filtered by age but never the actual academy - nothing had read this table, and
+    // nothing had widened the `players` decode to cover the ids it names. The ids are collected here
+    // so the decode below can include them.
+    const youthRows = decodeTable("career_youthplayers", {
+      limit: Math.max(this.options.rowLimit, 300),
+    });
+    const youthIds = new Set<number>();
+    for (const row of youthRows) {
+      const id = num(row, "playerid");
+      if (id !== null) youthIds.add(id);
+    }
+
+    const youthHistoryRows = decodeTable("career_youthplayerhistory", {
+      limit: Math.max(this.options.rowLimit, 600),
+    });
+    const youthHistoryByPlayer = new Map<number, Row>();
+    for (const row of youthHistoryRows) {
+      const id = num(row, "playerid");
+      if (id !== null && !youthHistoryByPlayer.has(id)) youthHistoryByPlayer.set(id, row);
+    }
+
     const contracts = decodeTable("career_playercontract", {
       limit: Math.max(this.options.rowLimit * 2, 120),
       filter: (row) => {
@@ -1248,7 +1377,10 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       limit: Math.max(squadPlayerIds.size * 10, 500),
       filter: (row) => {
         const id = num(row, "playerid");
-        return id !== null && squadPlayerIds.has(id);
+        if (id === null) return false;
+        // Academy ids are included so a prospect has a name, a rating and a position. They never reach
+        // `squadSample` - that list is built from the team-sheet links, not from this one.
+        return squadPlayerIds.has(id) || youthIds.has(id);
       },
     });
 
@@ -1344,6 +1476,232 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         avatarPomId: num(player, "avatarpomid"),
       };
     });
+
+    /**
+     * The unpromoted academy, resolved the same way a squad player is and collapsed to observed ranges.
+     *
+     * Name resolution follows `squadSample` exactly - edited names first, then the imported name
+     * table - because an academy player is still a player and a second naming path would be a second
+     * set of bugs. A prospect whose name the save does not hold keeps `null` rather than being given a
+     * placeholder: `#460719` means nothing to a manager, and the sync stores the real reason instead.
+     *
+     * The academy table describes some prospects more than once and the rows disagree, with nothing in
+     * the table to order them by. Every disagreeing field is therefore collapsed to the range observed
+     * across his assessments rather than one row being picked as authoritative - picking would assert a
+     * certainty the save does not carry. `assessmentCount` travels with the range so the UI can say how
+     * many readings it rests on.
+     *
+     * Everything here is a SAVE fact. Nothing is derived or estimated; the range IS the save data.
+     */
+    const youthRowsByPlayer = new Map<number, Row[]>();
+    for (const row of youthRows) {
+      const id = num(row, "playerid");
+      if (id === null) continue;
+      const list = youthRowsByPlayer.get(id) ?? [];
+      list.push(row);
+      youthRowsByPlayer.set(id, list);
+    }
+
+    const observedRange = (rows: Row[], field: string): [number | null, number | null] => {
+      const values = rows
+        .map((row) => num(row, field))
+        .filter((value): value is number => value !== null);
+      if (values.length === 0) return [null, null];
+      return [Math.min(...values), Math.max(...values)];
+    };
+
+    const youthProspects: YouthProspectRow[] = [...youthRowsByPlayer.entries()].map(
+      ([playerId, rows]) => {
+        const player = playerById.get(playerId);
+        const history = youthHistoryByPlayer.get(playerId);
+
+        let name = editedByPlayer.get(playerId) ?? null;
+        let nameSource = name ? "edited-in-save" : "unresolved";
+        if (!name) {
+          const imported = this.names.get(playerId);
+          if (imported) {
+            name = imported;
+            nameSource = "imported-name-table";
+          }
+        }
+
+        // `-1` is the game's "no preference" sentinel, so it is filtered here rather than accepted by
+        // a `??` chain and mapped to UNKNOWN - the same rule `squadSample` applies.
+        const preferred = num(player, "preferredposition1");
+        const rawPosCode = preferred !== null && preferred >= 0 ? preferred : null;
+        const birthdate = num(player, "birthdate");
+
+        const [tierLow, tierHigh] = observedRange(rows, "playertier");
+        const [swingLowMin, swingLowMax] = observedRange(rows, "swinglowpotential");
+        const [varianceMin, varianceMax] = observedRange(rows, "potentialvariance");
+        const tenure = observedRange(rows, "monthsinsquad");
+
+        return {
+          playerId,
+          name,
+          nameSource,
+          positionCode: rawPosCode,
+          primaryPosition: positionCodeToRole(rawPosCode),
+          age: calculateAgeFromBirthdate(birthdate, num(player, "age"), ageReferenceDate),
+          birthdate,
+          overallRating: num(player, "overallrating"),
+          potentialRating: num(player, "potential"),
+          tierLow,
+          tierHigh,
+          swingLowMin,
+          swingLowMax,
+          varianceMin,
+          varianceMax,
+          // Tenure only grows, so the highest reading is the best evidence; a range on it would imply he
+          // might have been there for less time than we have already seen.
+          monthsInSquad: tenure[1],
+          assessmentCount: rows.length,
+          goals: num(history, "goals"),
+          appearances: num(history, "appearances"),
+        };
+      }
+    );
+
+    // ------------------------------------------------------------------ //
+    // World player pool - taken UNREGISTERED and thrown away after use.    //
+    // ------------------------------------------------------------------ //
+    //
+    // `players` above is squad-filtered, so the other 21,000-odd professionals in the save are never
+    // read. Scouting needs them. Three things shape how they are taken:
+    //
+    //  1. Not registered in `extractedTables` (see `unregistered`) - that object feeds the payload
+    //     hash, and 21k rows would make hashing the expensive part of every sync.
+    //  2. A field allowlist, so a pool row is ~45 keys instead of 137.
+    //  3. **No wages, deliberately.** `career_playercontract` declares 42 rows in this save - our own
+    //     squad only - so a world player's value cannot be read and must be modelled from rating, age
+    //     and potential. Wage data is not blended in anywhere: two confidence levels in one column is
+    //     how a blended-provenance bug starts.
+    const worldLinks = decodeTable("teamplayerlinks", {
+      limit: 30_000,
+      unregistered: true,
+      fields: ["playerid", "teamid"],
+    });
+
+    const teamNameById = new Map<number, string>();
+    for (const team of teams) {
+      const id = num(team, "teamid");
+      const name = str(team, "teamname");
+      if (id !== null && name && !teamNameById.has(id)) teamNameById.set(id, name);
+    }
+
+    // One club per player, FIRST link wins. This save declares 22,240 links for 21,166 players, so
+    // some hold more than one - a loan or a duplicate entry. Taking the last would let a player's
+    // club silently change between syncs without the save changing.
+    const clubByPlayer = new Map<number, number>();
+    for (const link of worldLinks) {
+      const playerId = num(link, "playerid");
+      const teamId = num(link, "teamid");
+      if (playerId === null || teamId === null) continue;
+      if (!clubByPlayer.has(playerId)) clubByPlayer.set(playerId, teamId);
+    }
+
+    const worldRows = decodeTable("players", {
+      limit: WORLD_POOL_LIMIT,
+      unregistered: true,
+      fields: WORLD_PLAYER_FIELDS,
+      // Men's football only, filtered as the rows are read rather than afterwards. Any non-zero
+      // gender is dropped, so a future third value cannot leak into the pool either.
+      filter: (row) => Number(row.gender ?? 0) === 0,
+    });
+
+    // The save can carry the same player in more than one database block, so a raw decode contains
+    // duplicates - and the unique index on (career, eaPlayerId) would reject the whole insert. Keep
+    // the FIRST occurrence: the rows agree on every field the pool reads, and taking the first is what
+    // `playerById` already does for the squad.
+    const seenWorldPlayers = new Set<number>();
+    const worldPlayers: WorldPlayerEntry[] = [];
+    for (const row of worldRows) {
+      const playerId = num(row, "playerid") ?? -1;
+      if (playerId < 0 || seenWorldPlayers.has(playerId)) continue;
+      seenWorldPlayers.add(playerId);
+
+      const birthdate = num(row, "birthdate");
+      const rawPosCode = num(row, "preferredposition1");
+      const position = rawPosCode !== null && rawPosCode >= 0 ? rawPosCode : null;
+
+      let name = editedByPlayer.get(playerId) ?? null;
+      let nameSource: SquadEntry["nameSource"] = name ? "edited-in-save" : "unresolved";
+      if (!name) {
+        const imported = this.names.get(playerId);
+        if (imported) {
+          name = imported;
+          nameSource = "imported-name-table";
+        }
+      }
+
+      const clubId = clubByPlayer.get(playerId) ?? null;
+      worldPlayers.push({
+        playerId,
+        name: name ?? `#${playerId}`,
+        nameSource,
+        clubId,
+        clubName: clubId !== null ? teamNameById.get(clubId) ?? null : null,
+        positionCode: position,
+        primaryPosition: positionCodeToRole(position),
+        overall: num(row, "overallrating"),
+        potential: num(row, "potential"),
+        age: calculateAgeFromBirthdate(birthdate, null, ageReferenceDate),
+        birthdate,
+        heightCm: num(row, "height"),
+        weightKg: num(row, "weight"),
+        nationalityId: num(row, "nationality"),
+        contractValidUntil: num(row, "contractvaliduntil"),
+        preferredFoot: num(row, "preferredfoot"),
+        weakFoot: num(row, "weakfootabilitytypecode"),
+        skillMoves: num(row, "skillmoves"),
+        internationalRep: num(row, "internationalrep"),
+        pace: { acceleration: num(row, "acceleration"), sprintSpeed: num(row, "sprintspeed") },
+        shooting: {
+          positioning: num(row, "positioning"),
+          finishing: num(row, "finishing"),
+          shotPower: num(row, "shotpower"),
+          longShots: num(row, "longshots"),
+          volleys: num(row, "volleys"),
+          penalties: num(row, "penalties"),
+        },
+        passing: {
+          vision: num(row, "vision"),
+          crossing: num(row, "crossing"),
+          freeKickAccuracy: num(row, "freekickaccuracy"),
+          shortPassing: num(row, "shortpassing"),
+          longPassing: num(row, "longpassing"),
+          curve: num(row, "curve"),
+        },
+        dribbling: {
+          agility: num(row, "agility"),
+          balance: num(row, "balance"),
+          reactions: num(row, "reactions"),
+          ballControl: num(row, "ballcontrol"),
+          dribbling: num(row, "dribbling"),
+          composure: num(row, "composure"),
+        },
+        defending: {
+          interceptions: num(row, "interceptions"),
+          headingAccuracy: num(row, "headingaccuracy"),
+          defensiveAwareness: num(row, "defspe"),
+          standingTackle: num(row, "standingtackle"),
+          slidingTackle: num(row, "slidingtackle"),
+        },
+        physical: {
+          jumping: num(row, "jumping"),
+          stamina: num(row, "stamina"),
+          strength: num(row, "strength"),
+          aggression: num(row, "aggression"),
+        },
+        goalkeeping: {
+          diving: num(row, "gkdiving"),
+          handling: num(row, "gkhandling"),
+          kicking: num(row, "gkkicking"),
+          positioning: num(row, "gkpositioning"),
+          reflexes: num(row, "gkreflexes"),
+        },
+      });
+    }
 
     const rated = squadSample.filter((entry) => entry.overall !== null);
     facts.push({
@@ -1530,6 +1888,8 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       decodedTables,
       facts,
       squadSample,
+      youthProspects,
+      worldPlayers,
       blobSections: sections,
       fixtures,
       matchResults: results,

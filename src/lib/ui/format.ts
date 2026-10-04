@@ -22,3 +22,13 @@ export function formatMoney(value: number, symbol = "£"): string {
 export function formatMoneyExact(value: number, symbol = "£"): string {
   return `${symbol}${Math.round(value).toLocaleString()}`;
 }
+
+/**
+ * The save stores a currency CODE, not a glyph. One mapping, here, so the finance screen, the
+ * scouting board and the transfers desk cannot disagree about what a dollar looks like.
+ */
+export function currencySymbolFor(code: string | null | undefined): string {
+  if (code === "EUR") return "€";
+  if (code === "USD") return "$";
+  return "£";
+}

@@ -5,30 +5,33 @@ import { Navbar } from "@/components/ui/nav/navbar";
 import { LandingPage } from "@/components/ui/landing/landing-page";
 import { Footer } from "@/components/ui/landing/footer";
 import { OnboardingWizard, OnboardingSubmission } from "@/components/ui/onboarding/onboarding-wizard";
-import { SquadTable } from "@/components/ui/squad/squad-table";
+import { SquadView } from "@/components/ui/squad/squad-view";
 import { PlayerDrawer } from "@/components/ui/squad/player-drawer";
 import { LandingFooter } from "@/components/ui/landing/landing-footer";
 import { Pitch2D } from "@/components/ui/squad/pitch-2d";
 import { DashboardView } from "@/components/ui/dashboard/dashboard-view";
+import { GroupDebriefPrompt } from "@/components/ui/dashboard/group-debrief-prompt";
 import { SeasonView } from "@/components/ui/season/season-view";
+import type { SeasonSubTab } from "@/lib/ui/labels";
 import { StorylineEvidence } from "@/components/ui/dashboard/storyline-evidence";
 import { DebriefView } from "@/components/ui/debrief/debrief-view";
+import { FinanceView } from "@/components/ui/finance/finance-view";
 import { SettingsView, Diagnostics, ActionResult } from "@/components/ui/settings/settings-view";
 import { SquadTableSkeleton } from "@/components/ui/skeleton";
 import type { SaveCandidate } from "@/lib/parser/interface";
 import type { EnrichedPlayer } from "@/lib/services/squad-service";
-import type { PitchSlotAssignment } from "@/lib/services/tactics-service";
+import type { PitchSlotAssignment, TacticalSystemState } from "@/lib/services/tactics-service";
 import type { CareerHydrationPayload, LeagueTeamSummary } from "@/lib/services/career-service";
 import type { SeasonState } from "@/lib/services/season-service";
 import type { PlayerValuation } from "@/lib/services/value-service";
-import { eventLabel } from "@/lib/ui/labels";
-import { formatEventDate, provenanceLabel, summariseEvent } from "@/lib/ui/events";
+import { currencySymbolFor } from "@/lib/ui/format";
 import type { ParsedCareerEvent } from "@/lib/services/event-service";
 import type { StorylineItem } from "@/lib/events/types";
 import { LegalModal, LegalDocType } from "@/components/ui/landing/legal-modal";
 import {
   AppTab,
   DEFAULT_SESSION,
+  TAB_RESTORE_REDIRECT,
   ThemeMode,
   applyThemeClass,
   clearSession,
@@ -80,6 +83,11 @@ export default function TouchlineApp() {
   // session persistence), while the visible panel swaps one fade later so a tab change reads as
   // fade-out -> swap -> fade-in instead of an instant replacement.
   const [displayedTab, setDisplayedTab] = useState<AppTab>("LANDING");
+  //
+  // Set when something OUTSIDE the Season screen sends the manager to a particular inner tab - the
+  // board objective thread's card. Cleared on every other navigation, so it applies to that arrival
+  // and does not silently decide the Season tab for the rest of the session.
+  const [seasonFocus, setSeasonFocus] = useState<SeasonSubTab | null>(null);
   const [tabPhase, setTabPhase] = useState<"in" | "out">("in");
   const tabSwapTimeout = useRef<number | null>(null);
 
@@ -100,7 +108,11 @@ export default function TouchlineApp() {
    */
   const switchTab = (next: AppTab) => {
     // An onboarded manager must never be routed back into the setup wizard.
-    const effectiveNext = next === "PORTAL" && isOnboardingComplete ? "DASHBOARD" : next;
+    const portalResolved = next === "PORTAL" && isOnboardingComplete ? "DASHBOARD" : next;
+    // A tab that has since been folded into another section must land on its new home - this covers
+    // the navbar, a dashboard link and a restored session with one rule, so a stale destination can
+    // never leave the manager staring at an empty screen.
+    const effectiveNext = TAB_RESTORE_REDIRECT[portalResolved] ?? portalResolved;
 
     setActiveTab(effectiveNext);
     // LANDING and PORTAL sit outside the app shell, so arriving there re-arms the entry splash.
@@ -146,6 +158,8 @@ export default function TouchlineApp() {
   const [selectedStorylineId, setSelectedStorylineId] = useState<string | null>(null);
   const [tacticsSlots, setTacticsSlots] = useState<PitchSlotAssignment[]>([]);
   const [formationId, setFormationId] = useState<string>(DEFAULT_SESSION.formationId);
+  const [formations, setFormations] = useState<TacticalSystemState[]>([]);
+  const [activeFormationLabel, setActiveFormationLabel] = useState<string>("Primary");
   const [activeLegalDoc, setActiveLegalDoc] = useState<LegalDocType>(null);
   const [theme, setTheme] = useState<ThemeMode>(DEFAULT_SESSION.theme);
   // The theme actually painted. `theme` may be "system", so anything visual (the navbar icon in
@@ -197,6 +211,18 @@ export default function TouchlineApp() {
     if (typeof payload.formationId === "string" && payload.formationId) {
       setFormationId(payload.formationId);
     }
+    const incomingFormations = payload.formations;
+    if (Array.isArray(incomingFormations) && incomingFormations.length > 0) {
+      setFormations(incomingFormations);
+      // Keep the tab the manager is already on when it still exists, so a save does not yank them
+      // back to the current XI; otherwise fall back to whichever formation IS the current XI.
+      setActiveFormationLabel((current) =>
+        incomingFormations.some((formation) => formation.label === current)
+          ? current
+          : (incomingFormations.find((formation) => formation.isDefault) ?? incomingFormations[0])
+              .label
+      );
+    }
     if (typeof payload.careerId === "string" && payload.careerId) {
       setCareerId(payload.careerId);
     }
@@ -214,7 +240,23 @@ export default function TouchlineApp() {
       season: payload.season ?? prev.season,
       inGameDate: payload.inGameDate ?? prev.inGameDate,
     }));
-  }, []);
+    // State setters are stable for the lifetime of the component, so declaring them keeps this
+    // callback's identity stable (the boot effects depend on it) while satisfying the React
+    // Compiler's rule that every inferred dependency must be declared.
+  }, [
+    setSquad,
+    setTacticsSlots,
+    setTimeline,
+    setStorylines,
+    setLeagueTeams,
+    setSeasonState,
+    setValuations,
+    setFormationId,
+    setFormations,
+    setActiveFormationLabel,
+    setCareerId,
+    setCareerInfo,
+  ]);
 
   const loadSaveCandidates = useCallback(async () => {
     setSaveScanComplete(false);
@@ -239,7 +281,8 @@ export default function TouchlineApp() {
     } finally {
       setSaveScanComplete(true);
     }
-  }, []);
+    // Setters are stable, so declaring them keeps this callback's identity stable.
+  }, [setSaveCandidates, setSaveScanComplete, setAppError]);
 
   // Restore persisted session and prevent re-entering onboarding wizard if career exists
   useEffect(() => {
@@ -280,12 +323,14 @@ export default function TouchlineApp() {
         if (res.ok && data.success) {
           applyHydration(data);
           setIsOnboardingComplete(true);
-          // Restore the stored active tab if valid for the app shell, defaulting to DASHBOARD.
+          // Restore the stored active tab if valid for the app shell, defaulting to DASHBOARD. A
+          // tab that has since been folded into another section (Timeline -> Settings) is rewritten
+          // to its new home rather than restored to a slot that no longer exists.
           const restoredTab =
             session?.activeTab &&
             session.activeTab !== "LANDING" &&
             session.activeTab !== "PORTAL"
-              ? session.activeTab
+              ? (TAB_RESTORE_REDIRECT[session.activeTab] ?? session.activeTab)
               : "DASHBOARD";
           setActiveTab(restoredTab);
           setDisplayedTab(restoredTab);
@@ -511,7 +556,7 @@ export default function TouchlineApp() {
     } catch (error) {
       setDiagnosticsError((error as Error).message);
     }
-  }, []);
+  }, [setDiagnostics, setDiagnosticsError]);
 
   // Storage numbers change with every sync, so re-read them whenever Settings becomes visible.
   useEffect(() => {
@@ -608,7 +653,6 @@ export default function TouchlineApp() {
             managerName: data.managerName,
             nationality: data.nationality,
             tacticalPhilosophy: data.tacticalPhilosophy,
-            realismLevel: data.realismLevel,
             favFormations: data.favFormations,
             managerObjective: data.managerObjective,
             boardObjective: data.boardObjective,
@@ -626,6 +670,18 @@ export default function TouchlineApp() {
       }
 
       applyHydration(payload);
+
+      // Realism is app-level settings rather than anything the save carries, so it is written through
+      // the settings endpoint instead of riding along in the parse payload. Deliberately after a
+      // successful parse: a failed parse should not leave a preference behind from an onboarding that
+      // never completed. Failure is swallowed because a settings write is not worth failing the
+      // onboarding over - the manager can still set it in Settings.
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ realismLevel: data.realismLevel }),
+      }).catch(() => null);
+
       setIsOnboardingComplete(true);
       setActiveTab("DASHBOARD");
       setDisplayedTab("DASHBOARD");
@@ -709,9 +765,26 @@ export default function TouchlineApp() {
   const handleCloseStoryline = useCallback(() => {
     setSelectedStorylineId(null);
     patchSession({ openStorylineId: null });
-  }, []);
+  }, [setSelectedStorylineId]);
 
-  const handleSaveTactics = (nextFormationId: string, nextSlots: PitchSlotAssignment[]) => {
+  /**
+   * Saves the slots of ONE formation. `label` selects which, so editing a Plan B can never touch the
+   * current XI - or any other formation.
+   */
+  const handleSaveTactics = (
+    label: string,
+    nextFormationId: string,
+    nextSlots: PitchSlotAssignment[]
+  ) => {
+    // Optimistic locally: the pitch must not flicker back to the stored shape while the write is in
+    // flight. Only the formation being edited moves.
+    setFormations((prev) =>
+      prev.map((formation) =>
+        formation.label === label
+          ? { ...formation, formationName: nextFormationId, slots: nextSlots }
+          : formation
+      )
+    );
     setFormationId(nextFormationId);
     setTacticsSlots(nextSlots);
 
@@ -722,11 +795,49 @@ export default function TouchlineApp() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         careerId: targetCareerId,
-        tactics: { formationId: nextFormationId, slots: nextSlots },
+        tactics: { formationId: nextFormationId, slots: nextSlots, label },
       }),
     })
       .then((res) => {
         if (!res.ok) throw new Error(`Saving tactics failed (HTTP ${res.status}).`);
+      })
+      .catch((error: Error) => setAppError(error.message));
+  };
+
+  /** Formation library actions. The response is the same hydration shape every other write returns. */
+  const handleFormationAction = (
+    action: "CREATE" | "RENAME" | "DELETE" | "SET_DEFAULT",
+    label: string,
+    extra?: { nextLabel?: string; formationId?: string }
+  ) => {
+    const targetCareerId = careerId;
+    if (!targetCareerId) return;
+    setAppError(null);
+    void fetch("/api/career", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        careerId: targetCareerId,
+        formations: {
+          action,
+          label,
+          nextLabel: extra?.nextLabel,
+          formationId: extra?.formationId,
+        },
+      }),
+    })
+      .then(async (res) => {
+        const data = (await res.json()) as Partial<CareerHydrationPayload> & {
+          success?: boolean;
+          error?: string;
+        };
+        if (!res.ok || !data.success) {
+          throw new Error(data.error ?? `Formation update failed (HTTP ${res.status}).`);
+        }
+        applyHydration(data);
+        // A rename moves the label out from under the active tab, and promoting sets the XI.
+        if (action === "RENAME" && extra?.nextLabel) setActiveFormationLabel(extra.nextLabel);
+        if (action === "SET_DEFAULT") setActiveFormationLabel(label);
       })
       .catch((error: Error) => setAppError(error.message));
   };
@@ -736,6 +847,25 @@ export default function TouchlineApp() {
   // the same commit: the phase resolves once, and only then is either chosen. Previously the
   // dashboard painted in full - entrance animation and all - one commit before the splash covered it.
   const splashVisible = bootPhase === "app" && !hasEntered;
+
+  // Back-compat: a career with no saved formation rows still hydrates a synthetic default (via
+  // `getTacticalSystem`), so there is always exactly one formation to show before anything has been
+  // saved; the first write then persists it under its label.
+  const formationsForUi: TacticalSystemState[] =
+    formations.length > 0
+      ? formations
+      : [
+          {
+            careerId: careerId ?? "",
+            label: "Primary",
+            formationName: formationId,
+            isDefault: true,
+            slots: tacticsSlots,
+          },
+        ];
+  const activeFormation =
+    formationsForUi.find((formation) => formation.label === activeFormationLabel) ??
+    formationsForUi[0];
 
   // Landing and the setup wizard are marketing and onboarding surfaces rather than app pages, so
   // they sit outside the app shell's gutter and headroom treatment.
@@ -1029,7 +1159,15 @@ export default function TouchlineApp() {
         )}
 
         {displayedTab === "DASHBOARD" && (
-          <DashboardView
+          <div>
+            <GroupDebriefPrompt
+              careerId={careerId}
+              seasonNumber={seasonState?.outlook?.seasonNumber ?? null}
+              matchesPlayed={seasonState?.progressSeries?.at(-1)?.matchday ?? 0}
+              enabled={appSettings?.debriefFrequency === "EVERY_5_MATCHES"}
+              onOpenDebrief={() => switchTab("DEBRIEF")}
+            />
+            <DashboardView
             careerId={careerId ?? ""}
             managerName={careerInfo.managerName}
             clubName={careerInfo.clubName}
@@ -1039,14 +1177,18 @@ export default function TouchlineApp() {
             recentEvents={timeline}
             storylines={storylines}
             seasonState={seasonState}
-            tacticsSlots={tacticsSlots}
-            onNavigateTab={(tab) => switchTab(tab)}
+            tacticsSlots={activeFormation?.slots ?? tacticsSlots}
+            onNavigateTab={(tab, seasonSubTab) => {
+              setSeasonFocus(seasonSubTab ?? null);
+              switchTab(tab);
+            }}
             onSelectPlayer={(player) => setSelectedPlayer(player)}
             onOpenStoryline={(storylineId) => {
               setSelectedStorylineId(storylineId);
               patchSession({ openStorylineId: storylineId });
             }}
-          />
+            />
+          </div>
         )}
 
         {displayedTab === "SEASON" && (
@@ -1054,6 +1196,7 @@ export default function TouchlineApp() {
             careerId={careerId ?? ""}
             seasonState={seasonState}
             onSeasonChange={setSeasonState}
+            focusSubTab={seasonFocus}
           />
         )}
 
@@ -1062,9 +1205,11 @@ export default function TouchlineApp() {
             {isLoading || isRestoring ? (
               <SquadTableSkeleton />
             ) : (
-              <SquadTable
+              <SquadView
+                careerId={careerId}
                 players={squad}
                 onSelectPlayer={(player) => setSelectedPlayer(player)}
+                currencySymbol={currencySymbolFor(appSettings?.currencySymbol)}
               />
             )}
           </div>
@@ -1072,10 +1217,13 @@ export default function TouchlineApp() {
 
         {displayedTab === "TACTICS" && (
           <Pitch2D
+            key={activeFormationLabel}
             squad={squad}
-            currentFormationId={formationId}
-            initialSlots={tacticsSlots}
+            formations={formationsForUi}
+            activeFormationLabel={activeFormationLabel}
+            onSelectFormation={setActiveFormationLabel}
             onSaveTactics={handleSaveTactics}
+            onFormationAction={handleFormationAction}
           />
         )}
 
@@ -1087,6 +1235,7 @@ export default function TouchlineApp() {
             leagueTeams={leagueTeams}
             clubName={careerInfo.clubName}
             inGameDate={careerInfo.inGameDate}
+            seasonNumber={seasonState?.outlook?.seasonNumber ?? null}
             onDebriefSubmitted={() => {
               if (careerId) {
                 fetch(`/api/career?careerId=${encodeURIComponent(careerId)}`)
@@ -1099,44 +1248,7 @@ export default function TouchlineApp() {
           />
         )}
 
-        {displayedTab === "TIMELINE" && (
-          <div className="max-w-3xl mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xl transition-colors">
-            <h2 className="font-heading text-lg text-slate-900 dark:text-slate-100 uppercase border-b border-slate-200 dark:border-slate-800 pb-3 mb-4">
-              Career Timeline
-            </h2>
-
-            {timeline.length === 0 ? (
-              <p className="font-sans text-xs text-slate-600 dark:text-slate-300">
-                Nothing logged yet. Sync your save and the things that change - signings, ratings,
-                budgets - will show up here.
-              </p>
-            ) : (
-              <ol className="space-y-3">
-                {timeline.map((event) => (
-                  <li
-                    key={event.id}
-                    className="border-l-2 border-[#E11D48] pl-4 py-1 space-y-0.5"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-heading text-xs text-slate-900 dark:text-slate-100 uppercase tracking-wide">
-                        {eventLabel(event.eventType)}
-                      </span>
-                      <span className="font-sub text-[10px] px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                        {provenanceLabel(event.source)}
-                      </span>
-                    </div>
-                    <p className="font-sans text-xs text-slate-700 dark:text-slate-300">
-                      {summariseEvent(event)}
-                    </p>
-                    <p className="font-sub text-[10px] text-slate-400 tabular-nums">
-                      {formatEventDate(event.timestamp)}
-                    </p>
-                  </li>
-                ))}
-              </ol>
-            )}
-          </div>
-        )}
+        {displayedTab === "FINANCE" && <FinanceView careerId={careerId} />}
 
         {displayedTab === "SETTINGS" && (
           <SettingsView
@@ -1146,6 +1258,7 @@ export default function TouchlineApp() {
             diagnostics={diagnostics}
             diagnosticsError={diagnosticsError}
             themeMode={theme}
+            timeline={timeline}
             onUpdateSetting={(field, patch) => void handleUpdateSetting(field, patch)}
             onSetTheme={handleSetTheme}
             onRefreshDiagnostics={() => void refreshDiagnostics()}

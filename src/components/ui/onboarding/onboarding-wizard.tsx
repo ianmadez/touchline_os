@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { SaveCandidate } from "@/lib/parser/interface";
 import { FORMATIONS_REGISTRY, FormationDefinition } from "@/lib/tactics/formations";
+import { labelFor, REALISM_HINTS, REALISM_LEVELS, RealismLevel } from "@/lib/settings-vocabulary";
 
 const FORMATION_CATEGORY_LABELS: Record<FormationDefinition["category"], string> = {
   "4-at-the-back": "4-Defender Backlines",
@@ -18,11 +19,16 @@ export interface OnboardingSubmission {
   clubLogoUrl: string;
   clubInfo: string;
   tacticalPhilosophy: string;
-  realismLevel: "STRICT_REALISM" | "REALISTIC" | "BALANCED" | "CASUAL" | "CHAOS";
+
   favFormations: string[];
   managerObjective: string;
   boardObjective: string;
   personalObjective: string;
+  /**
+   * Realism is app-level settings rather than save data, but it is chosen here because it is a
+   * statement about how ambitious the objectives above are allowed to be.
+   */
+  realismLevel: RealismLevel;
 }
 
 interface OnboardingWizardProps {
@@ -38,7 +44,7 @@ export function OnboardingWizard({
   saveScanComplete = false,
   onRescan,
 }: OnboardingWizardProps) {
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedSave, setSelectedSave] = useState<SaveCandidate | null>(
     saveCandidates[0] || null
   );
@@ -74,10 +80,6 @@ export function OnboardingWizard({
     "4-3-3-holding",
     "4-2-3-1-narrow",
   ]);
-  const [realismLevel, setRealismLevel] = useState<
-    "STRICT_REALISM" | "REALISTIC" | "BALANCED" | "CASUAL" | "CHAOS"
-  >("REALISTIC");
-
   const [managerObjective, setManagerObjective] = useState(
     "Dominate middle of pitch with central overloads & pacy wingers"
   );
@@ -87,6 +89,7 @@ export function OnboardingWizard({
   const [personalObjective, setPersonalObjective] = useState(
     "Develop youth academy prospects into untouchable club legends"
   );
+  const [realismLevel, setRealismLevel] = useState<RealismLevel>("NORMAL");
 
   const [isCustomVision, setIsCustomVision] = useState(false);
   const [isCustomBoard, setIsCustomBoard] = useState(false);
@@ -539,110 +542,21 @@ export function OnboardingWizard({
               onClick={() => setStep(3)}
               className="w-2/3 bg-[#E11D48] hover:bg-[#FF8C7A] text-white font-heading text-sm font-bold uppercase py-3.5 rounded-xl transition-all shadow-md cursor-pointer"
             >
-              Set Realism Rules →
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* STEP 3: REALISM & FINANCIAL BOUNDS */}
-      {step === 3 && (
-        <div className="space-y-6">
-          <div className="flex items-center gap-2 mb-2">
-            <svg className="w-5 h-5 text-[#E11D48]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-            </svg>
-            <h2 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase tracking-wider">
-              Step 3: Transfer & Financial Realism Limits
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3">
-            {[
-              {
-                id: "STRICT_REALISM",
-                title: "Strict Realism",
-                desc: "Strict squad budget limits, restricted release clauses, and enforced wage caps based on club tier.",
-              },
-              {
-                id: "REALISTIC",
-                title: "Realistic (Recommended)",
-                desc: "Balanced club bounds enforcing logical market values and squad size ceilings.",
-              },
-              {
-                id: "BALANCED",
-                title: "Balanced",
-                desc: "Standard EA FC Career Mode rules with minor squad intent checks.",
-              },
-              {
-                id: "CASUAL",
-                title: "Casual",
-                desc: "Unrestricted transfer freedom without financial or squad role penalties.",
-              },
-            ].map((r) => {
-              const isSelected = realismLevel === r.id;
-              return (
-                <div
-                  key={r.id}
-                  onClick={() =>
-                    setRealismLevel(
-                      r.id as "STRICT_REALISM" | "REALISTIC" | "BALANCED" | "CASUAL" | "CHAOS"
-                    )
-                  }
-                  className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-start gap-4 ${
-                    isSelected
-                      ? "border-[#E11D48] bg-rose-50/60 dark:bg-rose-950/30 shadow-md ring-1 ring-[#E11D48]"
-                      : "border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 hover:border-slate-300 dark:hover:border-slate-700"
-                  }`}
-                >
-                  <div
-                    className={`w-4 h-4 rounded-full border mt-0.5 shrink-0 flex items-center justify-center ${
-                      isSelected
-                        ? "border-[#E11D48] bg-[#E11D48]"
-                        : "border-slate-400 dark:border-slate-600"
-                    }`}
-                  >
-                    {isSelected && <span className="w-1.5 h-1.5 bg-white rounded-full" />}
-                  </div>
-                  <div>
-                    <h4 className="font-heading text-sm text-slate-900 dark:text-slate-100 uppercase">
-                      {r.title}
-                    </h4>
-                    <p className="font-sans text-xs text-slate-600 dark:text-slate-400 mt-0.5 leading-relaxed">
-                      {r.desc}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="flex gap-3 mt-8">
-            <button
-              onClick={() => setStep(2)}
-              className="w-1/3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-sub text-xs font-bold uppercase py-3.5 rounded-xl transition-all cursor-pointer"
-            >
-              ← Back
-            </button>
-            <button
-              onClick={() => setStep(4)}
-              className="w-2/3 bg-[#E11D48] hover:bg-[#FF8C7A] text-white font-heading text-sm font-bold uppercase py-3.5 rounded-xl transition-all shadow-md cursor-pointer"
-            >
               Define Objectives →
             </button>
           </div>
         </div>
       )}
 
-      {/* STEP 4: OBJECTIVES TRIFECTA */}
-      {step === 4 && (
+      {/* STEP 3: OBJECTIVES TRIFECTA */}
+      {step === 3 && (
         <div className="space-y-6">
           <div className="flex items-center gap-2 mb-1">
             <svg className="w-5 h-5 text-[#E11D48]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
             <h2 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase tracking-wider">
-              Step 4: Your Objectives
+              Step 3: Your Objectives
             </h2>
           </div>
 
@@ -799,9 +713,41 @@ export function OnboardingWizard({
             )}
           </div>
 
+          {/* Realism belongs on THIS step rather than a step of its own. It is not a separate topic
+              from the objectives above - it is the answer to how much of them is achievable - and
+              adding a fourth step would renumber the wizard for one control. */}
+          <div className="mt-6 pt-6 border-t border-slate-200 dark:border-slate-800">
+            <span className="font-sub text-label font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Realism level
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+              {REALISM_LEVELS.map((level) => {
+                const isSelected = realismLevel === level;
+                return (
+                  <button
+                    key={level}
+                    type="button"
+                    onClick={() => setRealismLevel(level)}
+                    aria-pressed={isSelected}
+                    className={`px-3 py-2.5 rounded-xl border font-sub text-label font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                      isSelected
+                        ? "border-[#E11D48] bg-[#E11D48]/10 text-[#E11D48]"
+                        : "border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-[#E11D48] hover:text-[#E11D48]"
+                    }`}
+                  >
+                    {labelFor(level)}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="font-sans text-dense leading-relaxed text-slate-500 dark:text-slate-400 mt-3">
+              {REALISM_HINTS[realismLevel]}
+            </p>
+          </div>
+
           <div className="flex gap-3 mt-6">
             <button
-              onClick={() => setStep(3)}
+              onClick={() => setStep(2)}
               className="w-1/3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-sub text-xs font-bold uppercase py-3.5 rounded-xl transition-all cursor-pointer"
             >
               ← Back
@@ -817,11 +763,11 @@ export function OnboardingWizard({
                     clubLogoUrl,
                     clubInfo,
                     tacticalPhilosophy,
-                    realismLevel,
                     favFormations,
                     managerObjective,
                     boardObjective,
                     personalObjective,
+                    realismLevel,
                   });
                 }
               }}

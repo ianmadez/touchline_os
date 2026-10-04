@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { careerEvents } from "@/lib/db/schema";
 import { CareerService } from "@/lib/services/career-service";
+import { SeasonService } from "@/lib/services/season-service";
 import { MatchContribution } from "@/lib/events/types";
 import crypto from "crypto";
 
@@ -31,6 +32,13 @@ export interface MatchDebriefPayload {
   matchDate?: string | null;
   /** The club faced, when picked from the manager's own division. Null for a cup or friendly. */
   opponentTeamId?: number | null;
+  /**
+   * The anomaly prompts the manager answered.
+   *
+   * The debrief screen already sends these; persisting them is what lets the season digest show
+   * what the manager said in answer to a prompt. Omitting the field here silently dropped them.
+   */
+  dynamicPrompts?: Array<{ id?: string; question?: string; answer?: string }>;
   /**
    * Where the two clubs stood in the league when they met.
    *
@@ -96,6 +104,22 @@ export async function POST(request: Request) {
       }))
       .filter((entry) => entry.goals > 0 || entry.assists > 0);
 
+    // Answers to the anomaly prompts. An unanswered prompt is dropped rather than stored blank,
+    // matching how the season digest reads them (it only shows entries with a real answer).
+    const dynamicPrompts = (Array.isArray(body.dynamicPrompts) ? body.dynamicPrompts : [])
+      .filter(
+        (prompt): prompt is { id?: string; question: string; answer: string } =>
+          Boolean(prompt) &&
+          typeof prompt.question === "string" &&
+          typeof prompt.answer === "string"
+      )
+      .map((prompt) => ({
+        id: typeof prompt.id === "string" ? prompt.id : "",
+        question: prompt.question.trim(),
+        answer: prompt.answer.trim(),
+      }))
+      .filter((prompt) => prompt.question.length > 0 && prompt.answer.length > 0);
+
     // Surfaced so the debrief UI (and later analytics) can show whether the manager accounted for
     // every goal, without pretending the two figures came from the same source.
     const goalsLogged = contributions.reduce((sum, entry) => sum + entry.goals, 0);
@@ -115,6 +139,7 @@ export async function POST(request: Request) {
       unloggedGoals: Math.max(0, body.homeScore - goalsLogged),
       weaknessIdentified: body.weaknessIdentified || "",
       managerReflection: body.managerReflection || "",
+      dynamicPrompts,
       result: body.homeScore > body.awayScore ? "WIN" : body.homeScore < body.awayScore ? "LOSS" : "DRAW",
       matchDate: asMatchDate(body.matchDate),
       opponentTeamId: asInt(body.opponentTeamId),
@@ -138,6 +163,9 @@ export async function POST(request: Request) {
       payloadJson,
       timestamp: new Date().toISOString(),
     });
+
+    const seasonService = new SeasonService();
+    await seasonService.recordMatchdayProgress(body.careerId);
 
     const careerService = new CareerService();
     const updatedPayload = await careerService.hydrate(body.careerId);
@@ -198,6 +226,9 @@ export async function DELETE(request: Request) {
     // Re-hydrate so the caller gets the same shape it gets from every other write, rather than
     // having to guess what the timeline looks like now.
     const targetCareer = careerId ?? deleted[0].careerId;
+    const seasonService = new SeasonService();
+    await seasonService.recordMatchdayProgress(targetCareer);
+
     const careerService = new CareerService();
     const updatedPayload = await careerService.hydrate(targetCareer);
 

@@ -16,9 +16,15 @@ export type AppTab =
   | "SEASON"
   | "SQUAD"
   | "TACTICS"
-  | "TIMELINE"
   | "DEBRIEF"
-  | "SETTINGS";
+  | "FINANCE"
+  | "SETTINGS"
+  /**
+   * Legacy. The flat event feed was too thin to hold a top-level slot, so it now renders as an
+   * inner tab of Settings. Kept in the union so a session persisted before the move still restores
+   * (it is redirected to Settings below) instead of landing on a blank screen.
+   */
+  | "TIMELINE";
 
 export const APP_TABS: readonly AppTab[] = [
   "LANDING",
@@ -27,10 +33,18 @@ export const APP_TABS: readonly AppTab[] = [
   "SEASON",
   "SQUAD",
   "TACTICS",
-  "TIMELINE",
   "DEBRIEF",
+  "FINANCE",
   "SETTINGS",
+  "TIMELINE",
 ] as const;
+
+/**
+ * Where a tab restored from storage should actually land. Only legacy values need rewriting.
+ */
+export const TAB_RESTORE_REDIRECT: Partial<Record<AppTab, AppTab>> = {
+  TIMELINE: "SETTINGS",
+};
 
 /**
  * `"system"` follows the operating system until the user picks light or dark explicitly.
@@ -148,6 +162,233 @@ export function clearSession(): void {
   } catch {
     /* ignore */
   }
+}
+
+// ---------------------------------------------------------------------------
+// Dismissed dashboard cards
+//
+// A dismissal is a VIEW preference, not career data, so it lives in localStorage beside the rest of
+// the session state rather than in the database - where it would need a table, an API field and a
+// place in every hydration payload to say the same thing. It uses its OWN key so that rewriting the
+// session (which happens on every tab change) can never drop it.
+//
+// Keyed BY careerId, because a dismissal is a statement about one career's threads: switching saves
+// must not hide a new career's cards just because two threads happen to share an id.
+//
+// The ordering this solves: the dashboard re-fetches `/api/career` on every load AND after every
+// debrief, and each fetch returns the full lists again. So a dismissal can only ever be applied at
+// RENDER time by filtering the hydrated arrays - never by mutating the payload.
+// ---------------------------------------------------------------------------
+
+const DISMISSED_STORAGE_KEY = "touchline.dismissed.v1";
+
+export interface DismissedState {
+  storylines: string[];
+  events: string[];
+}
+
+const EMPTY_DISMISSED: DismissedState = { storylines: [], events: [] };
+
+function readAllDismissed(): Record<string, DismissedState> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(DISMISSED_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, DismissedState>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeAllDismissed(all: Record<string, DismissedState>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(DISMISSED_STORAGE_KEY, JSON.stringify(all));
+    for (const listener of [...dismissedListeners]) listener();
+  } catch {
+    /* storage unavailable — the dismissal simply will not persist */
+  }
+}
+
+let dismissedListeners: Array<() => void> = [];
+
+/** Lets `useSyncExternalStore` re-render the dashboard the moment a card is dismissed. */
+export function subscribeDismissed(listener: () => void): () => void {
+  dismissedListeners.push(listener);
+  return () => {
+    dismissedListeners = dismissedListeners.filter((entry) => entry !== listener);
+  };
+}
+
+/**
+ * The raw stored string, which is a primitive: `useSyncExternalStore` compares snapshots by
+ * identity, so building a fresh object here would re-render forever.
+ */
+export function getDismissedSnapshot(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(DISMISSED_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Parses one career's dismissals out of a snapshot. Never throws on a corrupt store. */
+export function dismissedForCareer(raw: string | null, careerId: string | null): DismissedState {
+  if (!raw || !careerId) return EMPTY_DISMISSED;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, Partial<DismissedState>> | null;
+    const entry = parsed?.[careerId];
+    if (!entry) return EMPTY_DISMISSED;
+    return {
+      storylines: Array.isArray(entry.storylines)
+        ? entry.storylines.filter((id): id is string => typeof id === "string")
+        : [],
+      events: Array.isArray(entry.events)
+        ? entry.events.filter((id): id is string => typeof id === "string")
+        : [],
+    };
+  } catch {
+    return EMPTY_DISMISSED;
+  }
+}
+
+export function dismissStoryline(careerId: string, storylineId: string): void {
+  const all = readAllDismissed();
+  const current = all[careerId] ?? EMPTY_DISMISSED;
+  if (current.storylines.includes(storylineId)) return;
+  all[careerId] = { ...current, storylines: [...current.storylines, storylineId] };
+  writeAllDismissed(all);
+}
+
+export function dismissEvent(careerId: string, eventId: string): void {
+  const all = readAllDismissed();
+  const current = all[careerId] ?? EMPTY_DISMISSED;
+  if (current.events.includes(eventId)) return;
+  all[careerId] = { ...current, events: [...current.events, eventId] };
+  writeAllDismissed(all);
+}
+
+/** Puts every dismissed card back. Scoped to one career, like the dismissals themselves. */
+export function restoreDismissed(careerId: string): void {
+  const all = readAllDismissed();
+  if (!all[careerId]) return;
+  all[careerId] = { ...EMPTY_DISMISSED };
+  writeAllDismissed(all);
+}
+
+// ---------------------------------------------------------------------------
+// Seen markers
+// ---------------------------------------------------------------------------
+//
+// A count badge on a section behaves like an app notification: it counts what has arrived since the
+// manager last looked, and looking is what clears it.
+//
+// Stored as a per-surface TIMESTAMP rather than a list of seen ids, which keeps the store bounded -
+// a career that runs for ten seasons accumulates nothing here. It also means the badge is honest
+// about arrival time rather than about which ids happened to be rendered.
+
+const SEEN_STORAGE_KEY = "touchline.seen.v1";
+
+export type SeenSurface = "STORYLINES" | "TIMELINE";
+type SeenState = Partial<Record<SeenSurface, string>>;
+
+/** Never looked at - everything counts as new. */
+const NEVER = 0;
+
+function readAllSeen(): Record<string, SeenState> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(SEEN_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, SeenState>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeAllSeen(all: Record<string, SeenState>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(all));
+    for (const listener of [...seenListeners]) listener();
+  } catch {
+    /* storage unavailable - the marker simply will not persist */
+  }
+}
+
+let seenListeners: Array<() => void> = [];
+
+/** Lets a badge re-render the moment its section is marked as looked at. */
+export function subscribeSeen(listener: () => void): () => void {
+  seenListeners.push(listener);
+  return () => {
+    seenListeners = seenListeners.filter((entry) => entry !== listener);
+  };
+}
+
+/** The raw stored string: a primitive, so `useSyncExternalStore` can compare snapshots safely. */
+export function getSeenSnapshot(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(SEEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One career's markers as epoch milliseconds.
+ *
+ * A surface that has never been opened resolves to 0, so everything in it reads as new - which is
+ * the right first impression for a manager who has just synced their first save.
+ */
+export function seenForCareer(
+  raw: string | null,
+  careerId: string | null
+): Record<SeenSurface, number> {
+  const never = { STORYLINES: NEVER, TIMELINE: NEVER };
+  if (!raw || !careerId) return never;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, SeenState> | null;
+    const entry = parsed?.[careerId];
+    if (!entry) return never;
+    const at = (value: string | undefined) => {
+      const parsedDate = value ? Date.parse(value) : Number.NaN;
+      return Number.isFinite(parsedDate) ? parsedDate : NEVER;
+    };
+    return { STORYLINES: at(entry.STORYLINES), TIMELINE: at(entry.TIMELINE) };
+  } catch {
+    return never;
+  }
+}
+
+/** Records that the manager has looked at a surface now. */
+export function markSeen(careerId: string | null, surface: SeenSurface, at?: string): void {
+  if (!careerId) return;
+  const all = readAllSeen();
+  all[careerId] = { ...(all[careerId] ?? {}), [surface]: at ?? new Date().toISOString() };
+  writeAllSeen(all);
+}
+
+/**
+ * Counts items that arrived after the manager last looked.
+ *
+ * An item with no usable timestamp is treated as NOT new rather than as new, because the opposite
+ * default would produce a badge that can never be cleared.
+ */
+export function countUnseen(
+  timestamps: Array<string | null | undefined>,
+  since: number
+): number {
+  let count = 0;
+  for (const value of timestamps) {
+    const parsed = value ? Date.parse(value) : Number.NaN;
+    if (Number.isFinite(parsed) && parsed > since) count += 1;
+  }
+  return count;
 }
 
 /** Resolves a stored preference into the concrete theme currently in effect. */

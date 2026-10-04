@@ -1,10 +1,24 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useMemo, useSyncExternalStore } from "react";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import { ParsedCareerEvent } from "@/lib/services/event-service";
 import { PitchSlotAssignment } from "@/lib/services/tactics-service";
-import { AppTab } from "@/lib/session";
+import {
+  AppTab,
+  countUnseen,
+  dismissedForCareer,
+  dismissEvent,
+  dismissStoryline,
+  getDismissedSnapshot,
+  getSeenSnapshot,
+  markSeen,
+  restoreDismissed,
+  seenForCareer,
+  subscribeDismissed,
+  subscribeSeen,
+} from "@/lib/session";
+import { DismissButton } from "./dismiss-button";
 import { UNKNOWN_POSITION } from "@/lib/parser/interface";
 import { StorylineItem } from "@/lib/events/types";
 import type { SeasonState } from "@/lib/services/season-service";
@@ -15,7 +29,10 @@ import {
   statusLabel,
   storylineDestination,
   storylineDestinationLabel,
+  storylineDestinationSubTab,
+  type SeasonSubTab,
 } from "@/lib/ui/labels";
+import { ModeChips } from "./mode-chips";
 import { formatEventDate, provenanceLabel, summariseEvent } from "@/lib/ui/events";
 
 /** Colour by category - what a thread is about. */
@@ -26,6 +43,7 @@ const CATEGORY_COLOURS: Record<string, string> = {
   TACTICAL: "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30",
   DEVELOPMENT: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30",
   SEASON_OBJECTIVE: "bg-slate-500/15 text-slate-600 dark:text-slate-300 border-slate-500/30",
+  PRAISE: "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30",
 };
 
 /** Colour by severity - how much it wants attention. Composed server-side from the evidence. */
@@ -48,7 +66,7 @@ interface DashboardViewProps {
   storylines?: StorylineItem[];
   seasonState?: SeasonState | null;
   tacticsSlots: PitchSlotAssignment[];
-  onNavigateTab: (tab: AppTab) => void;
+  onNavigateTab: (tab: AppTab, seasonSubTab?: SeasonSubTab | null) => void;
   onSelectPlayer: (player: EnrichedPlayer) => void;
   /** Opens the thread's evidence view - the one permitted level below the dashboard. */
   onOpenStoryline: (storylineId: string) => void;
@@ -114,8 +132,6 @@ export function DashboardView({
     (p) => (p.primaryPosition || UNKNOWN_POSITION) === UNKNOWN_POSITION
   ).length;
 
-  const displayEvents = recentEvents.slice(0, 5);
-
   // "What matters right now" has to be in that order: the loudest thread first, then the most
   // recently moved. Ordering by update time alone answers "what changed", not "what matters".
   const orderedStorylines = [...storylines].sort(
@@ -123,6 +139,47 @@ export function DashboardView({
       (SEVERITY_RANK[b.severity] ?? 0) - (SEVERITY_RANK[a.severity] ?? 0) ||
       b.updatedAt.localeCompare(a.updatedAt)
   );
+
+  // Dismissals live in localStorage and are applied at RENDER time: the next fetch always returns
+  // the full lists again, so filtering here is the only place it can stick. Reading through
+  // `useSyncExternalStore` keeps the read out of render (no hydration mismatch) and still lets the
+  // card disappear the instant it is dismissed.
+  const dismissedRaw = useSyncExternalStore(subscribeDismissed, getDismissedSnapshot, () => null);
+  const dismissed = useMemo(
+    () => dismissedForCareer(dismissedRaw, careerId),
+    [dismissedRaw, careerId]
+  );
+  const dismissedStorylines = new Set(dismissed.storylines);
+  const dismissedEvents = new Set(dismissed.events);
+  const visibleStorylines = orderedStorylines.filter((story) => !dismissedStorylines.has(story.id));
+  const hiddenStorylineCount = orderedStorylines.length - visibleStorylines.length;
+  const hiddenEventCount = recentEvents.filter((evt) => dismissedEvents.has(evt.id)).length;
+
+  // Filter BEFORE the slice, so dismissing the top card reveals the sixth rather than a gap.
+  const visibleEvents = recentEvents.filter((evt) => !dismissedEvents.has(evt.id));
+  const displayEventsFiltered = visibleEvents.slice(0, 5);
+
+  // ---------------------------------------------------------------------------
+  // The count badge behaves like an app notification: it reports what has arrived
+  // since the manager last looked here, and leaving the screen is what clears it.
+  // The marker is only ever written on unmount, so nothing rewrites it mid-visit and
+  // the number cannot blank out while it is being read.
+  // ---------------------------------------------------------------------------
+  const seenRaw = useSyncExternalStore(subscribeSeen, getSeenSnapshot, () => null);
+  const seenAt = useMemo(() => seenForCareer(seenRaw, careerId), [seenRaw, careerId]);
+  const unseenStorylines = useMemo(
+    () =>
+      countUnseen(
+        storylines
+          .filter((story) => story.status === "ACTIVE")
+          .map((story) => story.updatedAt),
+        seenAt.STORYLINES
+      ),
+    [storylines, seenAt.STORYLINES]
+  );
+  const activeStorylineCount = storylines.filter((story) => story.status === "ACTIVE").length;
+
+  useEffect(() => () => markSeen(careerId, "STORYLINES"), [careerId]);
 
   return (
     <div className="space-y-6">
@@ -137,6 +194,10 @@ export function DashboardView({
           <h1 className="font-heading text-2xl text-slate-900 dark:text-slate-100 uppercase tracking-wide">
             {clubName || "Career Hub"} <span className="text-slate-400 dark:text-slate-500 font-normal">| {managerName || "Manager"}</span>
           </h1>
+          {/* The modes this career is being judged by, under the name they are being judged under. */}
+          <div className="mt-3">
+            <ModeChips />
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -219,16 +280,23 @@ export function DashboardView({
             <div className="flex items-center justify-between">
               <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <span>What Matters Right Now</span>
-                <span className="text-[10px] font-sub font-bold px-2 py-0.5 rounded bg-[#E11D48]/15 text-[#E11D48] dark:text-[#FF8C7A] border border-[#E11D48]/30">
-                  {storylines.filter((s) => s.status === "ACTIVE").length} Open
-                </span>
+                {unseenStorylines > 0 && (
+                  <span
+                    title="Threads that have moved since you last looked here. Opening the dashboard clears the count."
+                    className="text-[10px] font-sub font-bold px-2 py-0.5 rounded bg-[#E11D48]/15 text-[#E11D48] dark:text-[#FF8C7A] border border-[#E11D48]/30 tabular-nums"
+                  >
+                    {unseenStorylines} new
+                  </span>
+                )}
               </h2>
-              <span className="text-xs font-sub text-slate-400">Tracked from your save</span>
+              <span className="text-xs font-sub text-slate-400 tabular-nums">
+                {activeStorylineCount} active · Tracked from your save
+              </span>
             </div>
 
-            {storylines.length > 0 ? (
+            {visibleStorylines.length > 0 ? (
               <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
-                {orderedStorylines.map((story) => {
+                {visibleStorylines.map((story) => {
                   const destination = storylineDestination(story.category);
                   const facts = story.evidenceEvents ?? [];
 
@@ -260,6 +328,10 @@ export function DashboardView({
                                 : statusLabel(story.status)}
                             </span>
                           </div>
+                          <DismissButton
+                            label="Dismiss this storyline"
+                            onDismiss={() => dismissStoryline(careerId, story.id)}
+                          />
                         </div>
 
                         {/* The whole card is the affordance, and it opens the thread rather than a tab:
@@ -290,7 +362,9 @@ export function DashboardView({
                               more than they want another paragraph. */}
                           <button
                             type="button"
-                            onClick={() => onNavigateTab(destination)}
+                            onClick={() =>
+                              onNavigateTab(destination, storylineDestinationSubTab(story.category))
+                            }
                             className="min-h-10 font-sub text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:text-[#E11D48] dark:hover:text-[#FF8C7A] transition-colors cursor-pointer"
                           >
                             {storylineDestinationLabel(story.category)} →
@@ -300,6 +374,19 @@ export function DashboardView({
                     </div>
                   );
                 })}
+              </div>
+            ) : orderedStorylines.length > 0 ? (
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-slate-500 italic">
+                  Everything here has been dismissed.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => restoreDismissed(careerId)}
+                  className="min-h-10 font-sub text-[11px] font-semibold text-[#E11D48] dark:text-[#FF8C7A] hover:underline cursor-pointer"
+                >
+                  Restore {hiddenStorylineCount}
+                </button>
               </div>
             ) : (
               <p className="text-xs text-slate-500 italic">
@@ -428,38 +515,63 @@ export function DashboardView({
               Recent Activity
             </h2>
             <button
-              onClick={() => onNavigateTab("TIMELINE")}
+              onClick={() => onNavigateTab("SETTINGS")}
               className="text-xs font-sub text-[#E11D48] dark:text-[#FF8C7A] hover:underline cursor-pointer"
             >
               See all →
             </button>
           </div>
 
-          <div className="space-y-3">
-            {displayEvents.length > 0 ? (
-              displayEvents.map((evt) => (
-                <button
+          {/* Internal scroll, the same trait the storylines card has: a long feed can never
+              stretch the column, and the card keeps its own height whatever the save holds. */}
+          <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+            {displayEventsFiltered.length > 0 ? (
+              displayEventsFiltered.map((evt) => (
+                <div
                   key={evt.id}
-                  type="button"
-                  onClick={() => onNavigateTab("TIMELINE")}
-                  className="w-full text-left p-3 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700 space-y-1 transition-[border-color,transform] duration-200 active:scale-[0.96] cursor-pointer"
+                  className="flex items-start gap-1 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800/80 hover:border-slate-300 dark:hover:border-slate-700 transition-[border-color] duration-200"
                 >
-                  <div className="flex items-center justify-between gap-2 text-[10px] font-sub font-bold uppercase tracking-wider">
-                    <span className="text-[#E11D48] dark:text-[#FF8C7A] truncate">
-                      {eventLabel(evt.eventType)}
+                  <button
+                    type="button"
+                    onClick={() => onNavigateTab("SETTINGS")}
+                    className="min-w-0 flex-1 text-left p-3 space-y-1 cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between gap-2 text-[10px] font-sub font-bold uppercase tracking-wider">
+                      <span className="text-[#E11D48] dark:text-[#FF8C7A] truncate">
+                        {eventLabel(evt.eventType)}
+                      </span>
+                      <span className="shrink-0 text-slate-400 dark:text-slate-500 normal-case font-medium tracking-normal">
+                        {formatEventDate(evt.timestamp)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-700 dark:text-slate-300 font-sans line-clamp-2">
+                      {summariseEvent(evt)}
+                    </p>
+                    <span className="block text-[10px] font-sub text-slate-400">
+                      {provenanceLabel(evt.source)}
                     </span>
-                    <span className="shrink-0 text-slate-400 dark:text-slate-500 normal-case font-medium tracking-normal">
-                      {formatEventDate(evt.timestamp)}
-                    </span>
+                  </button>
+                  <div className="p-1.5">
+                    <DismissButton
+                      label="Dismiss this activity"
+                      onDismiss={() => dismissEvent(careerId, evt.id)}
+                    />
                   </div>
-                  <p className="text-xs text-slate-700 dark:text-slate-300 font-sans line-clamp-2">
-                    {summariseEvent(evt)}
-                  </p>
-                  <span className="block text-[10px] font-sub text-slate-400">
-                    {provenanceLabel(evt.source)}
-                  </span>
-                </button>
+                </div>
               ))
+            ) : hiddenEventCount > 0 ? (
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-slate-500 dark:text-slate-400 italic">
+                  Everything here has been dismissed.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => restoreDismissed(careerId)}
+                  className="text-xs font-sub text-[#E11D48] dark:text-[#FF8C7A] hover:underline cursor-pointer"
+                >
+                  Restore {hiddenEventCount}
+                </button>
+              </div>
             ) : (
               <p className="text-xs text-slate-500 dark:text-slate-400 italic">
                 Nothing here yet. Sync your save to start the timeline.

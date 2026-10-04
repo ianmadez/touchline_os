@@ -5,7 +5,7 @@ import { careers } from "@/lib/db/schema";
 import { CareerService } from "@/lib/services/career-service";
 import { UserProfileService } from "@/lib/services/user-profile-service";
 import { KNOWN_POSITION_ROLES } from "@/lib/parser/interface";
-import type { PitchSlotAssignment } from "@/lib/services/tactics-service";
+import { TacticsService, type PitchSlotAssignment } from "@/lib/services/tactics-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,6 +15,15 @@ interface PatchCareerRequest {
   tactics?: {
     formationId?: string;
     slots?: PitchSlotAssignment[];
+    /** Which saved formation these slots belong to. Omitted means the manager's current XI. */
+    label?: string;
+  };
+  /** Formation lifecycle: a manager may keep as many formations as they like. */
+  formations?: {
+    action: "CREATE" | "RENAME" | "DELETE" | "SET_DEFAULT";
+    label?: string;
+    nextLabel?: string;
+    formationId?: string;
   };
   playerProfile?: {
     eaPlayerId?: number;
@@ -96,11 +105,27 @@ export async function PATCH(request: Request) {
       );
     }
 
+    if (body.formations) {
+      const tactics = new TacticsService();
+      const { action, formationId } = body.formations;
+      const label = body.formations.label?.trim();
+      if (action === "CREATE" && formationId) {
+        await tactics.createFormation(body.careerId, { formationName: formationId, label });
+      } else if (action === "RENAME" && label && body.formations.nextLabel) {
+        await tactics.renameFormation(body.careerId, label, body.formations.nextLabel);
+      } else if (action === "DELETE" && label) {
+        await tactics.deleteFormation(body.careerId, label);
+      } else if (action === "SET_DEFAULT" && label) {
+        await tactics.setDefaultFormation(body.careerId, label);
+      }
+    }
+
     if (body.tactics?.slots && body.tactics.formationId) {
       await careerService.saveTactics(
         body.careerId,
         body.tactics.formationId,
-        body.tactics.slots
+        body.tactics.slots,
+        body.tactics.label
       );
     }
 

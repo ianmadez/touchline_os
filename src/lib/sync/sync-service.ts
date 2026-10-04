@@ -15,10 +15,19 @@ import {
   leagueTeams,
   leagues,
   transferDeals,
+  worldPlayers,
+  youthProspects,
 } from "../db/schema";
-import { SaveCandidate, UNKNOWN_POSITION, type SeasonHistoryRow } from "../parser/interface";
+import {
+  SaveCandidate,
+  UNKNOWN_POSITION,
+  type SeasonHistoryRow,
+  type WorldPlayerEntry,
+} from "../parser/interface";
 import { ensureFacesForSquad } from "../services/face-service";
 import { FeasibilitySaveParser } from "../parser/feasibility-parser";
+import { SeasonService } from "../services/season-service";
+import { WorldValueModelService } from "../services/world-value-model";
 import { DeterministicDiffEngine, SnapshotStateRecord } from "../events/diff-engine";
 
 export interface SyncResult {
@@ -75,10 +84,84 @@ export interface SyncResult {
  * No bump for the league catalogue: it is written before the hash check (see the `leagues` upsert),
  * so a save that has not changed still repopulates it, and no career row derives anything from it.
  */
-export const SYNC_PIPELINE_VERSION = "10";
+/**
+ * Raised whenever the parser starts producing something the sync must now write.
+ *
+ * It folds into the payload hash, so raising it forces the next sync to re-run the whole transaction
+ * even when the save file is byte-identical. That is the point: a parser change ALONE does not trigger
+ * a re-sync, because change detection is against the save, not against our code. The academy landed as
+ * a silent no-op for exactly that reason - the parser was decoding the prospects correctly, and the
+ * sync was returning NO_CHANGE before it ever reached the write. Verified by watching `youth_prospects`
+ * stay empty through two successful syncs that both reported `success: true`.
+ *
+ * 11 - the academy: `youthProspects` from `career_youthplayers`, written to `youth_prospects`.
+ */
+export const SYNC_PIPELINE_VERSION = "11";
 
 export class SyncService {
   private parser = new FeasibilitySaveParser();
+
+  /**
+   * Builds the insertable world pool, value bands included.
+   *
+   * Deliberately OUTSIDE the transaction: better-sqlite3 transactions are synchronous, so the async
+   * model fit (which reads `transfer_deals` and the existing pool) cannot run inside one. The bands
+   * therefore reflect the deals present at sync time - which is the same set the search filters on,
+   * so the row a manager sees and the budget that filtered it always come from one model.
+   */
+  private async buildWorldPool(
+    careerId: string,
+    pool: WorldPlayerEntry[]
+  ): Promise<(typeof worldPlayers.$inferInsert)[]> {
+    if (pool.length === 0) return [];
+
+    const values = new WorldValueModelService();
+    const model = await values.model(careerId);
+    const now = new Date().toISOString();
+
+    return pool.map((player) => {
+      const band = values.evaluate(model, {
+        overallRating: player.overall,
+        potentialRating: player.potential,
+        age: player.age,
+      });
+      return {
+        id: `${careerId}_${player.playerId}`,
+        careerId,
+        eaPlayerId: player.playerId,
+        name: player.name,
+        // Only the NAME can be missing. Every other field below is present either way, which the
+        // dossier proves by rendering in full for an unresolved row.
+        nameResolved: player.nameSource !== "unresolved",
+        clubId: player.clubId,
+        clubName: player.clubName,
+        positionCode: player.positionCode,
+        primaryPosition: player.primaryPosition || UNKNOWN_POSITION,
+        overallRating: player.overall,
+        potentialRating: player.potential,
+        age: player.age,
+        preferredFoot: player.preferredFoot,
+        weakFoot: player.weakFoot,
+        skillMoves: player.skillMoves,
+        internationalRep: player.internationalRep,
+        heightCm: player.heightCm,
+        valueLow: band?.low ?? null,
+        valueMid: band?.mid ?? null,
+        valueHigh: band?.high ?? null,
+        valueConfidence: band?.confidence ?? null,
+        attributesJson: JSON.stringify({
+          pace: player.pace,
+          shooting: player.shooting,
+          passing: player.passing,
+          dribbling: player.dribbling,
+          defending: player.defending,
+          physical: player.physical,
+          goalkeeping: player.goalkeeping,
+        }),
+        updatedAt: now,
+      };
+    });
+  }
 
   async syncCandidate(save: SaveCandidate): Promise<SyncResult> {
     // 1. Asynchronously read and parse save container before DB transaction
@@ -128,6 +211,9 @@ export class SyncService {
         : null;
 
     // 3. Execute atomic synchronous transaction for better-sqlite3
+    // The world pool's bands are fitted out here, not inside the transaction below.
+    const worldPoolValues = await this.buildWorldPool(careerId, rawData.worldPlayers ?? []);
+
     const result = db.transaction<SyncResult>((tx) => {
       // Ensure career identity exists
       const existingCareer = tx
@@ -207,6 +293,35 @@ export class SyncService {
         .orderBy(desc(careerSnapshots.snapshotNumber))
         .limit(1)
         .get();
+
+      // --- World player pool (a SAVE fact, career-scoped) -------------------------------------
+      //
+      // Written in the reference-data section, BEFORE the snapshot hash check - the same position and
+      // the same reasoning as the league catalogue above. It creates no snapshot and emits no event,
+      // so the NO_CHANGE invariant is untouched and an existing career self-heals on its next sync
+      // WITHOUT a SYNC_PIPELINE_VERSION bump. A bump folds into the payload hash and would force the
+      // entire transaction body to re-run and a new snapshot to be created; that is not a cost worth
+      // paying to populate one reference table.
+      //
+      // Rewritten on EVERY sync, deliberately.
+      //
+      // The obvious optimisation - skip when the pool exists and the save is unchanged - is wrong,
+      // because the value bands are a MODEL output: refining the model would then never reach existing
+      // rows, and the pool would silently keep bands computed by a curve that has since been fixed.
+      // A stale band is a worse bug than half a second of writes, and a sync is already a parse of the
+      // whole save. What the guard DOES still skip is the work when the save carries no pool at all.
+      if (worldPoolValues.length > 0) {
+        tx.delete(worldPlayers).where(eq(worldPlayers.careerId, careerId)).run();
+        // Chunked because SQLite caps the bound variables in one statement: 21,160 rows x 25
+        // columns in a single insert is far past the limit. A fixed chunk size also keeps this to
+        // a single compiled statement shape for the whole loop.
+        const CHUNK = 30;
+        for (let at = 0; at < worldPoolValues.length; at += CHUNK) {
+          tx.insert(worldPlayers)
+            .values(worldPoolValues.slice(at, at + CHUNK))
+            .run();
+        }
+      }
 
       if (latestSnapshot && latestSnapshot.rawPayloadHash === payloadHash) {
         return {
@@ -486,6 +601,45 @@ export class SyncService {
           .run();
       }
 
+      // ---- The academy -------------------------------------------------------------------------
+      // The rows are DELETED first rather than upserted. The academy is a mirrored SET, not a growing
+      // log: a prospect who graduates or is released has to disappear from the table, and an upsert
+      // would leave him sitting there forever with no row in the save behind him.
+      const prospects = rawData.youthProspects ?? [];
+      tx.delete(youthProspects).where(eq(youthProspects.careerId, careerId)).run();
+      for (const prospect of prospects) {
+        tx.insert(youthProspects)
+          .values({
+            // Deterministic, so a re-sync replaces the same row rather than colliding on the unique
+            // (career, player) index.
+            id: `${careerId}_${prospect.playerId}`,
+            careerId,
+            playerId: prospect.playerId,
+            name: prospect.name,
+            nameSource: prospect.nameSource,
+            positionCode: prospect.positionCode,
+            primaryPosition: prospect.primaryPosition,
+            age: prospect.age,
+            birthdate: prospect.birthdate,
+            overallRating: prospect.overallRating,
+            potentialRating: prospect.potentialRating,
+            // Ranges, not settled values - see `YouthProspectRow` for why.
+            tierLow: prospect.tierLow,
+            tierHigh: prospect.tierHigh,
+            swingLowMin: prospect.swingLowMin,
+            swingLowMax: prospect.swingLowMax,
+            varianceMin: prospect.varianceMin,
+            varianceMax: prospect.varianceMax,
+            monthsInSquad: prospect.monthsInSquad,
+            assessmentCount: prospect.assessmentCount,
+            goals: prospect.goals,
+            appearances: prospect.appearances,
+            provenance: "SAVE",
+            updatedAt: new Date().toISOString(),
+          })
+          .run();
+      }
+
       tx.insert(clubFinances)
         .values({
           id: careerId,
@@ -748,6 +902,13 @@ export class SyncService {
     // no request - so the only real cost is a genuinely new signing. A failure here is not a sync
     // failure: the face component falls back to an initials disc and the next sync retries.
     if (result.status === "SYNCED") {
+      try {
+        const seasonService = new SeasonService();
+        await seasonService.recordMatchdayProgress(careerId);
+      } catch (err) {
+        console.error("[sync-service] Failed to record matchday progress:", err);
+      }
+
       try {
         await ensureFacesForSquad(careerId);
       } catch {

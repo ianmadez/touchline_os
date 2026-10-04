@@ -1,34 +1,132 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { SeasonState, SeasonRecord } from "@/lib/services/season-service";
+import type { TargetBlock } from "@/lib/services/target-block-service";
 import { leagueLabel } from "@/lib/ui/leagues";
 import { SeasonPanel } from "@/components/ui/dashboard/season-panel";
 import { SeasonVaultView } from "./season-vault-view";
+import { BoardObjectivesPanel } from "./board-objectives-panel";
 
 interface SeasonViewProps {
   careerId: string;
   seasonState: SeasonState | null;
   onSeasonChange: (next: SeasonState) => void;
+  /** An inner tab to open on arrival, when something outside this screen sent the manager here. */
+  focusSubTab?: SubTab | null;
 }
 
-type SubTab = "OUTLOOK" | "CHARTS" | "VAULT";
+export type SubTab = "OUTLOOK" | "OBJECTIVES" | "CHARTS" | "VAULT";
+
+/**
+ * The inner tabs, in order, with their labels in one place.
+ *
+ * A record rather than a chain of nested ternaries: adding the objectives tracker used to mean
+ * editing the tab list, the label ternary and the body separately, which is exactly how a tab ends
+ * up reachable but mislabelled.
+ */
+const SUB_TABS: readonly SubTab[] = ["OUTLOOK", "OBJECTIVES", "CHARTS", "VAULT"];
+
+const SUB_TAB_LABELS: Record<SubTab, string> = {
+  OUTLOOK: "Outlook & Records",
+  OBJECTIVES: "Board Objectives",
+  CHARTS: "Matchday & Trends",
+  VAULT: "Season Vault",
+};
 
 // Two independent sample-size gates, deliberately not the same number or the same name as the
 // league model's own MIN_OBSERVATIONS_FOR_MODEL: that one governs the position-inference band,
 // this one only governs whether a season-over-season chart has enough points to draw a trend.
 const MIN_SEASONS_FOR_TREND = 2;
 
-export function SeasonView({ careerId, seasonState, onSeasonChange }: SeasonViewProps) {
-  const [activeSubTab, setActiveSubTab] = useState<SubTab>("OUTLOOK");
+// Mirrors TargetBlockService.MATCHES_PER_BLOCK. Kept as a plain number so this client component
+// never has to import a runtime value out of the server-only service module.
+const MATCHES_PER_BLOCK = 5;
+
+export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab }: SeasonViewProps) {
+  const [activeSubTab, setActiveSubTab] = useState<SubTab>(focusSubTab ?? "OUTLOOK");
   const [selectedVaultSeason, setSelectedVaultSeason] = useState<number | null>(null);
+
+  // Arriving from a storyline card carries the inner tab with it. Deferred through a timeout rather
+  // than set inline: a synchronous setState inside an effect is a lint error in this codebase, and the
+  // deferral also lets the click that navigated here finish before the tab moves under the cursor.
+  useEffect(() => {
+    if (!focusSubTab) return;
+    const timer = window.setTimeout(() => setActiveSubTab(focusSubTab), 0);
+    return () => window.clearTimeout(timer);
+  }, [focusSubTab]);
 
   const outlook = seasonState?.outlook ?? null;
   // Memoised so the `??` fallback cannot hand `completedSeasons` a fresh empty array on every
   // render, which would make its dependency change even when nothing about the season did.
   const seasons = useMemo(() => seasonState?.seasons ?? [], [seasonState?.seasons]);
   const completedSeasons = useMemo(() => seasons.filter((s) => s.complete), [seasons]);
+
+  // The season the manager is actually IN - the highest ordinal on record. Objectives are judged at
+  // the end of a season, so this is the set he is currently being measured against.
+  const currentSeason = useMemo(() => {
+    const numbers = seasons.map((s) => s.season);
+    return numbers.length > 0 ? Math.max(...numbers) : 1;
+  }, [seasons]);
   const unreadableDebriefs = seasonState?.table.reconciliation.fromDebriefs.unreadable ?? 0;
+
+  // ---------------------------------------------------------------------------
+  // 1.3 — the manager's own block targets, drawn as a cumulative target line.
+  // ---------------------------------------------------------------------------
+  const [blockRows, setBlockRows] = useState<TargetBlock[]>([]);
+
+  const loadBlockTargets = useCallback(async () => {
+    if (!careerId) return;
+    try {
+      const response = await fetch(`/api/season/blocks?careerId=${encodeURIComponent(careerId)}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as {
+        success?: boolean;
+        blocks?: Array<{ block: TargetBlock }>;
+      };
+      if (response.ok && payload.success && Array.isArray(payload.blocks)) {
+        setBlockRows(payload.blocks.map((row) => row.block));
+      }
+    } catch {
+      // No target line is drawn; the 5-Match Blocks tab reports its own errors.
+    }
+  }, [careerId]);
+
+  // Deferred by a tick: the rule rightly forbids setState synchronously in an effect body.
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadBlockTargets(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadBlockTargets]);
+
+  // Cumulative target points per matchday, in the order the manager planned them: block 1's five
+  // matches are matchdays 1-5, block 2's are 6-10, and so on. The line is built only from targets
+  // the manager actually set - an unplanned block stops it rather than inventing a number, and it
+  // is always labelled as their own plan rather than as something the save states.
+  const targetSeries = useMemo(() => {
+    const ordered: Array<number | null> = [];
+    [...blockRows]
+      .sort((a, b) => a.blockIndex - b.blockIndex)
+      .forEach((row) => {
+        for (let index = 0; index < MATCHES_PER_BLOCK; index += 1) {
+          const match = row.matches?.[index];
+          ordered.push(match ? match.targetPoints : null);
+        }
+      });
+
+    const series = new Map<number, number>();
+    let cumulative = 0;
+    let complete = true;
+    ordered.forEach((points, index) => {
+      if (points === null || points === undefined) {
+        complete = false;
+        return;
+      }
+      cumulative += points;
+      if (complete) series.set(index + 1, cumulative);
+    });
+    return series;
+  }, [blockRows]);
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-hidden">
@@ -44,7 +142,7 @@ export function SeasonView({ careerId, seasonState, onSeasonChange }: SeasonView
         </div>
 
         <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 dark:border-slate-800 dark:bg-slate-950">
-          {(["OUTLOOK", "CHARTS", "VAULT"] as const).map((tab) => (
+          {SUB_TABS.map((tab) => (
             <button
               key={tab}
               type="button"
@@ -55,7 +153,7 @@ export function SeasonView({ careerId, seasonState, onSeasonChange }: SeasonView
                   : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
               }`}
             >
-              {tab === "OUTLOOK" ? "Outlook & Records" : tab === "CHARTS" ? "Matchday & Trends" : "Season Vault"}
+              {SUB_TAB_LABELS[tab]}
             </button>
           ))}
         </div>
@@ -78,9 +176,22 @@ export function SeasonView({ careerId, seasonState, onSeasonChange }: SeasonView
           </div>
         )}
 
+        {activeSubTab === "OBJECTIVES" &&
+          (careerId ? (
+            <BoardObjectivesPanel careerId={careerId} seasonNumber={currentSeason} />
+          ) : (
+            <EmptyCard
+              title="No career synced yet"
+              body="Sync a save from the Portal to record the objectives your board gave you."
+            />
+          ))}
+
         {activeSubTab === "CHARTS" && (
           <div className="space-y-6">
-            <MatchdayTrajectoryChart progressSeries={seasonState?.progressSeries ?? []} />
+            <MatchdayTrajectoryChart
+              progressSeries={seasonState?.progressSeries ?? []}
+              targetSeries={targetSeries}
+            />
             <PointsBySeasonChart seasons={completedSeasons} current={outlook} />
             <FinishBySeasonChart seasons={completedSeasons} />
           </div>
@@ -227,7 +338,13 @@ function SeasonHistoryTable({
 // Matchday Trajectory Series (Option A)
 // ---------------------------------------------------------------------------
 
-function MatchdayTrajectoryChart({ progressSeries }: { progressSeries: NonNullable<SeasonState["progressSeries"]> }) {
+function MatchdayTrajectoryChart({
+  progressSeries,
+  targetSeries,
+}: {
+  progressSeries: NonNullable<SeasonState["progressSeries"]>;
+  targetSeries: Map<number, number>;
+}) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
   if (progressSeries.length === 0) {
@@ -239,13 +356,19 @@ function MatchdayTrajectoryChart({ progressSeries }: { progressSeries: NonNullab
     );
   }
 
-  const maxPoints = Math.max(...progressSeries.map((p) => p.points), 1);
+  // Targets share the scale with actual points, so a target above the best actual still fits.
+  const maxPoints = Math.max(
+    ...progressSeries.map((p) => p.points),
+    ...Array.from(targetSeries.values()),
+    1,
+  );
   const activePoint = hoveredIndex !== null ? progressSeries[hoveredIndex] : progressSeries.at(-1);
+  const activeTarget = activePoint ? targetSeries.get(activePoint.matchday) : undefined;
 
   return (
     <ChartCard
       title="Matchday Trajectory & Form"
-      subtitle="Within-season cumulative points acceleration and position tracking across synced matchdays."
+      subtitle="Within-season cumulative points against the target you set for each block, plus position tracking across synced matchdays."
     >
       <div className="space-y-4">
         {/* Interactive Tooltip Card */}
@@ -270,6 +393,22 @@ function MatchdayTrajectoryChart({ progressSeries }: { progressSeries: NonNullab
                 <span className="text-slate-400">PTS: </span>
                 <span className="font-bold text-rose-600 dark:text-rose-400">{activePoint.points}</span>
               </div>
+              {activeTarget !== undefined && (
+                <div>
+                  <span className="text-slate-400">Target: </span>
+                  <span className="font-bold text-slate-700 dark:text-slate-300">{activeTarget}</span>
+                  <span
+                    className={`ml-1 font-bold ${
+                      activePoint.points >= activeTarget
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-amber-600 dark:text-amber-400"
+                    }`}
+                  >
+                    {activePoint.points - activeTarget >= 0 ? "+" : ""}
+                    {activePoint.points - activeTarget}
+                  </span>
+                </div>
+              )}
               {activePoint.tablePosition && (
                 <div>
                   <span className="text-slate-400">Pos: </span>
@@ -283,32 +422,71 @@ function MatchdayTrajectoryChart({ progressSeries }: { progressSeries: NonNullab
         )}
 
         {/* Interactive Visual Series */}
-        <div className="flex h-44 items-end gap-2 px-1 pt-4">
-          {progressSeries.map((p, idx) => {
-            const heightPct = Math.max(8, (p.points / maxPoints) * 100);
-            const isHovered = hoveredIndex === idx;
+        <div>
+          <div className="flex h-44 items-stretch gap-2 px-1 pt-4">
+            {progressSeries.map((p, idx) => {
+              const heightPct = Math.max(8, (p.points / maxPoints) * 100);
+              const isHovered = hoveredIndex === idx;
+              const target = targetSeries.get(p.matchday);
+              const targetPct = target === undefined ? null : Math.max(8, (target / maxPoints) * 100);
+              const behindTarget = target !== undefined && p.points < target;
 
-            return (
-              <div
-                key={p.id}
-                onMouseEnter={() => setHoveredIndex(idx)}
-                onMouseLeave={() => setHoveredIndex(null)}
-                className="group relative flex h-full flex-1 cursor-pointer flex-col items-center justify-end"
-              >
+              // Hover HIGHLIGHTS the column; it does not resize anything.
+              //
+              // The bar used to widen (`scale-x-110`) and the value label below used to grow
+              // (`scale-110`). Both are the same mistake: a chart whose geometry moves under the cursor
+              // reads as unstable, because the reader can no longer tell whether the bar is that size
+              // because of the hover or because of the data. Width and height now encode data ONLY, and
+              // the hover is carried by the column band and the fill's saturation - a change of colour
+              // rather than of shape.
+              //
+              // This lives here and NOT as a `{/* */}` above the element: inside `return (` a JSX
+              // comment becomes a second sibling expression and the file stops parsing. Made twice now.
+              return (
                 <div
-                  className={`w-full rounded-t transition-all duration-150 ${
-                    isHovered
-                      ? "bg-rose-500 shadow-md shadow-rose-500/30 scale-x-110"
-                      : "bg-rose-500/70 hover:bg-rose-500/90"
+                  key={p.id}
+                  onMouseEnter={() => setHoveredIndex(idx)}
+                  onMouseLeave={() => setHoveredIndex(null)}
+                  className={`group flex h-full flex-1 cursor-pointer flex-col items-center rounded-lg px-0.5 transition-colors duration-150 ${
+                    isHovered ? "bg-slate-900/[0.05] dark:bg-white/[0.06]" : ""
                   }`}
-                  style={{ height: `${heightPct}%` }}
-                />
-                <span className="mt-1.5 text-[9px] font-sub text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-200">
-                  M{p.matchday}
-                </span>
-              </div>
-            );
-          })}
+                >
+                  {/* Bar and marker share this box, so the dashed line sits level with the bar top
+                      rather than drifting as the label grows. */}
+                  <div className="relative w-full flex-1">
+                    <div
+                      className={`absolute inset-x-0 bottom-0 rounded-t transition-colors duration-150 ${
+                        behindTarget
+                          ? isHovered ? "bg-amber-500" : "bg-amber-500/70"
+                          : isHovered ? "bg-rose-500" : "bg-rose-500/70"
+                      }`}
+                      style={{ height: `${heightPct}%` }}
+                    />
+                    {targetPct !== null && (
+                      <div
+                        title={`Your target for matchday ${p.matchday}: ${target} point${target === 1 ? "" : "s"}`}
+                        className="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-dashed border-slate-700/70 dark:border-slate-200/80"
+                        style={{ bottom: `${targetPct}%` }}
+                      />
+                    )}
+                  </div>
+                  <span className="mt-1.5 text-[9px] font-sub text-slate-400 group-hover:text-slate-800 dark:group-hover:text-slate-200">
+                    M{p.matchday}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {targetSeries.size > 0 && (
+            <p className="mt-3 flex items-start gap-2 text-[10px] font-sub leading-relaxed text-slate-500 dark:text-slate-400">
+              <span
+                aria-hidden
+                className="mt-1.5 inline-block h-0 w-5 shrink-0 border-t-2 border-dashed border-slate-700/70 dark:border-slate-200/80"
+              />
+              The dashed marker on each matchday is the target you set in your own 5-Match Blocks. A bar
+              turns amber while you are behind it. This is your plan, not a figure reported by the save.
+            </p>
+          )}
         </div>
       </div>
     </ChartCard>
@@ -362,10 +540,12 @@ function PointsBySeasonChart({
               key={b.label}
               onMouseEnter={() => setHoveredLabel(b.label)}
               onMouseLeave={() => setHoveredLabel(null)}
-              className="group flex h-full flex-1 cursor-pointer flex-col items-center"
+              className={`group flex h-full flex-1 cursor-pointer flex-col items-center rounded-lg px-1 transition-colors duration-150 ${
+                isHovered ? "bg-slate-900/[0.05] dark:bg-white/[0.06]" : ""
+              }`}
             >
               <span className={`h-5 shrink-0 text-[11px] font-sub font-bold leading-5 tabular-nums transition-colors ${
-                isHovered ? "text-rose-600 dark:text-rose-400 scale-110" : "text-slate-700 dark:text-slate-200"
+                isHovered ? "text-rose-600 dark:text-rose-400" : "text-slate-500 dark:text-slate-400"
               }`}>
                 {b.points}
                 {b.live && (
@@ -376,10 +556,10 @@ function PointsBySeasonChart({
               </span>
               <div className="flex min-h-0 w-full flex-1 items-end justify-center">
                 <div
-                  className={`w-full rounded-t-md transition-all duration-200 ${
+                  className={`w-full rounded-t-md transition-colors duration-200 ${
                     b.live
-                      ? isHovered ? "bg-amber-500 shadow-md shadow-amber-500/20" : "bg-amber-500/70"
-                      : isHovered ? "bg-[#E11D48] shadow-md shadow-rose-600/30 scale-x-105" : "bg-[#E11D48]/80"
+                      ? isHovered ? "bg-amber-500" : "bg-amber-500/70"
+                      : isHovered ? "bg-[#E11D48]" : "bg-[#E11D48]/80"
                   }`}
                   style={{ height: `${Math.max(6, (b.points / max) * 100)}%` }}
                 />
@@ -423,17 +603,19 @@ function FinishBySeasonChart({ seasons }: { seasons: SeasonRecord[] }) {
               key={s.season}
               onMouseEnter={() => setHoveredSeason(s.season)}
               onMouseLeave={() => setHoveredSeason(null)}
-              className="group flex h-full flex-1 cursor-pointer flex-col items-center"
+              className={`group flex h-full flex-1 cursor-pointer flex-col items-center rounded-lg px-1 transition-colors duration-150 ${
+                isHovered ? "bg-slate-900/[0.05] dark:bg-white/[0.06]" : ""
+              }`}
             >
               <span className={`h-5 shrink-0 text-[11px] font-sub font-bold leading-5 tabular-nums transition-colors ${
-                isHovered ? "text-emerald-600 dark:text-emerald-400 scale-110" : "text-slate-700 dark:text-slate-200"
+                isHovered ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400"
               }`}>
                 {pos > 0 ? `${pos}${ordinalSuffix(pos)}` : "—"}
               </span>
               <div className="flex min-h-0 w-full flex-1 items-end justify-center">
                 <div
-                  className={`w-full rounded-t-md transition-all duration-200 ${
-                    isHovered ? "bg-emerald-500 shadow-md shadow-emerald-500/30 scale-x-105" : "bg-emerald-500/70"
+                  className={`w-full rounded-t-md transition-colors duration-200 ${
+                    isHovered ? "bg-emerald-500" : "bg-emerald-500/70"
                   }`}
                   style={{ height: `${heightPct}%` }}
                 />

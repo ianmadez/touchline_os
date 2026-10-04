@@ -13,6 +13,37 @@
   --color-brand-red: #e11d48;
   --color-brand-red-hover: #ff8c7a;
 
+  /* --- Type scale ------------------------------------------------------------------------------
+     The app grew a long tail of hardcoded 8/9/10/11px sizes for labels, metadata and dense table
+     cells. At 10px an uppercase tracked label is barely legible and 11px body copy is worse, but the
+     sizes were not arbitrary: they encoded a real hierarchy, so the ladder keeps every step and
+     moves the floor up instead of flattening the steps together.
+
+     Every step came down 1px from the first pass: at the original sizes the WHOLE SCREEN read as
+     zoomed in, which is a different complaint from small text. 1px per step keeps each step's
+     relation to its neighbours intact while pulling the overall impression back.
+
+     The order matters and is kept strict - a source size must never render larger than a bigger
+     source size. The first pass broke that: an 11px call site rendered at 14px while a 12px
+     (`text-xs`) call site rendered at 13px, so the smaller label came out bigger than the larger one.
+
+     micro  10px  from 8/9px   inline status pills, badges
+     label  11px  from 10px    uppercase tracked eyebrow labels
+     dense  12px  from 11px    body copy inside dense panels
+     xs     13px  from 12px    metadata, secondary values, dense table cells
+     sm     14px  from 14px    card headings and reading copy
+     base   16px  unchanged */
+  --text-micro: 0.625rem;
+  --text-label: 0.6875rem;
+  --text-xs: 0.8125rem;
+  --text-dense: 0.75rem;
+  --text-sm: 0.875rem;
+
+  /* Uppercase tracked labels need a little less size than lowercase copy to read as equals, so
+     they keep their own leading rather than inheriting the body's. */
+  --text-micro--line-height: 1.4;
+  --text-label--line-height: 1.4;
+
   /* One shared easing so every interaction decelerates identically. */
   --ease-brand: cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -21,11 +52,39 @@
   --shadow-card-hover: 0 2px 4px oklch(0 0 0 / 0.05), 0 12px 28px -8px oklch(0 0 0 / 0.18);
 }
 
+/* --- Legacy small-text remap --------------------------------------------------------------------
+   22 files still hardcode 8/9/10/11px through arbitrary Tailwind values, and the worst of them
+   (`text-[8px]` badges) are not legible at any zoom. Rather than leave the tail behind, the four
+   legacy sizes are remapped here onto the real ladder above.
+
+   `!important` is required, not decorative: Tailwind emits these as ordinary utilities and they were
+   winning the cascade against a plain rule here (measured - 62 elements still computed at 10px with
+   the rule present). Doubling the class for specificity would win too, but `!important` says the
+   intent plainly.
+
+   The one cost is that a responsive variant on the SAME element is also overridden, because media
+   queries carry no specificity. Call sites that pair an arbitrary size with a responsive step are
+   therefore listed below and were rewritten to a single token instead of relying on the step.
+
+   No mapping ever shrinks text, and the original order is preserved (8/9 < 10 < 11), so hierarchy is
+   widened rather than flattened. Prefer the tokens in new code so the ladder stays in one place. */
+.text-\[8px\],
+.text-\[9px\] {
+  font-size: var(--text-micro) !important;
+}
+
+.text-\[10px\] {
+  font-size: var(--text-label) !important;
+}
+
+.text-\[11px\] {
+  font-size: var(--text-dense) !important;
+}
+
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
 }
-
 .dark {
   --background: #090d16;
   --foreground: #f8fafc;

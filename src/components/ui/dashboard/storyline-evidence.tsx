@@ -20,6 +20,8 @@ import {
   statusLabel,
   storylineDestination,
   storylineDestinationLabel,
+  storylineDestinationSubTab,
+  type SeasonSubTab,
 } from "@/lib/ui/labels";
 import { formatEventDate, provenanceLabel, summariseEvent } from "@/lib/ui/events";
 
@@ -36,7 +38,7 @@ export function StorylineEvidence({
 }: {
   storyline: StorylineItem | null;
   onClose: () => void;
-  onNavigateTab: (tab: AppTab) => void;
+  onNavigateTab: (tab: AppTab, seasonSubTab?: SeasonSubTab | null) => void;
 }) {
   // Escape is part of being a dialog. The player drawer does not have this; there is no reason for
   // a second view to inherit the omission.
@@ -170,7 +172,7 @@ export function StorylineEvidence({
         <footer className="border-t border-slate-200 px-5 py-4 dark:border-slate-800">
           <button
             type="button"
-            onClick={() => onNavigateTab(destination)}
+            onClick={() => onNavigateTab(destination, storylineDestinationSubTab(storyline.category))}
             className="w-full rounded-xl bg-[#E11D48] px-4 py-3 font-sub text-xs font-bold uppercase tracking-wider text-white shadow-md transition-colors hover:bg-[#FF8C7A] cursor-pointer"
           >
             {storylineDestinationLabel(storyline.category)} →

@@ -64,7 +64,7 @@ export function Navbar({
     { id: "SQUAD", label: "Squad" },
     { id: "TACTICS", label: "Tactics" },
     { id: "DEBRIEF", label: "Debrief" },
-    { id: "TIMELINE", label: "Timeline" },
+    { id: "FINANCE", label: "Finances" },
     { id: "SETTINGS", label: "Settings" },
   ];
 
@@ -142,7 +142,7 @@ export function Navbar({
                 <button
                   key={tab.id}
                   onClick={() => onSelectTab(tab.id)}
-                  className={`py-1.5 px-2.5 lg:px-4 rounded-lg font-sub text-[10px] lg:text-xs uppercase tracking-normal lg:tracking-wider transition-[background-color,color,box-shadow] duration-200 whitespace-nowrap cursor-pointer ${
+                  className={`py-1.5 px-2.5 lg:px-4 rounded-lg font-sub text-label lg:text-xs uppercase tracking-normal lg:tracking-wider transition-[background-color,color,box-shadow] duration-200 whitespace-nowrap cursor-pointer ${
                     isActive
                       ? "bg-[#E11D48] text-white font-bold shadow-md shadow-rose-600/30"
                       : "text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800 font-semibold"
@@ -169,7 +169,7 @@ export function Navbar({
             href="https://ko-fi.com/ianmadezoss"
             target="_blank"
             rel="noopener noreferrer"
-            className="hidden sm:inline-flex items-center justify-center min-h-10 whitespace-nowrap rounded-xl bg-amber-400 px-3 lg:px-4 py-2 font-sub text-[10px] lg:text-xs font-bold uppercase tracking-wider text-slate-950 shadow-xs transition-[background-color,transform] duration-200 hover:scale-[1.02] hover:bg-amber-300 active:scale-[0.96]"
+            className="hidden sm:inline-flex items-center justify-center min-h-10 whitespace-nowrap rounded-xl bg-amber-400 px-3 lg:px-4 py-2 font-sub text-label lg:text-xs font-bold uppercase tracking-wider text-slate-950 shadow-xs transition-[background-color,transform] duration-200 hover:scale-[1.02] hover:bg-amber-300 active:scale-[0.96]"
           >
             {/* The full label only where there is room for it; a phone keeps the short one. */}
             <span className="hidden lg:inline">Support! (Ko-Fi)</span>

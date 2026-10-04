@@ -546,6 +546,37 @@ function ObservedHalf({
           </div>
         )}
 
+        {observed.boardObjectives.length > 0 && (
+          <div className="space-y-2 pt-2">
+            <div className="text-[11px] font-sub font-bold uppercase text-slate-400">
+              What you set out to do
+            </div>
+            {observed.boardObjectives.map((objective) => (
+              <div
+                key={objective.id}
+                className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-sub dark:border-slate-800/80 dark:bg-slate-950/60"
+              >
+                <span className="mr-2 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                  P{objective.priority}
+                </span>
+                <span className="text-slate-800 dark:text-slate-100">{objective.title}</span>
+                <span className="ml-2 text-slate-500 dark:text-slate-400">
+                  · {objective.category.toLowerCase()} · {objective.status}
+                </span>
+                {objective.notes && (
+                  <div className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    {objective.notes}
+                  </div>
+                )}
+              </div>
+            ))}
+            <p className="text-[11px] font-sub text-slate-500 dark:text-slate-400">
+              Goals you added to the Board Objectives tracker for this season. These are yours rather
+              than the save&apos;s - the game never recorded them.
+            </p>
+          </div>
+        )}
+
         {observed.positions.length > 0 && (
           <div className="space-y-2 pt-2">
             <div className="text-[11px] font-sub font-bold uppercase text-slate-400">

@@ -64,7 +64,8 @@ export type EvidenceEventType =
   | "PLAYER_FORM_STREAK"
   | "PLAYER_OUT_OF_POSITION"
   | "TACTICAL_SLOT_UNASSIGNED"
-  | "SQUAD_DEPTH_THIN";
+  | "SQUAD_DEPTH_THIN"
+  | "PLAYER_PRAISED";
 
 /** A single thing we know, in a form that can be stored and shown without further interpretation. */
 export interface EvidenceFact {
@@ -185,6 +186,16 @@ export const DEPTH_PROBLEM_BELOW = 2;
 export const DEPTH_SOLVED_AT = DEPTH_PROBLEM_BELOW + 1;
 
 /**
+ * Manager praise: rolling window size and trigger thresholds.
+ *
+ * Evaluates manager debriefs over a rolling 5-match lookback. A player praised in 3+ debriefs
+ * within the window triggers or adopts a PRAISE storyline. If 5 consecutive debriefs elapse
+ * with 0 praise mentions for that player, the thread decays and resolves.
+ */
+export const ROLLING_DEBRIEF_WINDOW = 5;
+export const PRAISE_THRESHOLD = 3;
+
+/**
  * The save's own form scale, and where a thread opens and clears on it.
  *
  * `teamplayerlinks.form` is declared INTEGER with `rangehigh="5"` in `fifa_ng_db-meta.xml`, and the
@@ -232,7 +243,9 @@ function readFormGrade(value: number | null | undefined): number | null {
  */
 export function contractExpiryFacts(
   squad: EnrichedPlayer[],
-  currentSeason: number
+  currentSeason: number,
+  /** Player row ids in the manager's starting XI, so tone can tell a starter from a squad player. */
+  starterIds?: ReadonlySet<string>
 ): EvidenceFact[] {
   const facts: EvidenceFact[] = [];
 
@@ -262,6 +275,12 @@ export function contractExpiryFacts(
         primaryPosition: player.primaryPosition,
         contractValidUntil: until,
         seasonsLeft,
+        // Squad standing, so the composer can pitch the risk at a starter rather than a name.
+        // Read from state we already hold: `isYouthProspect` is a save-derived flag and the
+        // starter set is the manager's own XI. Absent means "not a starter", the honest default.
+        isStarter: starterIds?.has(player.id) ?? false,
+        isYouthProspect: player.isYouthProspect,
+        age: player.age,
       },
     });
   }
@@ -546,6 +565,152 @@ export function positionChangeFacts(observations: DevelopmentObservation[]): Evi
         fromDate: observation.fromDate,
       },
     });
+  }
+
+  return facts;
+}
+
+/** A player the manager singled out, and how often, inside the rolling debrief window. */
+export interface PraiseMention {
+  player: EnrichedPlayer;
+  count: number;
+  matchDetails: string[];
+}
+
+/**
+ * Every player the manager singled out in the rolling debrief window, with their mention count.
+ *
+ * Separate from `praiseFacts` because the trust pass needs the players at *zero* just as much as the
+ * ones above the threshold: a count of zero is what decays an elevated status back to baseline, and
+ * a function that only returned threads over the line could never see it.
+ *
+ * Enforces ID-first player matching discipline: reads `standoutPlayerIds` or
+ * `contributions[].playerId` first, then falls back to string names only when no id resolved - a name
+ * is a spelling, an id is an identity. Collects match context (opponent & scoreline) so narrative
+ * composition can describe specific performances rather than generic praise.
+ */
+export function collectPraiseMentions(
+  debriefEvents: Array<{ payloadJson: string; timestamp: string }>,
+  squad: EnrichedPlayer[]
+): Map<string, PraiseMention> {
+  const windowDebriefs = debriefEvents.slice(-ROLLING_DEBRIEF_WINDOW);
+  const praiseMap = new Map<string, PraiseMention>();
+  if (windowDebriefs.length === 0) return praiseMap;
+
+  const playerMapById = new Map(squad.map((p) => [p.id, p]));
+  const playerMapByEaId = new Map(squad.map((p) => [p.eaPlayerId, p]));
+  const playerMapByName = new Map(squad.map((p) => [p.name.toLowerCase(), p]));
+
+  for (const debrief of windowDebriefs) {
+    let parsed: {
+      standoutPlayerIds?: string[];
+      standoutPlayerNames?: string[];
+      standoutPlayerName?: string;
+      contributions?: Array<{ playerId?: string; playerName?: string }>;
+      scoreline?: string;
+      /** The club faced. The debrief route writes `opponent`; `opponentName` is the legacy shape. */
+      opponent?: string;
+      opponentName?: string;
+    };
+    try {
+      parsed = typeof debrief.payloadJson === "string" ? JSON.parse(debrief.payloadJson) : debrief.payloadJson;
+    } catch {
+      continue;
+    }
+
+    const opponent = parsed.opponent ?? parsed.opponentName;
+    const matchContext =
+      parsed.scoreline && opponent
+        ? `${parsed.scoreline} vs ${opponent}`
+        : parsed.scoreline || "Match";
+
+    const praisedInMatch = new Set<EnrichedPlayer>();
+
+    // 1. ID-First Matching: Check contributions and standoutPlayerIds
+    if (Array.isArray(parsed.contributions)) {
+      for (const c of parsed.contributions) {
+        if (c.playerId && playerMapById.has(c.playerId)) {
+          praisedInMatch.add(playerMapById.get(c.playerId)!);
+        }
+      }
+    }
+
+    if (Array.isArray(parsed.standoutPlayerIds)) {
+      for (const id of parsed.standoutPlayerIds) {
+        if (playerMapById.has(id)) {
+          praisedInMatch.add(playerMapById.get(id)!);
+        } else {
+          const numId = Number(id);
+          if (!isNaN(numId) && playerMapByEaId.has(numId)) {
+            praisedInMatch.add(playerMapByEaId.get(numId)!);
+          }
+        }
+      }
+    }
+
+    // 2. Secondary Fallback: Check string names if no ID matched
+    const rawNames: string[] = [];
+    if (Array.isArray(parsed.standoutPlayerNames)) {
+      rawNames.push(...parsed.standoutPlayerNames);
+    }
+    if (parsed.standoutPlayerName) {
+      rawNames.push(parsed.standoutPlayerName);
+    }
+
+    for (const rawName of rawNames) {
+      const matched = playerMapByName.get(rawName.trim().toLowerCase());
+      if (matched) {
+        praisedInMatch.add(matched);
+      }
+    }
+
+    for (const player of praisedInMatch) {
+      const entry = praiseMap.get(player.id) || { player, count: 0, matchDetails: [] };
+      entry.count += 1;
+      entry.matchDetails.push(matchContext);
+      praiseMap.set(player.id, entry);
+    }
+  }
+
+  return praiseMap;
+}
+
+/**
+ * Extracts deep player praise facts from the rolling window of recent match debriefs.
+ *
+ * The facts flavour of `collectPraiseMentions`: it reports only the players who cleared
+ * `PRAISE_THRESHOLD`, because a fact is a storyline. Everyone else is deliberately absent here and
+ * visible there, which is what lets the trust pass decay an elevated player back to baseline.
+ */
+export function praiseFacts(
+  debriefEvents: Array<{ payloadJson: string; timestamp: string }>,
+  squad: EnrichedPlayer[]
+): EvidenceFact[] {
+  const windowSize = Math.min(debriefEvents.length, ROLLING_DEBRIEF_WINDOW);
+  const praiseMap = collectPraiseMentions(debriefEvents, squad);
+
+  const facts: EvidenceFact[] = [];
+
+  for (const [playerId, { player, count, matchDetails }] of praiseMap.entries()) {
+    if (count >= PRAISE_THRESHOLD) {
+      facts.push({
+        eventType: "PLAYER_PRAISED",
+        source: "USER",
+        entityId: playerId,
+        key: `praise:${count}_in_${windowSize}:${matchDetails.length}`,
+        weight: count >= 4 ? "SERIOUS" : "NOTABLE",
+        summary: `Manager singled out ${player.name} in ${count} of the last ${windowSize} match debriefs.`,
+        payload: {
+          playerId: player.id,
+          eaPlayerId: player.eaPlayerId,
+          name: player.name,
+          primaryPosition: player.primaryPosition,
+          praiseCount: count,
+          windowSize,
+          matchDetails,
+        },
+      });
+    }
   }
 
   return facts;

@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { SubTabs } from "@/components/ui/sub-tabs";
+import { GroupDebriefPanel } from "@/components/ui/debrief/group-debrief-panel";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import type { ParsedCareerEvent } from "@/lib/services/event-service";
 import type { LeagueTeamSummary } from "@/lib/services/career-service";
@@ -21,8 +23,12 @@ interface DebriefViewProps {
   clubName?: string;
   /** The save's current in-game date, used to seed the match date. */
   inGameDate?: string | null;
+  /** The season a group debrief belongs to. Null when nothing is synced yet. */
+  seasonNumber?: number | null;
   onDebriefSubmitted: () => void;
 }
+
+type DebriefSubTab = "MATCH" | "GROUP";
 
 /**
  * Shape of a stored MATCH_DEBRIEF payload. Tolerant of the earlier single-standout shape so a
@@ -185,8 +191,10 @@ export function DebriefView({
   leagueTeams = NO_LEAGUE_TEAMS,
   clubName = "",
   inGameDate = null,
+  seasonNumber = null,
   onDebriefSubmitted,
 }: DebriefViewProps) {
+  const [subTab, setSubTab] = useState<DebriefSubTab>("MATCH");
   const [opponent, setOpponent] = useState("");
   const [opponentTeamId, setOpponentTeamId] = useState<string>("");
   // Scores are held as typed text so the boxes can be empty. See `ScoreBox`.
@@ -482,6 +490,26 @@ export function DebriefView({
           </p>
         </div>
       </div>
+
+      <SubTabs
+        tabs={[
+          { id: "MATCH", label: "Match debrief" },
+          { id: "GROUP", label: "Group debrief" },
+        ]}
+        active={subTab}
+        onChange={setSubTab}
+      />
+
+      {subTab === "GROUP" ? (
+        careerId ? (
+          <GroupDebriefPanel careerId={careerId} seasonNumber={seasonNumber} />
+        ) : (
+          <p className="font-sans text-xs text-slate-600 dark:text-slate-400">
+            Sync a career from the Portal to keep group debriefs.
+          </p>
+        )
+      ) : (
+        <>
 
       {message && (
         <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-900 text-slate-100 text-xs font-sub font-bold flex items-center justify-between">
@@ -1151,6 +1179,8 @@ export function DebriefView({
           </div>
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

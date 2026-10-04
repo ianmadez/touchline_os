@@ -10,6 +10,7 @@ import {
   WAGE_FORMATS,
   toClientSettings,
 } from "@/lib/services/settings-service";
+import { PLAYSTYLES } from "@/lib/playstyles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,6 +61,14 @@ function parsePatch(body: unknown): { patch: AppSettingsPatch; problems: string[
       problems.push(`realismLevel must be one of: ${REALISM_LEVELS.join(", ")}.`);
     } else {
       patch.realismLevel = input.realismLevel;
+    }
+  }
+
+  if (input.playstyle !== undefined) {
+    if (!isMember(PLAYSTYLES, input.playstyle)) {
+      problems.push(`playstyle must be one of: ${PLAYSTYLES.join(", ")}.`);
+    } else {
+      patch.playstyle = input.playstyle;
     }
   }
 

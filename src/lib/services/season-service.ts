@@ -23,6 +23,7 @@ import {
   careerSnapshots,
   careers,
   leaguePositions,
+  leagueTeams,
   seasonHistory,
   seasonProgress,
   storylines,
@@ -141,6 +142,28 @@ export interface SeasonState {
     reconciliation: RecordReconciliation;
     recordedPositions: number;
   };
+}
+
+/**
+ * One matchday reading of the within-season progress series.
+ *
+ * Supplied when a caller already holds the figures; omitted when the service should read the
+ * current position out of the state the app already derives (see `recordMatchdayProgress`).
+ */
+export interface MatchdayProgressInput {
+  seasonNumber: number;
+  matchday: number;
+  inGameDate?: string | null;
+  points: number;
+  tablePosition?: number | null;
+  tablePositionHigh?: number | null;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  form?: string | null;
 }
 
 function toRecord(
@@ -282,26 +305,26 @@ export class SeasonService {
       .orderBy(asc(seasonProgress.matchday));
   }
 
-  /** Record or update a matchday progress entry in the season series. */
+  /**
+   * Records (or updates) one matchday in the season progress series.
+   *
+   * The reading may be supplied explicitly by a caller that already holds the figures. When it is
+   * omitted - which is how the debrief routes and the sync pass call this - the figures are read out
+   * of the state the app already derives (see `deriveMatchdayProgress`), so a caller only has to say
+   * *which career*, not re-derive the season totals itself.
+   *
+   * Either way the row is keyed by `(career, season, matchday)` and upserted, so recording the same
+   * matchday again with fresher figures updates it in place instead of appending a duplicate. It is
+   * a no-op when there is genuinely nothing to record (no season yet, or no match played).
+   */
   async recordMatchdayProgress(
     careerId: string,
-    input: {
-      seasonNumber: number;
-      matchday: number;
-      inGameDate?: string | null;
-      points: number;
-      tablePosition?: number | null;
-      tablePositionHigh?: number | null;
-      played: number;
-      wins: number;
-      draws: number;
-      losses: number;
-      goalsFor: number;
-      goalsAgainst: number;
-      form?: string | null;
-    }
+    input?: MatchdayProgressInput
   ): Promise<void> {
-    const id = `${careerId}_s${input.seasonNumber}_m${input.matchday}`;
+    const reading = input ?? (await this.deriveMatchdayProgress(careerId));
+    if (!reading) return;
+
+    const id = `${careerId}_s${reading.seasonNumber}_m${reading.matchday}`;
     const snapshotId = await this.latestSnapshotId(careerId);
 
     await db
@@ -310,38 +333,100 @@ export class SeasonService {
         id,
         careerId,
         snapshotId,
-        seasonNumber: input.seasonNumber,
-        matchday: input.matchday,
-        inGameDate: input.inGameDate ?? null,
-        points: input.points,
-        tablePosition: input.tablePosition ?? null,
-        tablePositionHigh: input.tablePositionHigh ?? null,
-        played: input.played,
-        wins: input.wins,
-        draws: input.draws,
-        losses: input.losses,
-        goalsFor: input.goalsFor,
-        goalsAgainst: input.goalsAgainst,
-        form: input.form ?? null,
+        seasonNumber: reading.seasonNumber,
+        matchday: reading.matchday,
+        inGameDate: reading.inGameDate ?? null,
+        points: reading.points,
+        tablePosition: reading.tablePosition ?? null,
+        tablePositionHigh: reading.tablePositionHigh ?? null,
+        played: reading.played,
+        wins: reading.wins,
+        draws: reading.draws,
+        losses: reading.losses,
+        goalsFor: reading.goalsFor,
+        goalsAgainst: reading.goalsAgainst,
+        form: reading.form ?? null,
         provenance: "DERIVED",
       })
       .onConflictDoUpdate({
         target: [seasonProgress.careerId, seasonProgress.seasonNumber, seasonProgress.matchday],
         set: {
           snapshotId,
-          inGameDate: input.inGameDate ?? null,
-          points: input.points,
-          tablePosition: input.tablePosition ?? null,
-          tablePositionHigh: input.tablePositionHigh ?? null,
-          played: input.played,
-          wins: input.wins,
-          draws: input.draws,
-          losses: input.losses,
-          goalsFor: input.goalsFor,
-          goalsAgainst: input.goalsAgainst,
-          form: input.form ?? null,
+          inGameDate: reading.inGameDate ?? null,
+          points: reading.points,
+          tablePosition: reading.tablePosition ?? null,
+          tablePositionHigh: reading.tablePositionHigh ?? null,
+          played: reading.played,
+          wins: reading.wins,
+          draws: reading.draws,
+          losses: reading.losses,
+          goalsFor: reading.goalsFor,
+          goalsAgainst: reading.goalsAgainst,
+          form: reading.form ?? null,
         },
       });
+  }
+
+  /**
+   * The current matchday reading, read out of state the app already holds.
+   *
+   * The save carries no per-match series for our division, so the honest "matchday" is the save's
+   * own count of matches played this season, and the figures are its own season totals - the
+   * all-competition numbers `SeasonRecord` documents. `matchday` is therefore a match ordinal, not
+   * a league round.
+   *
+   * Two things are deliberately left out of a derived reading:
+   *
+   * - **League position.** A season row's `tablePosition` is 0 until the season completes, and the
+   *   only live position the save keeps is the disputed `currenttableposition` hint. Writing that
+   *   hint here would feed the disputed figure into the position model as an observation of its own,
+   *   so position stays null unless a caller passes a real reading.
+   * - **Form** is the save's own opaque result string for our club, stored verbatim like the rest.
+   *
+   * Returns null when there is no season row yet or no match has been played - a zero-match
+   * "matchday 0" would be a fabricated point on the chart rather than a reading.
+   */
+  private async deriveMatchdayProgress(
+    careerId: string
+  ): Promise<MatchdayProgressInput | null> {
+    const latest = await db
+      .select()
+      .from(seasonHistory)
+      .where(eq(seasonHistory.careerId, careerId))
+      .orderBy(desc(seasonHistory.season))
+      .limit(1)
+      .get();
+
+    const played = latest?.gamesPlayed ?? 0;
+    if (!latest || played <= 0) return null;
+
+    const [career, ownClub] = await Promise.all([
+      db
+        .select({ inGameDate: careers.inGameDate })
+        .from(careers)
+        .where(eq(careers.id, careerId))
+        .get(),
+      db
+        .select({ form: leagueTeams.form })
+        .from(leagueTeams)
+        .where(and(eq(leagueTeams.careerId, careerId), eq(leagueTeams.isOwnClub, true)))
+        .limit(1)
+        .get(),
+    ]);
+
+    return {
+      seasonNumber: latest.season,
+      matchday: played,
+      inGameDate: career?.inGameDate ?? null,
+      points: latest.points ?? 0,
+      played,
+      wins: latest.wins ?? 0,
+      draws: latest.draws ?? 0,
+      losses: latest.losses ?? 0,
+      goalsFor: latest.goalsFor ?? 0,
+      goalsAgainst: latest.goalsAgainst ?? 0,
+      form: ownClub?.form ?? null,
+    };
   }
 
   /**

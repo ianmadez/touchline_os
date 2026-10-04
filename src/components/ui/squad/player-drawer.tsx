@@ -10,6 +10,7 @@ import {
   rolesForPosition,
 } from "@/lib/tactics/roles";
 import { PlayerFace } from "./player-face";
+import { AttributeBars } from "./attribute-bars";
 import type { PlayerValuation } from "@/lib/services/value-service";
 import { formatMoney, formatMoneyExact } from "@/lib/ui/format";
 
@@ -404,6 +405,18 @@ export function PlayerDrawer({ player, valuation, onClose, onSaveProfile }: Play
               </div>
             </div>
           </div>
+
+          {/* Every face stat, grouped as the game groups them, BELOW the notebook. The card is what
+              the manager acts on; the numbers are reference he consults after it. Read from the
+              world pool by EA player id - the squad table carries no attribute column. */}
+          {player.attributes && (
+            <section className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+              <h3 className="mb-3 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
+                Attributes
+              </h3>
+              <AttributeBars attributes={player.attributes} position={player.primaryPosition} />
+            </section>
+          )}
         </div>
       </div>
     </div>

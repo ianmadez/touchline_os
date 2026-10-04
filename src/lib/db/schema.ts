@@ -236,6 +236,15 @@ export const playerUserProfiles = sqliteTable(
     importanceMarker: text("importance_marker"), // e.g., "UNTOUCHABLE", "KEY_PLAYER", "SURPLUS"
     userNotes: text("user_notes"),
     primaryPosition: text("primary_position"), // User position override (e.g. ST, CM, CB)
+    /**
+     * Who owns `trustLevel` / `importanceMarker`.
+     *
+     * `USER` means the manager set them by hand and a derived pass must never touch them; `DERIVED`
+     * means the praise pass wrote them and may revise or clear them as the rolling window moves.
+     * NULL means neither has written them yet. Two tracks, never merged - the same discipline the
+     * career objectives use.
+     */
+    trustSource: text("trust_source"),
     provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
     updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   },
@@ -294,7 +303,7 @@ export const managerOnboardingProfiles = sqliteTable(
       .references(() => careers.id, { onDelete: "cascade" }),
     nationality: text("nationality"),
     tacticalPhilosophy: text("tactical_philosophy"), // e.g. Gegenpress, Tiki-Taka, Direct Counter
-    realismLevel: text("realism_level").notNull().default("REALISTIC"), // STRICT_REALISM, REALISTIC, BALANCED, CASUAL, CHAOS
+    realismLevel: text("realism_level").notNull().default("NORMAL"),
     favFormationsJson: text("fav_formations_json"), // JSON string array
     managerObjective: text("manager_objective"),
     boardObjective: text("board_objective"),
@@ -325,7 +334,15 @@ export const tacticalSystems = sqliteTable(
     careerId: text("career_id")
       .notNull()
       .references(() => careers.id, { onDelete: "cascade" }),
+    /**
+     * The manager's own name for this formation. It is the identity that keys the row, so a manager
+     * can keep as many formations as they like (Plan A, Plan B, "Cup away", ...) without any of them
+     * overwriting another. `formationName` stays the registry id of the shape.
+     */
+    label: text("label").notNull().default("Primary"),
     formationName: text("formation_name").notNull().default("4-3-3 Holding"),
+    /** True for the formation the rest of the app treats as the manager's current XI. */
+    isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
     baseShapeJson: text("base_shape_json").notNull(), // Pitch slot assignments JSON
     inPossessionShape: text("in_possession_shape"),
     outOfPossessionShape: text("out_of_possession_shape"),
@@ -337,7 +354,10 @@ export const tacticalSystems = sqliteTable(
   },
   (table) => ({
     careerIdx: index("idx_tactical_systems_career_id").on(table.careerId),
-    uniqueCareerTactics: uniqueIndex("uq_tactical_systems_career_id").on(table.careerId),
+    uniqueCareerFormation: uniqueIndex("uq_tactical_systems_career_label").on(
+      table.careerId,
+      table.label
+    ),
   })
 );
 
@@ -350,7 +370,11 @@ export const appSettings = sqliteTable("app_settings", {
   saveDirectory: text("save_directory"),
   syncTrigger: text("sync_trigger").notNull().default("ON_LAUNCH"), // ON_LAUNCH, MANUAL
   debriefFrequency: text("debrief_frequency").notNull().default("EVERY_MATCH"), // EVERY_MATCH, EVERY_2_MATCHES, EVERY_3_MATCHES, MANUAL
-  realismLevel: text("realism_level").notNull().default("REALISTIC"),
+  // CHAOS, STRICT_REALISM, NORMAL or OFF. Rows predating the four-level ladder may still hold the
+  // retired REALISTIC/BALANCED/CASUAL values; `normaliseRealismLevel` maps those to NORMAL on read.
+  realismLevel: text("realism_level").notNull().default("NORMAL"),
+  // The manager's run identity. OWN is a real choice rather than an absence: no constraint.
+  playstyle: text("playstyle").notNull().default("OWN"),
   currencySymbol: text("currency_symbol").notNull().default("GBP"), // GBP, EUR, USD
   wageFormat: text("wage_format").notNull().default("WEEKLY"), // WEEKLY, ANNUAL
   aiProvider: text("ai_provider").notNull().default("DISABLED"), // OLLAMA, GROQ, DISABLED
@@ -371,6 +395,7 @@ export const storylineCategoryEnum = [
   "TACTICAL",
   "DEVELOPMENT",
   "SEASON_OBJECTIVE",
+  "PRAISE",
 ] as const;
 export type StorylineCategory = (typeof storylineCategoryEnum)[number];
 
@@ -666,6 +691,44 @@ export const leaguePositions = sqliteTable(
 export const objectiveStatusEnum = ["ACTIVE", "MET", "MISSED", "CLOSED", "SUPERSEDED"] as const;
 export type ObjectiveStatus = (typeof objectiveStatusEnum)[number];
 
+/**
+ * The manager's own board-objective tracker.
+ *
+ * Separate from `careerObjectives` deliberately. That table mirrors what the SAVE decided: one
+ * objective per season, keyed by its source, and the save stores only a numeric code with no wording
+ * attached whatsoever. This one holds what the manager was actually told, in his own words or picked
+ * from the catalogue, and there are several of them at once across the five board categories.
+ *
+ * Folding them together would mean relaxing the save row's unique key to allow many rows - and that
+ * key is exactly what makes the save mirror trustworthy, since it is what stops a re-sync
+ * duplicating an objective it has already recorded.
+ */
+export const boardObjectives = sqliteTable(
+  "board_objectives",
+  {
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    seasonNumber: integer("season_number").notNull(),
+    /** One of the five board expectation categories. Free text in storage, typed by the app. */
+    category: text("category").notNull(),
+    /** The game's own 1-5 scale: 1 Critical, 5 Low. The manager sets it; the app never guesses it. */
+    priority: integer("priority").notNull().default(3),
+    title: text("title").notNull(),
+    status: text("status").notNull().default("ON_TRACK"),
+    notes: text("notes"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerSeasonIdx: index("idx_board_objectives_career_season").on(
+      table.careerId,
+      table.seasonNumber
+    ),
+  })
+);
+
 export const careerObjectives = sqliteTable(
   "career_objectives",
   {
@@ -783,3 +846,351 @@ export const seasonProgress = sqliteTable(
 );
 
 export type SeasonProgressRow = typeof seasonProgress.$inferSelect;
+
+// ============================================================================
+// 20. 5-MATCH TARGET BLOCKS (manager-reported micro-objectives)
+// ============================================================================
+//
+// Fully USER provenance, and deliberately so. The save carries no per-match results for our division
+// (its points columns are zeroed) and MATCH_DEBRIEF rows carry no season, so a block could not be
+// derived from either without inventing a binding. Instead the manager states the block: a target for
+// each of its five matches, and what actually happened. That makes every figure here a reported fact
+// rather than an estimate, and it is the only reading of "target block" this data can honestly
+// support.
+
+export const targetBlocks = sqliteTable(
+  "target_blocks",
+  {
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    /** The save's season ordinal, so blocks are scoped to one campaign. */
+    seasonNumber: integer("season_number").notNull(),
+    /** 1-based within the season. */
+    blockIndex: integer("block_index").notNull(),
+    /**
+     * The five match entries, USER-reported:
+     * `{ matchday, opponent, targetPoints, actualPoints, goalsFor, goalsAgainst }`.
+     * Targets and actuals are 0/1/3 (a loss, a draw, a win) - the same currency a league table uses.
+     */
+    matchesJson: text("matches_json").notNull(),
+    /** The band the block is judged against: e.g. 8-10 wanted, 11-12 a dream, <=6 a concern. */
+    targetMin: integer("target_min").notNull(),
+    targetMax: integer("target_max").notNull(),
+    dreamPoints: integer("dream_points").notNull(),
+    concernPoints: integer("concern_points").notNull(),
+    /**
+     * Where the club stood *before* the block's first match, as the manager read it off the table.
+     *
+     * Reported rather than derived, and that is the point: the save zeroes its own points columns for
+     * our division, so these four figures exist only because the manager typed them. They are what
+     * make the debrief's opening line ("36 played, 48 pts, 12th, +1") a fact instead of a guess.
+     */
+    gamesPlayedBefore: integer("games_played_before"),
+    pointsBefore: integer("points_before"),
+    positionBefore: integer("position_before"),
+    goalDifferenceBefore: integer("goal_difference_before"),
+    /** Where the club stood when the block ended, as the manager read it off the table. */
+    tablePosition: integer("table_position"),
+    notes: text("notes"),
+    provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_target_blocks_career_id").on(table.careerId),
+    uniqueBlock: uniqueIndex("uq_target_blocks_career_season_block").on(
+      table.careerId,
+      table.seasonNumber,
+      table.blockIndex
+    ),
+  })
+);
+
+export type TargetBlockRow = typeof targetBlocks.$inferSelect;
+
+// ============================================================================
+// CAREER FINANCE INPUTS (manager-stated budgets, all USER provenance)
+// ============================================================================
+//
+// FC 26 keeps the live transfer and wage budgets in memory and writes ZEROS to the save, so there is
+// no fact to read and no derivation that would not be invention. An entered figure is information,
+// so the app asks for the two numbers instead of printing a note about their absence.
+//
+// One row per career. A null column means "not stated", which is different from a stated zero - the
+// manager may genuinely have nothing left, and that is worth being able to say.
+
+export const careerFinanceInputs = sqliteTable(
+  "career_finance_inputs",
+  {
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    transferBudget: integer("transfer_budget"),
+    wageBudget: integer("wage_budget"),
+    notes: text("notes"),
+    provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerUnique: uniqueIndex("uq_career_finance_inputs_career").on(table.careerId),
+  })
+);
+
+export type CareerFinanceInputsRow = typeof careerFinanceInputs.$inferSelect;
+
+// ============================================================================
+// SCOUT TARGETS (the manager's own scouting board, all USER provenance)
+// ============================================================================
+//
+// Why this is manager-entered rather than read from the save: the game stores no player valuation
+// anywhere (`players` has no value column, and `career_presignedcontract` is the only table carrying
+// an agreed fee), and the parser decodes the players table squad-filtered, so there is no world pool
+// of other clubs' players to search. A scouting board built on nothing would be fabricated, so the
+// manager states what he has actually seen in-game and Touchline does the arithmetic that follows:
+// budget headroom, the gap between his valuation and the asking price, and the age profile.
+//
+// Keyed uniquely on (career, name) so adding someone already on the board updates him instead of
+// creating a duplicate.
+
+export const scoutTargetStatuses = [
+  "WATCHING",
+  "SHORTLISTED",
+  "BID",
+  "AGREED",
+  "SIGNED",
+  "PASSED",
+] as const;
+export const scoutTargetPriorities = ["DREAM", "TOP", "HIGH", "MEDIUM", "LOW"] as const;
+
+/**
+ * Why a target was set aside. The reason is what makes the archive a MEMORY rather than a graveyard:
+ * a target rejected for age can never become relevant again, while one rejected for price can - so the
+ * resurfacing pass has to know which is which before it decides to bring anything back.
+ */
+export const scoutArchiveReasons = [
+  "TOO_EXPENSIVE",
+  "WAGE_HIGH",
+  "AGE_MISMATCH",
+  "POSTPONED",
+] as const;
+export type ScoutArchiveReason = (typeof scoutArchiveReasons)[number];
+export type ScoutTargetStatus = (typeof scoutTargetStatuses)[number];
+export type ScoutTargetPriority = (typeof scoutTargetPriorities)[number];
+
+export const scoutTargets = sqliteTable(
+  "scout_targets",
+  {
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /**
+     * The pool player this entry was pinned from, when it came from a search rather than being typed.
+     *
+     * This is what makes the shortlist a LAYER on the search rather than a copy of it: the row can be
+     * traced back to the real player, and a hand-entered target simply leaves it null. Nullable on
+     * purpose - the shortlist long predates the world pool and must keep working for typed rows.
+     */
+    eaPlayerId: integer("ea_player_id"),
+    clubName: text("club_name"),
+    position: text("position"),
+    age: integer("age"),
+    overallRating: integer("overall_rating"),
+    potentialRating: integer("potential_rating"),
+    /** What the manager reckons he is worth. His own judgement, not a fitted model. */
+    valueEstimate: integer("value_estimate"),
+    /** What his club is asking. This is the number that actually decides affordability. */
+    askingPrice: integer("asking_price"),
+    wageDemand: integer("wage_demand"),
+    priority: text("priority", { enum: scoutTargetPriorities }).notNull().default("MEDIUM"),
+    status: text("status", { enum: scoutTargetStatuses }).notNull().default("WATCHING"),
+    notes: text("notes"),
+    /** Set when the manager sets the target aside. Null while the target is live. */
+    archiveReason: text("archive_reason", { enum: scoutArchiveReasons }),
+    archivedAt: text("archived_at"),
+    /**
+     * The value band midpoint at the moment of archiving.
+     *
+     * Stored rather than re-derived so the resurfacing test is a comparison against what he actually
+     * cost when the manager said no. Re-deriving it later would compare the new model against the new
+     * model, which always reports no change.
+     */
+    valueAtArchive: integer("value_at_archive"),
+    /** Contract expiry at the moment of archiving, so a renewal since then is visible as a change. */
+    contractAtArchive: integer("contract_at_archive"),
+    /**
+     * The transfer budget at the moment of archiving.
+     *
+     * This is what makes POSTPONED mean anything. "Not now" only has a trigger if we know what the
+     * manager could not afford at the time - otherwise there is no signal to watch and the reason is
+     * a label rather than a rule.
+     */
+    budgetAtArchive: integer("budget_at_archive"),
+    /** The last time this was surfaced again, so a recurring alert cannot nag every single search. */
+    resurfacedAt: text("resurfaced_at"),
+    provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_scout_targets_career_id").on(table.careerId),
+    uniqueTarget: uniqueIndex("uq_scout_targets_career_name").on(table.careerId, table.name),
+  })
+);
+
+export type ScoutTargetRow = typeof scoutTargets.$inferSelect;
+
+//
+// The manager's own academy, decoded from `career_youthplayers`.
+//
+// This is NOT the first-team squad filtered by age, which is what the Youth tab had to show before
+// anything read the academy table. Academy players have no `teamplayerlinks` row - they are unpromoted,
+// so nothing links them to the first team - and their ids sit in a generated range that appears in
+// neither the squad nor the world pool.
+//
+// The assessment fields are stored as RANGES because the save describes some prospects more than once
+// and the rows disagree, with no timestamp or "latest" flag to order them by. See `YouthProspectRow`
+// for the full reasoning. `assessmentCount` travels with the range so the UI can say how thin it is.
+//
+export const youthProspects = sqliteTable(
+  "youth_prospects",
+  {
+    /** `careerId:playerId` - one row per prospect per career, so a re-sync replaces rather than adds. */
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    /** The save's own player id, not an EA id. Kept so a dossier can be reopened by id. */
+    playerId: integer("player_id").notNull(),
+    name: text("name"),
+    nameSource: text("name_source"),
+    positionCode: integer("position_code"),
+    primaryPosition: text("primary_position"),
+    age: integer("age"),
+    birthdate: integer("birthdate"),
+    overallRating: integer("overall_rating"),
+    potentialRating: integer("potential_rating"),
+    tierLow: integer("tier_low"),
+    tierHigh: integer("tier_high"),
+    swingLowMin: integer("swing_low_min"),
+    swingLowMax: integer("swing_low_max"),
+    varianceMin: integer("variance_min"),
+    varianceMax: integer("variance_max"),
+    monthsInSquad: integer("months_in_squad"),
+    /** How many academy rows describe him. 1 means a single reading and no range to display. */
+    assessmentCount: integer("assessment_count").notNull().default(1),
+    goals: integer("goals"),
+    appearances: integer("appearances"),
+    provenance: text("provenance", { enum: provenanceEnum }).notNull().default("SAVE"),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_youth_prospects_career_id").on(table.careerId),
+    uniqueProspect: uniqueIndex("uq_youth_prospects_career_player").on(
+      table.careerId,
+      table.playerId
+    ),
+  })
+);
+
+export type YouthProspectEntry = typeof youthProspects.$inferSelect;
+
+// ============================================================================
+// WORLD PLAYERS (every professional in the save, decoded for scouting)
+// ============================================================================
+//
+// 21,166 rows in the reference career, against the 24 the squad-filtered decode used to take. This is
+// SAVE data: rating, potential, age, club, foot, weak foot, skill moves and every face stat are read
+// straight from the file and are never rewritten by a model.
+//
+// The three `value_*` columns are the exception and are DERIVED, written at persist time so a search
+// can filter and sort in SQL rather than in memory. They are the band, not a point estimate, and
+// every surface must render them through the value-band formatter - a bare number is never allowed.
+//
+// `name_resolved` exists because 7,058 of the 21,166 rows have no name in the save. A text search
+// EXCLUDES those rather than returning them namelessly; they are still fully usable as players and
+// are labelled "name not in this save" wherever they are shown.
+
+export const worldPlayers = sqliteTable(
+  "world_players",
+  {
+    id: text("id").primaryKey(), // `${careerId}_${eaPlayerId}`
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    eaPlayerId: integer("ea_player_id").notNull(),
+    name: text("name").notNull(),
+    /** False when the save carries no name. Only the NAME is missing - every other field is intact. */
+    nameResolved: integer("name_resolved", { mode: "boolean" }).notNull().default(false),
+    clubId: integer("club_id"),
+    clubName: text("club_name"),
+    positionCode: integer("position_code"),
+    primaryPosition: text("primary_position").notNull().default("SUB"),
+    overallRating: integer("overall_rating"),
+    potentialRating: integer("potential_rating"),
+    age: integer("age"),
+    preferredFoot: integer("preferred_foot"),
+    weakFoot: integer("weak_foot"),
+    skillMoves: integer("skill_moves"),
+    internationalRep: integer("international_rep"),
+    heightCm: integer("height_cm"),
+    /** DERIVED band. Null when no basis existed at all; never rendered as a point estimate. */
+    valueLow: integer("value_low"),
+    valueMid: integer("value_mid"),
+    valueHigh: integer("value_high"),
+    /** `LOW` | `MEDIUM` | `HIGH` - how much evidence the band rests on. */
+    valueConfidence: text("value_confidence"),
+    /** The six face-stat groups, as the game groups them. One blob, read only by the dossier. */
+    attributesJson: text("attributes_json").notNull(),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_world_players_career_id").on(table.careerId),
+    uniquePlayer: uniqueIndex("uq_world_players_career_player").on(table.careerId, table.eaPlayerId),
+    valueIdx: index("idx_world_players_career_value").on(table.careerId, table.valueHigh),
+    ratingIdx: index("idx_world_players_career_rating").on(table.careerId, table.overallRating),
+    positionIdx: index("idx_world_players_career_position").on(table.careerId, table.primaryPosition),
+    ageIdx: index("idx_world_players_career_age").on(table.careerId, table.age),
+  })
+);
+
+export type WorldPlayerRow = typeof worldPlayers.$inferSelect;
+
+// ============================================================================
+// WORLD PLAYER OVERRIDES (what the manager says about a world player)
+// ============================================================================
+//
+// The save stores a foot for every player, but the game's stored foot is not always the one he is
+// used on, so the manager can state his own. It lives in its OWN table rather than on `world_players`
+// for the reason the whole project keeps coming back to: `world_players` is a SAVE fact and must stay
+// rewritable from the file on every sync, so a USER value stored on it would either be lost on the
+// next sync or would silently stop reflecting the save. Keeping them apart means the dossier can show
+// both and say which is which.
+
+export const worldPlayerOverrides = sqliteTable(
+  "world_player_overrides",
+  {
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    eaPlayerId: integer("ea_player_id").notNull(),
+    /** 1 = right, 2 = left, matching the save's own code. Null clears the override. */
+    preferredFoot: integer("preferred_foot"),
+    provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    uniqueOverride: uniqueIndex("uq_world_player_overrides_career_player").on(
+      table.careerId,
+      table.eaPlayerId
+    ),
+  })
+);
+
+export type WorldPlayerOverrideRow = typeof worldPlayerOverrides.$inferSelect;

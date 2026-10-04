@@ -20,14 +20,15 @@ export function LandingPage({
 }: LandingPageProps) {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
 
-  // Paste your image paths in `imageSrc` whenever you have them ready!
+  // Landing screenshots. Each one is captured from the running app against a real save rather than
+  // mocked up, so this page cannot quietly drift from what the product actually shows.
   const bentoImages = {
-    snapshots: "", // e.g. "/screenshots/snapshot-audit.png"
-    pitch: "",     // e.g. "/screenshots/pitch-2d.png"
-    notebook: "",  // e.g. "/screenshots/card-flip.png"
-    bridge: "",    // e.g. "/screenshots/save-picker.png"
-    youth: "",     // e.g. "/screenshots/youth-tracker.png"
-    events: "",    // e.g. "/screenshots/timeline.png"
+    scouting: "/scoutinglanding.png",
+    pitch: "/pitchlanding.png",
+    dossier: "/dossierlanding.png",
+    storylines: "/storylineslanding.png",
+    finances: "/financeslanding.png",
+    season: "/seasonlanding.png",
   };
 
   const faqs = [
@@ -37,7 +38,7 @@ export function LandingPage({
     },
     {
       q: "Where do I find my EA SPORTS FC save file on my computer?",
-      a: "TouchlineOS auto-detects your save folder on launch. It checks the places EA SPORTS FC writes careers to — a settings folder inside your Documents (in an FC 25 or FC 26 folder, including OneDrive Documents) and AppData\\Local\\EA SPORTS FC 25 or 26 — then lists every career save it finds.",
+      a: "TouchlineOS auto-detects your save folder on launch. It checks the places EA Sports EAFC writes careers to — a settings folder inside your Documents (in the title's own folder, including OneDrive Documents) and the AppData location for your installed title — then lists every career save it finds.",
     },
     {
       q: "Do I need any programming or technical knowledge to use this?",
@@ -199,24 +200,26 @@ export function LandingPage({
           <div className="md:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl hover:border-rose-300 dark:hover:border-rose-500/60 transition-all flex flex-col justify-between">
             <div className="mb-4">
               <h3 className="font-heading text-xl sm:text-2xl text-slate-900 dark:text-slate-100 uppercase mb-2">
-                Immutable Save Snapshots
+                Scout Every Player In Your Save
               </h3>
               <p className="font-sans text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                Every save sync creates a permanent audit record. Compare Snapshot N vs N-1 to track transfers, squad depth, and rating changes.
+                All 21,000 professionals in your career, searchable by rating, age, position and what you
+                can actually afford. Four strategies — Balanced, Immediate, Prospect and Value — rank
+                them the way a manager shops, with a value band and a confidence tag on every one.
               </p>
             </div>
 
             <div className="relative w-full h-60 sm:h-72 rounded-2xl bg-slate-900 dark:bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 font-sub text-xs uppercase">
-              {bentoImages.snapshots ? (
+              {bentoImages.scouting ? (
                 <Image
-                  src={bentoImages.snapshots}
-                  alt="Snapshot Audit View"
+                  src={bentoImages.scouting}
+                  alt="Scouting search over the whole save"
                   fill
-                  sizes="(min-width: 768px) 33vw, 100vw"
-                  className="object-cover"
+                  sizes="(min-width: 768px) 66vw, 100vw"
+                  className="object-cover object-top"
                 />
               ) : (
-                <span>[ Image Slot: Snapshot Audit View ]</span>
+                <span>[ Image Slot: Scouting Search ]</span>
               )}
             </div>
           </div>
@@ -228,7 +231,7 @@ export function LandingPage({
                 2D Interactive Pitch
               </h3>
               <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                Map your starting XI across 13 distinct 3, 4, and 5-at-the-back tactical shapes directly on a realistic pitch overlay.
+                Map your starting XI across 33 distinct 3, 4, and 5-at-the-back tactical shapes directly on a realistic pitch overlay, with a sortable bench for filling them.
               </p>
             </div>
 
@@ -239,7 +242,7 @@ export function LandingPage({
                   alt="2D Pitch Canvas"
                   fill
                   sizes="(min-width: 768px) 33vw, 100vw"
-                  className="object-cover"
+                  className="object-cover object-top"
                 />
               ) : (
                 <span>[ Image Slot: 2D Pitch Canvas ]</span>
@@ -251,24 +254,25 @@ export function LandingPage({
           <div className="md:col-span-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xl hover:border-rose-300 dark:hover:border-rose-500/60 transition-all flex flex-col justify-between">
             <div className="mb-4">
               <h3 className="font-heading text-lg text-slate-900 dark:text-slate-100 uppercase mb-2">
-                Manager Intent Notebook
+                Full Player Dossiers
               </h3>
               <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                Tag players as Untouchable or Surplus. Set custom trust levels and bespoke roles no AI can overwrite.
+                Every face stat the save holds — pace, shooting, passing, dribbling, defending and
+                physical — alongside weak foot, skill moves and where his value sits.
               </p>
             </div>
 
             <div className="relative w-full h-44 rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 dark:text-slate-500 font-sub text-xs uppercase">
-              {bentoImages.notebook ? (
+              {bentoImages.dossier ? (
                 <Image
-                  src={bentoImages.notebook}
-                  alt="Player Card Assessment"
+                  src={bentoImages.dossier}
+                  alt="Player dossier with attribute bars"
                   fill
                   sizes="(min-width: 768px) 33vw, 100vw"
-                  className="object-cover"
+                  className="object-cover object-top"
                 />
               ) : (
-                <span>[ Image Slot: Player Assessment ]</span>
+                <span>[ Image Slot: Player Dossier ]</span>
               )}
             </div>
           </div>
@@ -277,24 +281,25 @@ export function LandingPage({
           <div className="md:col-span-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xl hover:border-rose-300 dark:hover:border-rose-500/60 transition-all flex flex-col justify-between">
             <div className="mb-4">
               <h3 className="font-heading text-lg text-slate-900 dark:text-slate-100 uppercase mb-2">
-                Save Bridge
+                What Matters Right Now
               </h3>
               <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                Auto-detects local save directories and extracts factual squad data, player overall ratings, and wages.
+                TouchlineOS reads your save and says what deserves attention: a contract running out, a
+                slump, a squad grown too thin. Every thread opens the evidence behind it.
               </p>
             </div>
 
             <div className="relative w-full h-44 rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 dark:text-slate-500 font-sub text-xs uppercase">
-              {bentoImages.bridge ? (
+              {bentoImages.storylines ? (
                 <Image
-                  src={bentoImages.bridge}
-                  alt="Save Bridge Picker"
+                  src={bentoImages.storylines}
+                  alt="What Matters Right Now storyline feed"
                   fill
                   sizes="(min-width: 768px) 33vw, 100vw"
-                  className="object-cover"
+                  className="object-cover object-top"
                 />
               ) : (
-                <span>[ Image Slot: Save Bridge ]</span>
+                <span>[ Image Slot: Storyline Feed ]</span>
               )}
             </div>
           </div>
@@ -303,24 +308,25 @@ export function LandingPage({
           <div className="md:col-span-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xl hover:border-rose-300 dark:hover:border-rose-500/60 transition-all flex flex-col justify-between">
             <div className="mb-4">
               <h3 className="font-heading text-lg text-slate-900 dark:text-slate-100 uppercase mb-2">
-                Youth Prospect Tracker
+                Finances You Can Audit
               </h3>
               <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                Monitors academy talent directly from save files, tracking growth trajectories into first-team stars.
+                Every figure is labelled with where it came from — read from the save, worked out by
+                TouchlineOS, or entered by you. Where the game stores nothing, you state it yourself.
               </p>
             </div>
 
             <div className="relative w-full h-44 rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 dark:text-slate-500 font-sub text-xs uppercase">
-              {bentoImages.youth ? (
+              {bentoImages.finances ? (
                 <Image
-                  src={bentoImages.youth}
-                  alt="Youth Prospect Tracker"
+                  src={bentoImages.finances}
+                  alt="Finance figures each labelled with their provenance"
                   fill
                   sizes="(min-width: 768px) 33vw, 100vw"
-                  className="object-cover"
+                  className="object-cover object-top"
                 />
               ) : (
-                <span>[ Image Slot: Youth Tracker ]</span>
+                <span>[ Image Slot: Finances ]</span>
               )}
             </div>
           </div>
@@ -329,24 +335,25 @@ export function LandingPage({
           <div className="md:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl hover:border-rose-300 dark:hover:border-rose-500/60 transition-all flex flex-col justify-between">
             <div className="mb-4">
               <h3 className="font-heading text-xl text-slate-900 dark:text-slate-100 uppercase mb-2">
-                Timeline & Grounded AI
+                Your Season, Charted
               </h3>
               <p className="font-sans text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                Every career milestone is logged automatically, with a clear note of where each fact came from. Optional local Ollama and Groq models add narrative colour without ever rewriting your save history.
+                Points and finishing position season by season, a matchday trajectory, and the target you
+                set for each block of five against what you actually took from it.
               </p>
             </div>
 
             <div className="relative w-full h-44 rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center text-slate-400 dark:text-slate-500 font-sub text-xs uppercase">
-              {bentoImages.events ? (
+              {bentoImages.season ? (
                 <Image
-                  src={bentoImages.events}
-                  alt="Event Timeline Feed"
+                  src={bentoImages.season}
+                  alt="Season charts showing points and finishing position"
                   fill
                   sizes="(min-width: 768px) 66vw, 100vw"
-                  className="object-cover"
+                  className="object-cover object-top"
                 />
               ) : (
-                <span>[ Image Slot: Event Timeline Feed ]</span>
+                <span>[ Image Slot: Season Charts ]</span>
               )}
             </div>
           </div>
@@ -360,7 +367,7 @@ export function LandingPage({
               ...And Much More!
             </h3>
             <p className="font-sans text-xs text-slate-300 leading-relaxed">
-              Including post-match debriefs, board objective tracking, your own realism rules, and local database exports.
+              Including post-match debriefs, board objective tracking and local database exports.
             </p>
           </div>
         </div>
@@ -378,9 +385,9 @@ export function LandingPage({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 text-left">
-          <div className="border-l-2 border-[#E11D48] pl-4">
-            <span className="font-sub text-[10px] text-[#E11D48] font-bold uppercase tracking-wider block">
-              Phase 0 - 7 (Active MVP)
+          <div className="border-l-2 border-slate-300 dark:border-slate-700 pl-4">
+            <span className="font-sub text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider block">
+              v0.1 (Shipped)
             </span>
             <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mt-0.5 mb-1">
               The Solid Core
@@ -395,16 +402,16 @@ export function LandingPage({
               v0.2
             </span>
             <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mt-0.5 mb-1">
-              Dynamic Debriefs
+              Dynamic Debriefs (Shipped)
             </h4>
             <p className="font-sans text-xs text-slate-600 dark:text-slate-300">
               Anomaly-triggered post-match questions, storyline tracking, and basic analytics graphs.
             </p>
           </div>
 
-          <div className="border-l-2 border-slate-300 dark:border-slate-700 pl-4">
-            <span className="font-sub text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider block">
-              v0.3
+          <div className="border-l-2 border-[#E11D48] pl-4">
+            <span className="font-sub text-[10px] text-[#E11D48] font-bold uppercase tracking-wider block">
+              v0.3 (Active)
             </span>
             <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mt-0.5 mb-1">
               Transfers & Youth

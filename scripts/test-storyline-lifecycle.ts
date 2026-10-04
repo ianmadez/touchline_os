@@ -410,7 +410,7 @@ function testComposer(): void {
       eventType: "PLAYER_CONTRACT_EXPIRING",
       summary: "A. Player's contract runs out at the end of 2027.",
       weight: "NOTABLE",
-      payload: { contractValidUntil: 2027, seasonsLeft: 1 },
+      payload: { name: "A. Player", contractValidUntil: 2027, seasonsLeft: 1 },
       observedAt: "2026-09-01T00:00:00.000Z",
     },
   ];
@@ -444,7 +444,7 @@ function testComposer(): void {
 
   check(
     "a single fact gets a headline that names the situation, not the fact type",
-    note.title.startsWith("A. Player - ") &&
+    note.title.startsWith("Contract Watch: A. Player") &&
       /2027/.test(note.title) &&
       !note.title.endsWith("the contract"),
     note.title
@@ -453,7 +453,8 @@ function testComposer(): void {
     "a single fact still states the position and the decision",
     note.body.includes("his deal runs out at the end of 2027") &&
       /open(ing)? (renewal )?talks/.test(note.body) &&
-      /(let|letting) the deal run down/.test(note.body),
+      /(list(ing)? him|moving him on)/.test(note.body) &&
+      /(leave it|leaving it)/.test(note.body),
     note.body
   );
   check("a single fact has no history line", !/How it got there:|The run-up:|How it got to this:/.test(note.body), note.body);
@@ -464,10 +465,21 @@ function testComposer(): void {
     ) && report.body.split("his deal runs out at the end of 2027").length === 2,
     report.body
   );
+  // Substance, not bytes: the point is that a four-fact card states more of the evidence than a
+  // one-fact card. Byte length is a poor proxy (a player's initials alone split a sentence counter).
+  const evidenceFragments = [
+    "his deal runs out at the end of 2027",
+    "form has dropped to poor",
+    "moved from CM to CDM",
+    "gone up 3 overall",
+  ];
   check(
-    "a report is substantively bigger than a note",
-    report.body.length > note.body.length * 1.5,
-    `${note.body.length} -> ${report.body.length} chars`
+    "a report states more of the evidence than a note",
+    evidenceFragments.filter((fragment) => report.body.includes(fragment)).length === 4 &&
+      evidenceFragments.filter((fragment) => note.body.includes(fragment)).length === 1,
+    `note ${evidenceFragments.filter((fragment) => note.body.includes(fragment)).length}/4, report ${
+      evidenceFragments.filter((fragment) => report.body.includes(fragment)).length
+    }/4`
   );
 
   // Repeated readings of the SAME kind are a position that moved, not four competing statements.
@@ -487,12 +499,16 @@ function testComposer(): void {
   );
   check(
     "the depth headline counts rather than labelling",
-    depth.title.startsWith("CM - ") && /nobody|no cover/.test(depth.title),
+    depth.title.startsWith("Structural Vulnerability: ") &&
+      /CM/.test(depth.title) &&
+      /nobody|no specialist|no cover/i.test(depth.title),
     depth.title
   );
   check(
     "the depth decision names both options",
-    /sign(ing)? cover/.test(depth.body) && /does not need|do not need/.test(depth.body),
+    /promot/i.test(depth.body) &&
+      /secondary-position player/.test(depth.body) &&
+      /(transfer window|next window)/.test(depth.body),
     depth.body
   );
 
@@ -544,7 +560,7 @@ function testComposer(): void {
   );
   check(
     "a past-dated deal reads as past its date, not as a final year",
-    /run out|past the date|out of time/.test(pastDated.title) &&
+    /past the recorded|out of time|recorded date has gone/.test(pastDated.title) &&
       pastDated.body.includes("already passed the date the save records"),
     `${pastDated.title} | ${pastDated.body}`
   );
@@ -568,7 +584,8 @@ function testComposer(): void {
     noteVariants.every(
       (entry) =>
         /open(ing)? (renewal )?talks/.test(entry.body) &&
-        /(let|letting) the deal run down/.test(entry.body)
+        /(list(ing)? him|moving him on)/.test(entry.body) &&
+        /(leave it|leaving it)/.test(entry.body)
     ),
     [...bodies].join(" || ")
   );
@@ -585,7 +602,10 @@ function testComposer(): void {
   check(
     "the final-year variants all name renew-or-leave",
     finalYearVariants.every(
-      (entry) => /renew/i.test(entry.body) && /(goes|leaves|leaving|to leave)/i.test(entry.body)
+      (entry) =>
+        /renew/i.test(entry.body) &&
+        /(list him|cashing in)/i.test(entry.body) &&
+        /(hold him|holding to the end)/i.test(entry.body)
     ),
     [...new Set(finalYearVariants.map((entry) => entry.body))].join(" || ")
   );

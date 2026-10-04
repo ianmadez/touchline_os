@@ -8,7 +8,6 @@ export interface OnboardingInput {
   managerName: string;
   nationality?: string;
   tacticalPhilosophy: string;
-  realismLevel: "STRICT_REALISM" | "REALISTIC" | "BALANCED" | "CASUAL" | "CHAOS";
   favFormations: string[];
   managerObjective: string;
   boardObjective: string;
@@ -41,7 +40,6 @@ export class OnboardingService {
         .set({
           nationality: input.nationality,
           tacticalPhilosophy: input.tacticalPhilosophy,
-          realismLevel: input.realismLevel,
           favFormationsJson: JSON.stringify(input.favFormations),
           managerObjective: input.managerObjective,
           boardObjective: input.boardObjective,
@@ -55,7 +53,6 @@ export class OnboardingService {
         careerId: input.careerId,
         nationality: input.nationality,
         tacticalPhilosophy: input.tacticalPhilosophy,
-        realismLevel: input.realismLevel,
         favFormationsJson: JSON.stringify(input.favFormations),
         managerObjective: input.managerObjective,
         boardObjective: input.boardObjective,

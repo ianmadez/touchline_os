@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import {
   careers,
@@ -15,20 +15,25 @@ import {
 } from "../db/schema";
 import { EventService, ParsedCareerEvent } from "./event-service";
 import { EnrichedPlayer, SquadService, type SquadDepthAnalysis } from "./squad-service";
-import { PitchSlotAssignment, TacticsService } from "./tactics-service";
+import { PitchSlotAssignment, TacticsService, type TacticalSystemState } from "./tactics-service";
 import { SeasonService, type SeasonState } from "./season-service";
+import { UserProfileService } from "./user-profile-service";
 import { ValueService, type PlayerValuation } from "./value-service";
-import { FORMATIONS_REGISTRY, getFormationById } from "../tactics/formations";
+import { FORMATIONS_REGISTRY } from "../tactics/formations";
 import { StorylineItem, DomainEvent } from "../events/types";
 import {
   CONTRACT_CLEARED_SEASONS,
   DEPTH_SOLVED_AT,
   EvidenceFact,
   FORM_RECOVERED_AT,
+  ROLLING_DEBRIEF_WINDOW,
   contractExpiryFacts,
   developmentFacts,
   positionChangeFacts,
   formFacts,
+  PRAISE_THRESHOLD,
+  collectPraiseMentions,
+  praiseFacts,
   squadDepthFacts,
   evidenceEventId,
   resolveOverStale,
@@ -68,7 +73,6 @@ export interface OnboardingInput {
   managerName?: string | null;
   nationality?: string | null;
   tacticalPhilosophy?: string | null;
-  realismLevel?: string | null;
   favFormations?: string[] | null;
   managerObjective?: string | null;
   boardObjective?: string | null;
@@ -90,7 +94,6 @@ export interface CareerSummary {
 export interface CareerOnboardingState {
   nationality: string | null;
   tacticalPhilosophy: string | null;
-  realismLevel: string;
   favFormations: string[];
   managerObjective: string | null;
   boardObjective: string | null;
@@ -107,6 +110,11 @@ export interface CareerHydrationPayload extends CareerSummary {
   players: EnrichedPlayer[];
   formationId: string;
   tacticsSlots: PitchSlotAssignment[];
+  /**
+   * Every formation this manager has saved, default first. The manager may keep any number of them;
+   * `formationId`/`tacticsSlots` above are the current XI (the default one) for older consumers.
+   */
+  formations: TacticalSystemState[];
   recentEvents: ParsedCareerEvent[];
   storylines: StorylineItem[];
   onboarding: CareerOnboardingState | null;
@@ -154,6 +162,7 @@ export class CareerService {
   private eventService = new EventService();
   private seasonService = new SeasonService();
   private valueService = new ValueService();
+  private userProfileService = new UserProfileService();
 
   async getCareerRow(careerId: string) {
     return db.select().from(careers).where(eq(careers.id, careerId)).get();
@@ -168,8 +177,15 @@ export class CareerService {
     const career = await this.getCareerRow(careerId);
     if (!career) return null;
 
-    const [players, tacticState, recentEvents, onboardingRow, latestSnapshot, leagueTeamRows] =
-      await Promise.all([
+    const [
+      players,
+      tacticState,
+      recentEvents,
+      onboardingRow,
+      latestSnapshot,
+      leagueTeamRows,
+      formationList,
+    ] = await Promise.all([
         this.squadService.getCurrentSquad(careerId, career.inGameDate),
         this.tacticsService.getTacticalSystem(careerId),
         this.eventService.getTimeline(careerId, 25),
@@ -192,6 +208,7 @@ export class CareerService {
           // Alphabetical here only so the input to the display sort below is deterministic; the
           // ordering that matters (own club first, then by position) is applied to the payload.
           .orderBy(leagueTeams.name),
+        this.tacticsService.listFormations(careerId),
       ]);
 
     const activeStorylines = await this.evaluateAndSyncStorylines(
@@ -219,6 +236,7 @@ export class CareerService {
       players,
       formationId: tacticState.formationName,
       tacticsSlots: tacticState.slots,
+      formations: formationList,
       recentEvents,
       storylines: activeStorylines,
       seasonState,
@@ -243,7 +261,6 @@ export class CareerService {
         ? {
             nationality: onboardingRow.nationality,
             tacticalPhilosophy: onboardingRow.tacticalPhilosophy,
-            realismLevel: onboardingRow.realismLevel,
             favFormations: onboardingRow.favFormationsJson
               ? (JSON.parse(onboardingRow.favFormationsJson) as string[])
               : [],
@@ -272,7 +289,6 @@ export class CareerService {
         .set({
           nationality: input.nationality ?? existing.nationality,
           tacticalPhilosophy: input.tacticalPhilosophy ?? existing.tacticalPhilosophy,
-          realismLevel: input.realismLevel ?? existing.realismLevel,
           favFormationsJson: favFormationsJson ?? existing.favFormationsJson,
           managerObjective: input.managerObjective ?? existing.managerObjective,
           boardObjective: input.boardObjective ?? existing.boardObjective,
@@ -287,7 +303,6 @@ export class CareerService {
         careerId,
         nationality: input.nationality ?? null,
         tacticalPhilosophy: input.tacticalPhilosophy ?? null,
-        realismLevel: input.realismLevel ?? "REALISTIC",
         favFormationsJson,
         managerObjective: input.managerObjective ?? null,
         boardObjective: input.boardObjective ?? null,
@@ -301,49 +316,50 @@ export class CareerService {
   }
 
   /**
-   * Seeds the tactical system from the manager's favourite formation the first time a
-   * career is opened. Existing user layouts are never overwritten.
+   * Seeds the manager's first formation from their favourite shape when a career is first opened.
+   *
+   * It only acts when the career has NO saved formation at all, so a manager who has since added,
+   * renamed, emptied or deleted formations is never overwritten by the onboarding preference.
    */
   async ensureInitialTactics(careerId: string, favFormations?: string[] | null): Promise<void> {
+    const existing = await this.tacticsService.listFormations(careerId);
+    if (existing.length > 0) return;
+
     const formationId = resolveFormationId(favFormations?.[0]);
     if (!formationId) return;
 
-    const current = await this.tacticsService.getTacticalSystem(careerId);
-    const hasAssignedPlayer = current.slots.some((slot) => slot.playerId !== null);
-    const hasStoredSystem = current.formationName !== "4-3-3-holding" || hasAssignedPlayer;
-    if (hasStoredSystem) return;
-
-    const definition = getFormationById(formationId);
-    await this.tacticsService.saveTacticalSystem({
-      careerId,
+    await this.tacticsService.createFormation(careerId, {
       formationName: formationId,
-      slots: definition.slots.map((slot) => ({
-        slotIndex: slot.slotIndex,
-        role: slot.role,
-        label: slot.label,
-        playerId: null,
-        eaPlayerId: null,
-        playerName: null,
-        overallRating: null,
-      })),
+      label: "Primary",
     });
   }
 
+  /**
+   * Saves the slots of ONE formation.
+   *
+   * `label` selects which; omitting it means the current XI, so a caller that only knows about a
+   * single formation keeps working, and editing a Plan B can never touch the default's slots.
+   */
   async saveTactics(
     careerId: string,
     formationId: string,
-    slots: PitchSlotAssignment[]
+    slots: PitchSlotAssignment[],
+    label?: string
   ): Promise<void> {
-    const current = await this.tacticsService.getTacticalSystem(careerId);
+    const all = await this.tacticsService.listFormations(careerId);
+    const target =
+      all.find((formation) => formation.label === label) ?? all.find((f) => f.isDefault) ?? all[0];
     await this.tacticsService.saveTacticalSystem({
       careerId,
+      label: target?.label ?? label ?? "Primary",
+      isDefault: target?.isDefault ?? all.length === 0,
       formationName: resolveFormationId(formationId) ?? formationId,
       slots,
-      inPossessionShape: current.inPossessionShape,
-      outOfPossessionShape: current.outOfPossessionShape,
-      pressingStyle: current.pressingStyle,
-      buildUpStyle: current.buildUpStyle,
-      notes: current.notes,
+      inPossessionShape: target?.inPossessionShape ?? null,
+      outOfPossessionShape: target?.outOfPossessionShape ?? null,
+      pressingStyle: target?.pressingStyle ?? null,
+      buildUpStyle: target?.buildUpStyle ?? null,
+      notes: target?.notes ?? null,
     });
     await this.touchCareer(careerId);
   }
@@ -491,7 +507,17 @@ export class CareerService {
     // thinks about it - a decision about a named person, not a squad-wide statistic. The thread id
     // is derived from the player rather than random, so re-evaluating cannot open a second thread
     // about the same contract.
-    for (const fact of contractExpiryFacts(squad, currentSeason)) {
+    // The manager's starting XI, so a contract thread can pitch its tone at a starter rather than a
+    // name. USER data from the tactics service; an unset shape yields an empty set, which the probe
+    // reads as "not a starter" rather than guessing a standing from a rating.
+    const tacticalSystem = await this.tacticsService.getTacticalSystem(careerId);
+    const starterIds = new Set(
+      tacticalSystem.slots
+        .map((slot) => slot.playerId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    );
+
+    for (const fact of contractExpiryFacts(squad, currentSeason, starterIds)) {
       const threadId = deterministicStorylineId(careerId, "CONTRACT", fact.entityId);
       // The title states the situation, not just the name - a card headed only "Trygve Danielsen"
       // tells the manager nothing about why it is on the screen.
@@ -637,7 +663,7 @@ export class CareerService {
         await openOrAdoptThread({
           category: "FORM",
           discriminator: fact.entityId,
-          title: `${playerName} - form watch`,
+          title: `${playerName} form watch`,
           adoptBySubject: playerName,
           fact,
         });
@@ -648,6 +674,44 @@ export class CareerService {
         if (open) pending.push({ fact, storylineId: open.id });
       }
     }
+
+    // Rule 1e: Manager Praise Storylines
+    //
+    // Evaluates standout player mentions across the rolling 5-debrief window.
+    // Opens or adopts a PRAISE storyline when a player reaches 3+ mentions.
+    const debriefRows = await db
+      .select({ payloadJson: careerEvents.payloadJson, timestamp: careerEvents.timestamp })
+      .from(careerEvents)
+      .where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "MATCH_DEBRIEF")))
+      .orderBy(asc(careerEvents.timestamp));
+
+    for (const fact of praiseFacts(debriefRows, squad)) {
+      const playerName = String(fact.payload.name);
+      await openOrAdoptThread({
+        category: "PRAISE",
+        discriminator: fact.entityId,
+        title: `${playerName} manager praise`,
+        adoptBySubject: playerName,
+        fact,
+      });
+    }
+
+    // The praise-to-trust overlay. It reads the same rolling window as the PRAISE thread, so the
+    // card and the trust badge can never disagree about how much praise a player has had. Elevation
+    // takes PRAISE_THRESHOLD mentions; one more adds the marker tier. Anything less is baseline,
+    // which is exactly what decays an elevated player once the window stops carrying him.
+    const praiseMentions = collectPraiseMentions(debriefRows, squad);
+    await this.userProfileService.syncPraiseTrust({
+      careerId,
+      evaluations: squad.map((player) => {
+        const count = praiseMentions.get(player.id)?.count ?? 0;
+        return {
+          eaPlayerId: player.eaPlayerId,
+          trustLevel: count >= PRAISE_THRESHOLD ? ("HIGH" as const) : ("MEDIUM" as const),
+          importanceMarker: count >= PRAISE_THRESHOLD + 1 ? ("KEY_PLAYER" as const) : null,
+        };
+      }),
+    });
 
     // The evidence pass. Writes the facts gathered above and guarantees every thread carries at
     // least its own opening fact, which is what makes a thread readable rather than a bare flag.
@@ -670,7 +734,8 @@ export class CareerService {
       evidenceMap,
       depthAnalysis,
       recentEvents,
-      currentSeason
+      currentSeason,
+      debriefRows
     );
 
     return threads.map((s) => {
@@ -791,7 +856,8 @@ export class CareerService {
     evidenceMap: Record<string, DomainEvent[]>,
     depthAnalysis: SquadDepthAnalysis,
     recentEvents: ParsedCareerEvent[],
-    currentSeason: number
+    currentSeason: number,
+    debriefRows: Array<{ payloadJson: string; timestamp: string }> = []
   ): Promise<void> {
     const active = threads.filter((thread) => thread.status === "ACTIVE");
     if (active.length === 0) return;
@@ -897,6 +963,34 @@ export class CareerService {
         const player = playerFor(thread.id);
         // Nothing answers a progress thread yet, so the only closure is losing sight of the player.
         decision = resolveOverStale({ answered: false, unobservable: !player });
+      } else if (thread.category === "PRAISE") {
+        const player = playerFor(thread.id);
+        if (!player) {
+          decision = resolveOverStale({ answered: false, unobservable: true });
+        } else {
+          const windowDebriefs = debriefRows.slice(-ROLLING_DEBRIEF_WINDOW);
+          let praiseCountInWindow = 0;
+          for (const debrief of windowDebriefs) {
+            try {
+              const p = typeof debrief.payloadJson === "string" ? JSON.parse(debrief.payloadJson) : debrief.payloadJson;
+              const hasId =
+                (Array.isArray(p.contributions) && p.contributions.some((c: { playerId?: string }) => c.playerId === player.id)) ||
+                (Array.isArray(p.standoutPlayerIds) && p.standoutPlayerIds.some((id: string | number) => id === player.id || Number(id) === player.eaPlayerId));
+              const rawNames: string[] = [
+                ...(Array.isArray(p.standoutPlayerNames) ? p.standoutPlayerNames : []),
+                ...(p.standoutPlayerName ? [p.standoutPlayerName] : []),
+              ];
+              const hasName = rawNames.some((n) => n.trim().toLowerCase() === player.name.toLowerCase());
+              if (hasId || hasName) praiseCountInWindow++;
+            } catch {
+              /* ignore parse error */
+            }
+          }
+          decision = resolveOverStale({
+            answered: windowDebriefs.length > 0 && praiseCountInWindow === 0,
+            unobservable: false,
+          });
+        }
       }
 
       if (!decision) continue;

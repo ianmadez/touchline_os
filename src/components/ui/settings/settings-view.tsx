@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   AI_PROVIDERS,
   AppSettingsPatch,
@@ -8,11 +8,23 @@ import {
   ClientAppSettings,
   DEBRIEF_FREQUENCIES,
   labelFor,
+  REALISM_HINTS,
   REALISM_LEVELS,
   SYNC_TRIGGERS,
   WAGE_FORMATS,
 } from "@/lib/settings-vocabulary";
+import { PLAYSTYLE_DEFINITIONS, PLAYSTYLES } from "@/lib/playstyles";
 import { ThemeMode } from "@/lib/session";
+import {
+  countUnseen,
+  getSeenSnapshot,
+  markSeen,
+  seenForCareer,
+  subscribeSeen,
+} from "@/lib/session";
+import type { ParsedCareerEvent } from "@/lib/services/event-service";
+import { SubTabs, type SubTabOption } from "@/components/ui/sub-tabs";
+import { CareerTimeline } from "@/components/ui/settings/career-timeline";
 
 export interface ActionResult {
   ok: boolean;
@@ -56,11 +68,27 @@ interface SettingsViewProps {
   diagnostics: Diagnostics | null;
   diagnosticsError: string | null;
   themeMode: ThemeMode;
+  /** The career timeline feed. It lives inside Settings rather than owning a top-level tab. */
+  timeline: ParsedCareerEvent[];
   onUpdateSetting: (field: string, patch: AppSettingsPatch) => void;
   onSetTheme: (mode: ThemeMode) => void;
   onRefreshDiagnostics: () => void;
   onExport: () => Promise<ActionResult>;
   onResetCareer: () => Promise<ActionResult>;
+}
+
+type SettingsSubTab = "PREFERENCES" | "TIMELINE";
+
+/** Only shown once there is something new, so the badge never reads as decoration. */
+function settingsSubTabs(unseenTimeline: number): ReadonlyArray<SubTabOption<SettingsSubTab>> {
+  return [
+    { id: "PREFERENCES", label: "Preferences" },
+    {
+      id: "TIMELINE",
+      label: "Career Timeline",
+      badge: unseenTimeline > 0 ? `${unseenTimeline} new` : undefined,
+    },
+  ];
 }
 
 function formatBytes(bytes: number | null): string {
@@ -106,11 +134,19 @@ function Segmented<T extends string>({
   disabled?: boolean;
   name: string;
 }) {
+  // `flex w-full` rather than `inline-flex`. With `inline-flex` the group sized itself to max-content,
+  // which made IT the widest thing on the page - so at narrow widths it pushed the whole card wider
+  // than the viewport and the segments leaked off the edge of the screen. `flex-wrap` never fired,
+  // because a flex container that sizes to its content has nothing to wrap against. Taking the full
+  // width of its column gives it a real edge to wrap at, and `min-w-0` on the Field's control column
+  // lets that column shrink. The explanation lives here rather than beside the attribute: a JSX
+  // `{/* */}` comment is not legal between the attributes of an opening tag, which is what broke this
+  // file the first time it was written.
   return (
     <div
       role="radiogroup"
       aria-label={name}
-      className="inline-flex flex-wrap gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800"
+      className="flex w-full min-w-0 flex-wrap gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800"
     >
       {options.map((option) => {
         const active = value === option;
@@ -122,7 +158,7 @@ function Segmented<T extends string>({
             aria-checked={active}
             disabled={disabled}
             onClick={() => onChange(option)}
-            className={`px-3 py-1.5 rounded-lg font-sub text-[11px] font-bold uppercase cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`max-w-full whitespace-normal text-center px-3 py-1.5 rounded-lg font-sub text-[11px] font-bold uppercase cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               active
                 ? "bg-[#E11D48] text-white"
                 : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800"
@@ -162,7 +198,11 @@ function Field({
           <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{hint}</p>
         )}
       </div>
-      <div className="shrink-0">{children}</div>
+      {/* `min-w-0` and deliberately NOT `shrink-0`.
+          The control used to refuse to shrink, which made it the widest thing on the page: at narrow
+          widths it pushed the whole card past the viewport edge and the segments leaked off screen.
+          A control that cannot shrink cannot wrap either, so `flex-wrap` on the group never fired. */}
+      <div className="min-w-0 max-w-full">{children}</div>
     </div>
   );
 }
@@ -174,18 +214,39 @@ export function SettingsView({
   diagnostics,
   diagnosticsError,
   themeMode,
+  timeline,
   onUpdateSetting,
   onSetTheme,
   onRefreshDiagnostics,
   onExport,
   onResetCareer,
 }: SettingsViewProps) {
+  const [subTab, setSubTab] = useState<SettingsSubTab>("PREFERENCES");
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState<"export" | "reset" | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
 
   const activeCareerId = diagnostics?.activeCareer?.careerId ?? null;
   const canReset = activeCareerId !== null && confirmText === activeCareerId && busy === null;
+
+  // ---------------------------------------------------------------------------
+  // The timeline badge counts what has arrived since the manager last opened the tab. Like a
+  // notification, opening it is what clears it - deferred a tick so the count is still on screen
+  // for the click that opened it rather than vanishing under the cursor.
+  // ---------------------------------------------------------------------------
+  const seenRaw = useSyncExternalStore(subscribeSeen, getSeenSnapshot, () => null);
+  const seenAt = useMemo(() => seenForCareer(seenRaw, activeCareerId), [seenRaw, activeCareerId]);
+  const unseenTimeline = useMemo(
+    () => countUnseen(timeline.map((event) => event.timestamp), seenAt.TIMELINE),
+    [timeline, seenAt.TIMELINE]
+  );
+  const subTabs = useMemo(() => settingsSubTabs(unseenTimeline), [unseenTimeline]);
+
+  useEffect(() => {
+    if (subTab !== "TIMELINE") return;
+    const timer = window.setTimeout(() => markSeen(activeCareerId, "TIMELINE"), 0);
+    return () => window.clearTimeout(timer);
+  }, [subTab, activeCareerId]);
 
   const runExport = async () => {
     setBusy("export");
@@ -223,13 +284,17 @@ export function SettingsView({
         </p>
       </div>
 
+      <SubTabs tabs={subTabs} active={subTab} onChange={setSubTab} />
+
       {settingsError && (
         <p className="rounded-xl border border-rose-300 dark:border-rose-500/50 bg-rose-50 dark:bg-rose-500/10 px-4 py-3 font-sub text-xs text-rose-700 dark:text-rose-300">
           {settingsError}
         </p>
       )}
 
-      {!settings ? (
+      {subTab === "TIMELINE" ? (
+        <CareerTimeline events={timeline} />
+      ) : !settings ? (
         <p className="font-sans text-xs text-slate-600 dark:text-slate-400">Loading settings…</p>
       ) : (
         <>
@@ -303,6 +368,24 @@ export function SettingsView({
                 disabled={savingField !== null}
                 onChange={(next) => onUpdateSetting("realismLevel", { realismLevel: next })}
               />
+              <p className="mt-2 max-w-full font-sans text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                {/* Falls back to NORMAL rather than rendering nothing: a client holding a value from
+                    before the ladder was collapsed would otherwise show an empty paragraph. */}
+                {REALISM_HINTS[settings.realismLevel] ?? REALISM_HINTS.NORMAL}
+              </p>
+            </Field>
+
+            <Field label="Manager playstyle" saving={savingField === "playstyle"}>
+              <Segmented
+                name="Manager playstyle"
+                value={settings.playstyle}
+                options={PLAYSTYLES}
+                disabled={savingField !== null}
+                onChange={(next) => onUpdateSetting("playstyle", { playstyle: next })}
+              />
+              <p className="mt-2 max-w-full font-sans text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                {PLAYSTYLE_DEFINITIONS[settings.playstyle]?.hint ?? PLAYSTYLE_DEFINITIONS.OWN.hint}
+              </p>
             </Field>
 
             <Field label="Currency" saving={savingField === "currencySymbol"}>
@@ -484,7 +567,7 @@ export function SettingsView({
         </>
       )}
 
-      {result && (
+      {result && subTab === "PREFERENCES" && (
         <p
           className={`rounded-xl border px-4 py-3 font-sub text-xs ${
             result.ok

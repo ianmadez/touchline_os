@@ -178,7 +178,7 @@ async function initDatabase() {
       career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
       nationality TEXT,
       tactical_philosophy TEXT,
-      realism_level TEXT NOT NULL DEFAULT 'REALISTIC',
+      realism_level TEXT NOT NULL DEFAULT 'NORMAL',
       fav_formations_json TEXT,
       manager_objective TEXT,
       board_objective TEXT,
@@ -195,7 +195,9 @@ async function initDatabase() {
     CREATE TABLE IF NOT EXISTS tactical_systems (
       id TEXT PRIMARY KEY,
       career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      label TEXT NOT NULL DEFAULT 'Primary',
       formation_name TEXT NOT NULL DEFAULT '4-3-3 Holding',
+      is_default INTEGER NOT NULL DEFAULT 0,
       base_shape_json TEXT NOT NULL,
       in_possession_shape TEXT,
       out_of_possession_shape TEXT,
@@ -206,7 +208,9 @@ async function initDatabase() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_tactical_systems_career_id ON tactical_systems(career_id);
-    CREATE UNIQUE INDEX IF NOT EXISTS uq_tactical_systems_career_id ON tactical_systems(career_id);
+    -- NOTE: the unique index on (career_id, label) is created in the alter statements below, NOT
+    -- here. On an existing database the CREATE TABLE IF NOT EXISTS above is skipped, so the label
+    -- column does not exist yet at this point and an index on it would fail before the ALTER runs.
 
     -- 11. APP SETTINGS
     CREATE TABLE IF NOT EXISTS app_settings (
@@ -214,7 +218,8 @@ async function initDatabase() {
       save_directory TEXT,
       sync_trigger TEXT NOT NULL DEFAULT 'ON_LAUNCH',
       debrief_frequency TEXT NOT NULL DEFAULT 'EVERY_MATCH',
-      realism_level TEXT NOT NULL DEFAULT 'REALISTIC',
+      realism_level TEXT NOT NULL DEFAULT 'NORMAL',
+      playstyle TEXT NOT NULL DEFAULT 'OWN',
       currency_symbol TEXT NOT NULL DEFAULT 'GBP',
       wage_format TEXT NOT NULL DEFAULT 'WEEKLY',
       ai_provider TEXT NOT NULL DEFAULT 'DISABLED',
@@ -326,6 +331,25 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_career_objectives_career_id ON career_objectives(career_id);
     CREATE INDEX IF NOT EXISTS idx_career_objectives_status ON career_objectives(status);
     CREATE UNIQUE INDEX IF NOT EXISTS uq_career_objectives_career_season_source ON career_objectives(career_id, season_number, source);
+
+    -- 12g. THE MANAGER'S BOARD-OBJECTIVE TRACKER
+    -- Separate from career_objectives, which mirrors the save's single numeric objective code and
+    -- therefore has a unique key of one row per season. This holds what the manager was told, across
+    -- the five board categories, with the priority the game assigned and his own progress status.
+    CREATE TABLE IF NOT EXISTS board_objectives (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      season_number INTEGER NOT NULL,
+      category TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 3,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ON_TRACK',
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_board_objectives_career_season ON board_objectives(career_id, season_number);
     -- 16. TRANSFER DEALS (observed prices)
     CREATE TABLE IF NOT EXISTS transfer_deals (
       id TEXT PRIMARY KEY,
@@ -405,6 +429,144 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_season_progress_career_id ON season_progress(career_id);
     CREATE INDEX IF NOT EXISTS idx_season_progress_snapshot_id ON season_progress(snapshot_id);
     CREATE UNIQUE INDEX IF NOT EXISTS uq_season_progress_career_season_matchday ON season_progress(career_id, season_number, matchday);
+
+    -- 20. GROUP DEBRIEFS / 5-MATCH TARGET BLOCKS (manager-reported micro-objectives; all USER provenance)
+    CREATE TABLE IF NOT EXISTS target_blocks (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      season_number INTEGER NOT NULL,
+      block_index INTEGER NOT NULL,
+      matches_json TEXT NOT NULL,
+      target_min INTEGER NOT NULL,
+      target_max INTEGER NOT NULL,
+      dream_points INTEGER NOT NULL,
+      concern_points INTEGER NOT NULL,
+      games_played_before INTEGER,
+      points_before INTEGER,
+      position_before INTEGER,
+      goal_difference_before INTEGER,
+      table_position INTEGER,
+      notes TEXT,
+      provenance TEXT NOT NULL DEFAULT 'USER',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_target_blocks_career_id ON target_blocks(career_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_target_blocks_career_season_block ON target_blocks(career_id, season_number, block_index);
+
+    -- 21. CAREER FINANCE INPUTS (the two budgets the save refuses to carry; USER provenance)
+    CREATE TABLE IF NOT EXISTS career_finance_inputs (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      transfer_budget INTEGER,
+      wage_budget INTEGER,
+      notes TEXT,
+      provenance TEXT NOT NULL DEFAULT 'USER',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_career_finance_inputs_career ON career_finance_inputs(career_id);
+
+    -- 22. SCOUT TARGETS (the manager's own scouting board; USER provenance)
+    CREATE TABLE IF NOT EXISTS scout_targets (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      club_name TEXT,
+      position TEXT,
+      age INTEGER,
+      overall_rating INTEGER,
+      potential_rating INTEGER,
+      value_estimate INTEGER,
+      asking_price INTEGER,
+      wage_demand INTEGER,
+      priority TEXT NOT NULL DEFAULT 'MEDIUM',
+      status TEXT NOT NULL DEFAULT 'WATCHING',
+      notes TEXT,
+      provenance TEXT NOT NULL DEFAULT 'USER',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_scout_targets_career_id ON scout_targets(career_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_scout_targets_career_name ON scout_targets(career_id, name);
+
+    -- 24. YOUTH PROSPECTS
+    -- The save's own academy table (career_youthplayers), not the squad filtered by age. Assessment
+    -- fields are ranges because the save assesses some prospects more than once and the rows disagree.
+    -- NOTE: no backticks anywhere in this SQL - it lives inside a template literal, and a stray one
+    -- closes the string and breaks the whole script. That has happened once already.
+    CREATE TABLE IF NOT EXISTS youth_prospects (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      player_id INTEGER NOT NULL,
+      name TEXT,
+      name_source TEXT,
+      position_code INTEGER,
+      primary_position TEXT,
+      age INTEGER,
+      birthdate INTEGER,
+      overall_rating INTEGER,
+      potential_rating INTEGER,
+      tier_low INTEGER,
+      tier_high INTEGER,
+      swing_low_min INTEGER,
+      swing_low_max INTEGER,
+      variance_min INTEGER,
+      variance_max INTEGER,
+      months_in_squad INTEGER,
+      assessment_count INTEGER NOT NULL DEFAULT 1,
+      goals INTEGER,
+      appearances INTEGER,
+      provenance TEXT NOT NULL DEFAULT 'SAVE',
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_youth_prospects_career_id ON youth_prospects(career_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_youth_prospects_career_player ON youth_prospects(career_id, player_id);
+    -- Added after the fact: links a pinned target back to its world-pool player. Null for typed rows.
+    -- No index: the shortlist is tens of rows and is never queried BY this column.
+
+    -- 23. WORLD PLAYERS (every professional in the save, for scouting search)
+    CREATE TABLE IF NOT EXISTS world_players (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      ea_player_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      name_resolved INTEGER NOT NULL DEFAULT 0,
+      club_id INTEGER,
+      club_name TEXT,
+      position_code INTEGER,
+      primary_position TEXT NOT NULL DEFAULT 'SUB',
+      overall_rating INTEGER,
+      potential_rating INTEGER,
+      age INTEGER,
+      preferred_foot INTEGER,
+      weak_foot INTEGER,
+      skill_moves INTEGER,
+      international_rep INTEGER,
+      height_cm INTEGER,
+      value_low INTEGER,
+      value_mid INTEGER,
+      value_high INTEGER,
+      value_confidence TEXT,
+      attributes_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_world_players_career_player ON world_players(career_id, ea_player_id);
+    CREATE INDEX IF NOT EXISTS idx_world_players_career_value ON world_players(career_id, value_high);
+    CREATE INDEX IF NOT EXISTS idx_world_players_career_rating ON world_players(career_id, overall_rating);
+    CREATE INDEX IF NOT EXISTS idx_world_players_career_position ON world_players(career_id, primary_position);
+    CREATE INDEX IF NOT EXISTS idx_world_players_career_age ON world_players(career_id, age);
+
+    -- 24. WORLD PLAYER OVERRIDES (manager-stated foot, USER provenance)
+    CREATE TABLE IF NOT EXISTS world_player_overrides (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      ea_player_id INTEGER NOT NULL,
+      preferred_foot INTEGER,
+      provenance TEXT NOT NULL DEFAULT 'USER',
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_world_player_overrides_career_player ON world_player_overrides(career_id, ea_player_id);
   `);
 
   // Auto-migration checks for existing databases
@@ -412,6 +574,21 @@ async function initDatabase() {
     "ALTER TABLE players ADD COLUMN primary_position TEXT NOT NULL DEFAULT 'SUB';",
     "ALTER TABLE player_snapshots ADD COLUMN primary_position TEXT NOT NULL DEFAULT 'SUB';",
     "ALTER TABLE player_user_profiles ADD COLUMN primary_position TEXT;",
+    "ALTER TABLE player_user_profiles ADD COLUMN trust_source TEXT;",
+    // Rows that predate `trust_source` carry no ownership flag. Before the praise-derived pass
+    // existed, the only way a trust value could reach a row was the manager setting it by hand - so
+    // a value with no flag is HIS. Claiming these is what stops the derived pass overwriting a
+    // trust level the manager set long before this column existed.
+    "UPDATE player_user_profiles SET trust_source = 'USER' WHERE trust_source IS NULL AND (trust_level IS NOT NULL OR importance_marker IS NOT NULL);",
+    // The group debrief's opening line needs the club's situation BEFORE the block, and the save
+    // zeroes its own points columns for our division - so the manager reports these four by hand.
+    "ALTER TABLE target_blocks ADD COLUMN games_played_before INTEGER;",
+    "ALTER TABLE target_blocks ADD COLUMN points_before INTEGER;",
+    "ALTER TABLE target_blocks ADD COLUMN position_before INTEGER;",
+    "ALTER TABLE target_blocks ADD COLUMN goal_difference_before INTEGER;",
+    // Links a pinned shortlist target back to its world-pool player. Null for hand-typed rows, which
+    // is why it is nullable rather than defaulted.
+    "ALTER TABLE scout_targets ADD COLUMN ea_player_id INTEGER;",
     // Birthdate is a SAVE FACT captured so age is always re-derivable from the real in-game date.
     // Additive only - existing snapshot history is never rewritten.
     "ALTER TABLE players ADD COLUMN birthdate INTEGER;",
@@ -451,6 +628,27 @@ async function initDatabase() {
     "ALTER TABLE league_positions ADD COLUMN basis TEXT;",
     "ALTER TABLE league_positions ADD COLUMN evidence_count INTEGER;",
     "ALTER TABLE league_positions ADD COLUMN projected_best INTEGER;",
+    // A manager may keep as many formations as they like, so the one-row-per-career constraint is
+    // replaced by one-row-per-(career, label). The old index MUST be dropped first, or the second
+    // formation is rejected on every existing database.
+    "ALTER TABLE tactical_systems ADD COLUMN label TEXT NOT NULL DEFAULT 'Primary';",
+    "ALTER TABLE tactical_systems ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0;",
+    "DROP INDEX IF EXISTS uq_tactical_systems_career_id;",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_tactical_systems_career_label ON tactical_systems(career_id, label);",
+    // The single pre-existing formation becomes the manager's default so the current XI is unchanged.
+    "UPDATE tactical_systems SET is_default = 1 WHERE id IN (SELECT id FROM tactical_systems GROUP BY career_id HAVING COUNT(*) = 1);",
+    // The manager's run identity. Existing rows take OWN, which is the correct backfill: a manager who
+    // never chose a playstyle has no rule, and assuming one for him would change his results silently.
+    "ALTER TABLE app_settings ADD COLUMN playstyle TEXT NOT NULL DEFAULT 'OWN';",
+    // Scouting memory. A rejection is only useful later if we recorded WHY and what it cost at the
+    // time - without these, the archive is a list of names with no way to tell whether anything has
+    // changed since.
+    "ALTER TABLE scout_targets ADD COLUMN archive_reason TEXT;",
+    "ALTER TABLE scout_targets ADD COLUMN archived_at TEXT;",
+    "ALTER TABLE scout_targets ADD COLUMN value_at_archive INTEGER;",
+    "ALTER TABLE scout_targets ADD COLUMN contract_at_archive INTEGER;",
+    "ALTER TABLE scout_targets ADD COLUMN budget_at_archive INTEGER;",
+    "ALTER TABLE scout_targets ADD COLUMN resurfaced_at TEXT;",
   ];
 
   for (const stmt of alterStatements) {

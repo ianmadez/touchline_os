@@ -27,6 +27,7 @@ const EVENT_LABELS: Record<string, string> = {
   PLAYER_CONTRACT_EXPIRING: "Contract running out",
   PLAYER_DEVELOPED: "Rating movement",
   PLAYER_POSITION_CHANGED: "Position change",
+  PLAYER_PRAISED: "Player praised",
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -36,6 +37,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   TACTICAL: "Tactics",
   DEVELOPMENT: "Development",
   SEASON_OBJECTIVE: "Season objective",
+  PRAISE: "Manager praise",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -111,14 +113,20 @@ export function severityLabel(severity: string): string {
  */
 export function storylineDestination(
   category: string
-): "SQUAD" | "TACTICS" | "DEBRIEF" | "TIMELINE" {
+): "SQUAD" | "TACTICS" | "DEBRIEF" | "SEASON" {
   switch (category) {
     case "TACTICAL":
       return "TACTICS";
+    // Form is a run of results, and the run is charted on the Season screen. It used to point at
+    // the Timeline, which no longer has a top-level tab.
     case "FORM":
-      return "TIMELINE";
+      return "SEASON";
+    // A season objective is tracked on the Season screen, not in the debrief. It used to go to the
+    // debrief because the debrief was the only place a result could be logged against it - but the
+    // objective is the thing the manager is being asked to act on, so the objective is where the card
+    // has to land. Sending him to a debrief to "log a result" answered a question he had not asked.
     case "SEASON_OBJECTIVE":
-      return "DEBRIEF";
+      return "SEASON";
     default:
       return "SQUAD";
   }
@@ -132,8 +140,22 @@ export function storylineDestinationLabel(category: string): string {
     case "FORM":
       return "See the run";
     case "SEASON_OBJECTIVE":
-      return "Log a result";
+      return "View objectives";
     default:
       return "Open squad";
   }
+}
+
+/** The Season screen's inner tabs, shared so a call site cannot invent a name this screen lacks. */
+export type SeasonSubTab = "OUTLOOK" | "OBJECTIVES" | "CHARTS" | "VAULT";
+
+/**
+ * Which inner tab of the Season screen a storyline should open.
+ *
+ * Landing on the Season screen is not enough for an objective thread: the screen opens on Outlook, so
+ * "View objectives" would put the manager one tab away from the thing it just told him to look at.
+ * Returns null for the categories where the default tab IS the destination.
+ */
+export function storylineDestinationSubTab(category: string): SeasonSubTab | null {
+  return category === "SEASON_OBJECTIVE" ? "OBJECTIVES" : null;
 }

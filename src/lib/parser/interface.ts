@@ -316,6 +316,69 @@ export interface SquadEntry {
  * to `goalsAgainst` must never be described as league form; `tablePosition` is the only
  * league-specific value here.
  */
+/**
+ * One unpromoted academy player.
+ *
+ * These come from `career_youthplayers`, which is the save's own academy table - NOT a squad filtered
+ * by age, which is what the Youth tab showed before this existed.
+ *
+ * Two things about this table are worth knowing before reading the fields. Academy players have no
+ * `teamplayerlinks` row, because they are not in the first team, so their identity has to be pulled
+ * from `players` by id. And their ids sit in a generated range (460xxx in the reference save) that
+ * appears in neither the squad nor the world pool, so nothing else in the save would have surfaced
+ * them.
+ */
+export interface YouthProspectRow {
+  /** The save's own player id. Generated academy players are high-numbered and club-specific. */
+  playerId: number;
+  name: string | null;
+  nameSource: string;
+  /** The save's raw position code, kept so a re-map needs no re-parse. */
+  positionCode: number | null;
+  primaryPosition: string;
+  age: number | null;
+  birthdate: number | null;
+  overallRating: number | null;
+  potentialRating: number | null;
+
+  // ---------------------------------------------------------------------------------------------
+  // The assessment fields, carried as RANGES.
+  //
+  // `career_youthplayers` holds repeated assessments of the same prospect and they disagree: in the
+  // reference save one 16-year-old reads tier 0 / swing -10 twice and tier 2 / swing +2 once. With no
+  // timestamp and no "latest" flag, no single row can be called the correct one, and choosing the
+  // bleakest would discard two of three readings to manufacture a certainty the save does not have.
+  // So every disagreeing field is collapsed to the range actually observed - the same treatment the
+  // transfer-value bands get - and `assessmentCount` records how thin that range is.
+  //
+  // A prospect with one reading has low === high, and the UI must show a plain value for him rather
+  // than dressing it as a range.
+  // ---------------------------------------------------------------------------------------------
+
+  /** Academy quality band, 0-3, lowest reading seen. */
+  tierLow: number | null;
+  /** Highest reading seen. Equal to `tierLow` when he has only been assessed once. */
+  tierHigh: number | null;
+  /**
+   * The LOW end of his potential swing, as a DELTA. Legitimately NEGATIVE (-10 to +21).
+   *
+   * This is the field that keeps an academy honest: a negative swing low is the game saying he may
+   * never reach his headline potential. Across disagreeing assessments the two ends can straddle zero,
+   * which is exactly the uncertainty a manager should see.
+   */
+  swingLowMin: number | null;
+  swingLowMax: number | null;
+  /** How wide the potential range is, 0-7. A high variance is uncertainty, not quality. */
+  varianceMin: number | null;
+  varianceMax: number | null;
+  /** Longest observed tenure, in months. Tenure only grows, so the highest reading is the best one. */
+  monthsInSquad: number | null;
+  /** How many academy rows describe him. 1 means a single reading, so there is no range to show. */
+  assessmentCount: number;
+  goals: number | null;
+  appearances: number | null;
+}
+
 export interface SeasonHistoryRow {
   season: number | null;
   leagueId: number | null;
@@ -354,6 +417,46 @@ export interface LeagueEntry {
   /** `leagues.level`: the tier the save records, 0-7. Null when the save omits it. */
   level: number | null;
   countryId: number | null;
+}
+
+/** A named group of face stats, grouped exactly as the game groups them. */
+export type AttributeGroup = Record<string, number | null>;
+
+/**
+ * One professional in the save's world pool.
+ *
+ * `preferredFoot`, `weakFoot` and `skillMoves` are decoded because the save carries them, but the
+ * dossier lets the manager override the foot by hand: a hand-set value is recorded as USER rather
+ * than blended with this one, so the two can never be confused for each other.
+ */
+export interface WorldPlayerEntry {
+  playerId: number;
+  name: string;
+  nameSource: string | null;
+  clubId: number | null;
+  clubName: string | null;
+  /** The raw 0-29 EA position code, kept so the role mapping loses nothing recoverable. */
+  positionCode: number | null;
+  primaryPosition: string;
+  overall: number | null;
+  potential: number | null;
+  age: number | null;
+  birthdate: number | null;
+  heightCm: number | null;
+  weightKg: number | null;
+  nationalityId: number | null;
+  contractValidUntil: number | null;
+  preferredFoot: number | null;
+  weakFoot: number | null;
+  skillMoves: number | null;
+  internationalRep: number | null;
+  pace: AttributeGroup;
+  shooting: AttributeGroup;
+  passing: AttributeGroup;
+  dribbling: AttributeGroup;
+  defending: AttributeGroup;
+  physical: AttributeGroup;
+  goalkeeping: AttributeGroup;
 }
 
 /**
@@ -403,11 +506,20 @@ export interface SpikeCareerData extends RawCareerData {
   decodedTables: Record<string, number>;
   facts: SaveFact[];
   squadSample: SquadEntry[];
+  /**
+   * Every professional in the save, not just our squad: 21,166 rows in the reference career.
+   *
+   * Deliberately NOT part of `extractedTables` - that object is folded into the sync payload hash, so
+   * carrying the pool there would make hashing the expensive part of every sync.
+   */
+  worldPlayers: WorldPlayerEntry[];
   blobSections: BlobSectionInfo[];
   fixtures: SlotFixture[] | null;
   matchResults: MatchResult[] | null;
   /** Every `career_managerhistory` season row, in season order. Never collapsed to [0]. */
   seasonHistory: SeasonHistoryRow[];
+  /** The unpromoted academy. Empty for a save whose academy table is missing or has no rows. */
+  youthProspects: YouthProspectRow[];
   /** The save's league catalogue, so a `leagueid` anywhere can be resolved to a real name. */
   leagueDirectory: LeagueEntry[];
   /** Agreed transfers across the whole save - the evidence base for any value estimate. */

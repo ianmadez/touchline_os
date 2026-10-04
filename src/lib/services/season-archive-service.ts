@@ -33,6 +33,7 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import {
+  boardObjectives,
   careerEvents,
   careerObjectives,
   careerSnapshots,
@@ -190,6 +191,16 @@ export interface SeasonObservedHalf {
   finance: SeasonFinance | null;
   storylines: DossierStoryline[];
   objectives: DossierObjective[];
+  /**
+   * The manager's own tracked goals for this season, from the Board Objectives tracker.
+   *
+   * Deliberately NOT folded into `objectives`. That list mirrors the save's own single objective, where
+   * the save owns the text and there is one of them per season. These are the five or six the manager
+   * wrote for himself, with his own priorities and statuses, and they exist only because he recorded
+   * them. Merging the two would make it impossible to tell which rows the save asserted and which the
+   * manager did - which is the exact distinction the whole provenance split exists to preserve.
+   */
+  boardObjectives: DossierBoardObjective[];
   positions: DossierPosition[];
   /** Spine events observed in the window, newest first, already in `ParsedCareerEvent` shape. */
   timeline: ParsedCareerEvent[];
@@ -208,6 +219,24 @@ export interface SeasonDossier {
   fromSave: SeasonSaveHalf;
   coverage: SeasonCoverage;
   observed: SeasonObservedHalf | null;
+}
+
+/**
+ * A goal the manager set himself, as recorded on the Board Objectives tracker.
+ *
+ * USER provenance, like the debrief digest: the save knows nothing about these, and they exist only
+ * because the manager wrote them down. The vault lists them as his own record of what he set out to
+ * do, never as something the game asserted.
+ */
+export interface DossierBoardObjective {
+  id: string;
+  /** One of the five EA board categories: domestic, continental, brand, financial, youth. */
+  category: string;
+  /** 1 is critical and 5 is low. The dossier lists them in this order. */
+  priority: number;
+  title: string;
+  status: string;
+  notes: string | null;
 }
 
 const MAX_NAMED = 6;
@@ -428,6 +457,24 @@ export class SeasonArchiveService {
     const placed = new Set(dossierStorylines.map((t) => t.id));
     const unplaced = threadRows.filter((t) => t.seasonNumber === null && !placed.has(t.id)).length;
 
+    // The manager's own tracker, scoped by the season it was written for. Ordered by priority so the
+    // vault lists them the way the tracker does, rather than in insertion order.
+    const boardRows = await db
+      .select()
+      .from(boardObjectives)
+      .where(eq(boardObjectives.careerId, careerId))
+      .orderBy(asc(boardObjectives.priority));
+    const dossierBoardObjectives: DossierBoardObjective[] = boardRows
+      .filter((o) => o.seasonNumber === season)
+      .map((o) => ({
+        id: o.id,
+        category: o.category,
+        priority: o.priority,
+        title: o.title,
+        status: o.status,
+        notes: o.notes,
+      }));
+
     const squad = await this.squadMovement(careerId, first?.id ?? null, last?.id ?? null, first, last);
     const finance = await this.finance(careerId, first?.id ?? null, last?.id ?? null);
 
@@ -446,6 +493,7 @@ export class SeasonArchiveService {
       finance,
       storylines: dossierStorylines,
       objectives,
+      boardObjectives: dossierBoardObjectives,
       positions,
       timeline: timeline.slice(0, 40),
       unplacedStorylines: unplaced,

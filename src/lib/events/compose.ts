@@ -63,6 +63,19 @@ function text(value: unknown): string | null {
 }
 
 /**
+ * Where a player stands in the manager's own thinking, from the fields the fact carries.
+ *
+ * Only ever read off recorded state: the manager's starting XI (`isStarter`) and the save's own
+ * youth flag. A fact that carries neither is a squad player, which is the safe middle. Nothing here
+ * infers standing from a rating, because a rating is not a role.
+ */
+function standingOf(payload: Record<string, unknown>): "STARTER" | "YOUTH" | "SQUAD" {
+  if (payload.isStarter === true) return "STARTER";
+  if (payload.isYouthProspect === true) return "YOUTH";
+  return "SQUAD";
+}
+
+/**
  * A small stable hash, used only to choose between equivalent phrasings.
  *
  * Determinism matters more than variety here: the card is composed on the server and re-rendered on
@@ -242,6 +255,17 @@ function clauseFor(fact: ComposableFact, currentYear: number | null): string | n
       const label = text(p.label) ?? text(p.role);
       return label === null ? null : `${label} has nobody assigned to it`;
     }
+    case "PLAYER_PRAISED": {
+      const count = num(p.praiseCount);
+      const windowSize = num(p.windowSize);
+      const matchDetails = Array.isArray(p.matchDetails) ? (p.matchDetails as string[]) : [];
+      if (count === null || windowSize === null) return null;
+      if (matchDetails.length > 0) {
+        const recentMatch = matchDetails[matchDetails.length - 1];
+        return `you have singled him out in ${count} of your last ${windowSize} debriefs (most recently vs ${recentMatch})`;
+      }
+      return `you have singled him out in ${count} of your last ${windowSize} debriefs`;
+    }
     default:
       return null;
   }
@@ -276,6 +300,11 @@ function historyFor(fact: ComposableFact): string | null {
     case "SQUAD_DEPTH_THIN": {
       const count = num(p.count);
       return count === null ? null : `depth was recorded at ${count}`;
+    }
+    case "PLAYER_PRAISED": {
+      const count = num(p.praiseCount);
+      const windowSize = num(p.windowSize);
+      return count !== null && windowSize !== null ? `praised in ${count}/${windowSize} debriefs` : null;
     }
     default:
       return null;
@@ -317,9 +346,9 @@ function headlineFor(
       if (until !== null && currentYear !== null && until <= currentYear) {
         return pickVariant(
           [
-            `${subject} - deal has run out`,
-            `${subject} - past the date on his deal`,
-            `${subject} - deal is out of time`,
+            `Contract Watch: ${subject} past the recorded expiry`,
+            `Contract Watch: ${subject} - deal already out of time`,
+            `Contract Watch: ${subject} - the recorded date has gone`,
           ],
           seed,
           "headline"
@@ -328,21 +357,21 @@ function headlineFor(
       if (seasonsLeft !== null && seasonsLeft <= 0) {
         return pickVariant(
           [
-            `${subject} - final year of his deal`,
-            `${subject} - last season on his contract`,
-            `${subject} - into the last year of his deal`,
+            `Contract Watch: ${subject} entering final 12 months`,
+            `Contract Watch: ${subject} into the last year of his deal`,
+            `Contract Watch: ${subject} - final season`,
           ],
           seed,
           "headline"
         );
       }
       return until === null
-        ? `${subject} - contract`
+        ? `Contract Watch: ${subject}`
         : pickVariant(
             [
-              `${subject} - deal ends ${until}`,
-              `${subject} - contract runs to ${until}`,
-              `${subject} - signed up to ${until}`,
+              `Contract Watch: ${subject} - deal to ${until}`,
+              `Contract Watch: ${subject} - signed to ${until}`,
+              `Contract Watch: ${subject} - ${until} expiry`,
             ],
             seed,
             "headline"
@@ -350,22 +379,23 @@ function headlineFor(
     }
     case "SQUAD_DEPTH_THIN": {
       const count = num(p.count);
-      if (count === null) return `${subject} - short on numbers`;
+      const position = text(p.position) ?? subject;
+      if (count === null) return `Structural Vulnerability: ${position} short on numbers`;
       return count === 0
         ? pickVariant(
             [
-              `${subject} - nobody there`,
-              `${subject} - no cover at all`,
-              `${subject} - nobody to call on`,
+              `Structural Vulnerability: No specialist ${position} in the first team`,
+              `Structural Vulnerability: Nobody at ${position}`,
+              `Structural Vulnerability: ${position} with no cover at all`,
             ],
             seed,
             "headline"
           )
         : pickVariant(
             [
-              `${subject} - down to ${count}`,
-              `${subject} - only ${count} to call on`,
-              `${subject} - ${count} and no more`,
+              `Structural Vulnerability: Only ${count} ${position} in the first team`,
+              `Structural Vulnerability: ${position} down to ${count}`,
+              `Structural Vulnerability: ${count} ${position} and no more`,
             ],
             seed,
             "headline"
@@ -405,6 +435,19 @@ function headlineFor(
       const delta = num(p.delta);
       if (delta === null || delta === 0) return `${subject} - progress`;
       const size = Math.abs(delta);
+      // A step of three or more is a different event from a gradual move: the growth has already
+      // happened, and the question becomes whether the first team keeps pace with it.
+      if (delta >= 3) {
+        return pickVariant(
+          [
+            `${subject} - breakthrough: up ${size} overall`,
+            `${subject} - ${size}-point surge in overall`,
+            `Breakthrough: ${subject} up ${size} overall`,
+          ],
+          seed,
+          "headline"
+        );
+      }
       return delta > 0
         ? pickVariant(
             [
@@ -463,8 +506,206 @@ function headlineFor(
             "headline"
           );
     }
+    case "PLAYER_PRAISED": {
+      const name = text(p.name) ?? "Squad player";
+      const count = num(p.praiseCount);
+      const windowSize = num(p.windowSize);
+      if (count === null || windowSize === null) return `${name} manager praise`;
+      return pickVariant(
+        [
+          `${name}: Key Performer in Recent Debriefs`,
+          `${name} Singled Out ${count} Times in ${windowSize} Matches`,
+          `Managerial Focus: ${name}'s Rising Influence`,
+          `${name} Driving Matchday Results (${count}/${windowSize} Debriefs)`,
+        ],
+        seed,
+        "headline"
+      );
+    }
     default:
       return fallbackTitle;
+  }
+}
+
+/**
+ * The fact a category's copy is actually about.
+ *
+ * A thread can carry several kinds of fact - a contract thread showing a rating move, say - and the
+ * copy has to read the fields of the fact it is describing, not of whichever fact happens to be
+ * newest. Falls back to the newest fact so a card carrying only tangential evidence still composes.
+ */
+const CATEGORY_FACT_TYPES: Partial<Record<StorylineCategory, readonly string[]>> = {
+  CONTRACT: ["PLAYER_CONTRACT_EXPIRING"],
+  SQUAD_DEPTH: ["SQUAD_DEPTH_THIN"],
+  FORM: ["PLAYER_FORM_SLUMP", "PLAYER_FORM_STREAK"],
+  DEVELOPMENT: ["PLAYER_DEVELOPED", "PLAYER_POSITION_CHANGED"],
+};
+
+function leadingFactFor(
+  category: StorylineCategory,
+  leading: ComposableFact[]
+): ComposableFact | undefined {
+  const types = CATEGORY_FACT_TYPES[category];
+  if (types) {
+    const match = leading.find((fact) => types.includes(fact.eventType));
+    if (match) return match;
+  }
+  return leading[0];
+}
+
+/**
+ * What is actually at stake, in the words of the decision rather than the fact.
+ *
+ * Kept separate from `askFor` so the risk reads as a consequence and the ask reads as a set of
+ * options. Null where a category carries no risk of its own - a praise card is good news, and a
+ * closed season thread has already been decided.
+ *
+ * Read only off fields the fact carries. The one cross-cutting input is the save's own year, used
+ * to tell a deadline that has passed from one that is merely near.
+ */
+function riskFor(
+  category: StorylineCategory,
+  leading: ComposableFact[],
+  currentYear: number | null,
+  seed: string
+): string | null {
+  const first = leadingFactFor(category, leading);
+  if (!first) return null;
+  const p = first.payload;
+
+  switch (category) {
+    case "CONTRACT": {
+      const name = text(p.name) ?? "He";
+      const until = num(p.contractValidUntil);
+      if (until !== null && currentYear !== null && until <= currentYear) {
+        return pickVariant(
+          [
+            `${name}'s deal has already run past the date the save records, so the club no longer controls the outcome - he can leave for nothing.`,
+            `The recorded expiry on ${name}'s deal has gone, which means the club has lost the ability to renew or sell on its own terms.`,
+          ],
+          seed,
+          "risk"
+        );
+      }
+      const standing = standingOf(p);
+      if (standing === "STARTER") {
+        return pickVariant(
+          [
+            `Losing ${name} costs you a starter you cannot replace in-house, and a free transfer returns nothing to reinvest.`,
+            `${name} is in your XI, so the exposure is a hole in the shape only the market can fill - and a free transfer pays for none of it.`,
+          ],
+          seed,
+          "risk"
+        );
+      }
+      if (standing === "YOUTH") {
+        return pickVariant(
+          [
+            `${name} is not a first-team fixture yet, so the exposure is losing a developing asset for nothing rather than losing a starter.`,
+            `The risk here is a prospect leaving before he has returned anything on the minutes already invested in him.`,
+          ],
+          seed,
+          "risk"
+        );
+      }
+      return pickVariant(
+        [
+          `Let it run down and ${name} leaves for nothing, or for a fraction of his value in the final window.`,
+          `The longer it runs, the less the club can ask for ${name} - and at the end of it, nothing at all.`,
+        ],
+        seed,
+        "risk"
+      );
+    }
+    case "SQUAD_DEPTH": {
+      const count = num(p.count);
+      const position = text(p.position) ?? "the position";
+      // Zero and one are different alarms. With nobody at all there is no natural answer on the
+      // bench; with one specialist the answer exists but carries the whole load.
+      if (count === 0) {
+        return pickVariant(
+          [
+            `There is no specialist at all: one injury or suspension forces a makeshift solution, and the matchday squad cannot absorb fatigue at ${position}.`,
+            `With nobody at ${position}, a single booking or knock changes the shape mid-match and the bench has no natural answer.`,
+          ],
+          seed,
+          "risk"
+        );
+      }
+      return pickVariant(
+        [
+          `A single specialist carries the whole position: fatigue, a booking or one injury and the shape has to change mid-match.`,
+          `One specialist means no rotation at ${position} - the fixture list, not form, decides when he breaks down.`,
+        ],
+        seed,
+        "risk"
+      );
+    }
+    case "FORM": {
+      // FORM deliberately stays fact-local: the debriefs' view of this player is a PRAISE thread,
+      // and the two are allowed to disagree. Nothing here reads across categories.
+      if (first.eventType === "PLAYER_FORM_STREAK") {
+        return pickVariant(
+          [
+            "He is on an upswing; the risk now is breaking the run by changing his role or resting him at the wrong moment.",
+            "The ratings are climbing - the wrong intervention here ends the run rather than protecting it.",
+          ],
+          seed,
+          "risk"
+        );
+      }
+      return pickVariant(
+        [
+          "His recent ratings have dropped, and a run of low readings in a position you rely on drags the shape down with it.",
+          "A slump in a role you depend on is not only his problem - it shows up as goals and points elsewhere.",
+        ],
+        seed,
+        "risk"
+      );
+    }
+    case "DEVELOPMENT": {
+      if (first.eventType === "PLAYER_POSITION_CHANGED") {
+        return pickVariant(
+          [
+            "The move only pays off if the tactical setup actually uses him in the new role.",
+            "A new position is only realised in the team sheet - until the shape uses him there, nothing has changed.",
+          ],
+          seed,
+          "risk"
+        );
+      }
+      const delta = num(p.delta);
+      if (delta !== null && delta >= 3) {
+        return pickVariant(
+          [
+            "A surge this size is the point where a player outgrows a bit-part role - the growth is already there, and the question is whether the first team keeps pace.",
+            "He has moved further, faster than the squad around him; the risk is stalling it with minutes that do not match the level.",
+          ],
+          seed,
+          "risk"
+        );
+      }
+      if (delta !== null && delta < 0) {
+        return pickVariant(
+          [
+            "The rating has slipped, which usually points to minutes or role rather than ability.",
+            "A drop this size is normally about opportunity, not talent - left alone it becomes both.",
+          ],
+          seed,
+          "risk"
+        );
+      }
+      return pickVariant(
+        [
+          "The growth is real but gradual; he needs minutes to keep it moving rather than a role he is not ready to hold.",
+          "Steady progress is easy to stall - without a clear pathway the curve flattens.",
+        ],
+        seed,
+        "risk"
+      );
+    }
+    default:
+      return null;
   }
 }
 
@@ -475,61 +716,74 @@ function headlineFor(
  * naming the two things they could actually do turns the card into a decision.
  */
 function askFor(category: StorylineCategory, leading: ComposableFact[], seed: string): string {
-  const first = leading[0];
+  const first = leadingFactFor(category, leading);
 
   switch (category) {
     case "CONTRACT": {
       const seasonsLeft = first ? num(first.payload.seasonsLeft) : null;
-      return seasonsLeft !== null && seasonsLeft <= 0
-        ? pickVariant(
-            [
-              "The call is whether to renew him now or accept that he goes when the deal ends.",
-              "It comes down to renewing him now or accepting that he leaves when the deal ends.",
-              "Decide now: renew, or plan for him to leave when the deal ends.",
-            ],
-            seed,
-            "ask"
-          )
-        : pickVariant(
-            [
-              "The call is whether to open renewal talks this season or let the deal run down.",
-              "It comes down to opening talks this season or letting the deal run down.",
-              "Decide between opening talks now and letting the deal run down.",
-            ],
-            seed,
-            "ask"
-          );
+      if (seasonsLeft !== null && seasonsLeft <= 0) {
+        return pickVariant(
+          [
+            "The call is whether to renew him now, list him in the next window while he still has value, or hold him to the end of the season and risk losing him for nothing.",
+            "Decide between renewing now, cashing in during the next window, or holding to the end of the season and accepting the free-transfer risk.",
+          ],
+          seed,
+          "ask"
+        );
+      }
+      return pickVariant(
+        [
+          "The call is whether to open renewal talks now, list him while his value holds, or leave it until the end of the season.",
+          "It comes down to opening talks now, moving him on while the fee is real, or leaving it late.",
+          "It comes down to opening renewal talks now, listing him while his value holds, or leaving it until the end of the season.",
+        ],
+        seed,
+        "ask"
+      );
     }
     case "SQUAD_DEPTH": {
       const count = first ? num(first.payload.count) : null;
       return count === 0
         ? pickVariant(
             [
-              "The call is whether to sign cover or set up in a way that does not need one.",
-              "It comes down to signing cover or setting up so that you do not need any.",
+              "The call is whether to promote from the youth setup, convert a secondary-position player, or make this a priority in the next transfer window.",
+              "Decide between promoting youth cover, moving a secondary-position player across, or signing a specialist in the next window.",
             ],
             seed,
             "ask"
           )
         : pickVariant(
             [
-              "The call is whether to add a second option or accept that one injury changes your shape.",
-              "It comes down to adding a second option or accepting that one injury changes your shape.",
-              "Add a second option, or accept that one injury changes your shape.",
+              "The call is whether to promote cover from within, move a secondary-position player across, or sign a second specialist in the next window.",
+              "Decide between promoting from within, converting a squad player, or adding a specialist in the next window.",
             ],
             seed,
             "ask"
           );
     }
-    case "FORM":
+    case "FORM": {
+      // A recovery and a slump are opposite situations and must not share a closing line. FORM
+      // stays fact-local by design: what the debriefs say about this player lives on a PRAISE
+      // thread, and the two cards are allowed to tell different stories about the same man.
+      if (first?.eventType === "PLAYER_FORM_STREAK") {
+        return pickVariant(
+          [
+            "The call is whether to keep him in and ride the streak, or rest him to protect the run - changing his role now would break it.",
+            "Keep him in and let the run continue, or manage his minutes so the role does not change under him.",
+          ],
+          seed,
+          "ask"
+        );
+      }
       return pickVariant(
         [
-          "The call is whether to keep picking him and let him play through it, or take him out for a game.",
-          "Keep picking him and let him play through it, or take him out for a game - that is the call.",
+          "The call is whether to take him out for a tactical reset, change his role in the formation, or keep picking him and let him play through it.",
+          "Decide between a game out to reset him, a change of role, or backing him to play through the slump.",
         ],
         seed,
         "ask"
       );
+    }
     case "TACTICAL":
       return pickVariant(
         [
@@ -539,22 +793,85 @@ function askFor(category: StorylineCategory, leading: ComposableFact[], seed: st
         seed,
         "ask"
       );
-    case "DEVELOPMENT":
+    case "DEVELOPMENT": {
+      // A position move, a surge and a gradual rise are three different planning calls, so they do
+      // not share a closing line. The newest fact decides which one this card is about.
+      if (first?.eventType === "PLAYER_POSITION_CHANGED") {
+        return pickVariant(
+          [
+            "The call is whether to lock him into the new role in the system, or accept that he stays a squad option there.",
+            "Decide whether the new position becomes part of the setup, or stays a stop-gap.",
+          ],
+          seed,
+          "ask"
+        );
+      }
+      const delta = first ? num(first.payload.delta) : null;
+      if (delta !== null && delta >= 3) {
+        return pickVariant(
+          [
+            "The call is whether to grant him a starting role now, or keep managing his minutes and risk stalling the surge.",
+            "Decide between handing him a starting role or rationing his minutes while the growth settles.",
+          ],
+          seed,
+          "ask"
+        );
+      }
+      if (delta !== null && delta < 0) {
+        return pickVariant(
+          [
+            "The call is whether to change his role, or accept that his ceiling in this squad is a supporting one.",
+            "Decide between a different role and accepting a squad-level ceiling.",
+          ],
+          seed,
+          "ask"
+        );
+      }
       return pickVariant(
         [
-          "Nothing is being asked of you here - the job is to keep the minutes coming.",
-          "No decision here: the job is to keep the minutes coming.",
-          "Nothing to decide - keep the minutes coming.",
+          "The call is whether to loan him out for regular minutes or keep him around the first team.",
+          "Decide between a loan for minutes and keeping him in the first-team group.",
         ],
         seed,
         "ask"
       );
+    }
     case "SEASON_OBJECTIVE":
       return pickVariant(
         ["The board judges it when the season ends.", "It gets judged when the season ends."],
         seed,
         "ask"
       );
+    case "PRAISE": {
+      const payload = (first?.payload ?? {}) as Record<string, unknown>;
+      const name = text(payload.name) ?? "The player";
+      const count = num(payload.praiseCount) ?? 3;
+      const windowSize = num(payload.windowSize) ?? 5;
+      const matchDetails = Array.isArray(payload.matchDetails) ? (payload.matchDetails as string[]) : [];
+      const recentMatch = matchDetails.length > 0 ? matchDetails[matchDetails.length - 1] : null;
+
+      const matchClause = recentMatch ? ` (most recently in the debrief vs ${recentMatch})` : "";
+
+      if (count >= 4) {
+        return pickVariant(
+          [
+            `${name} has established himself as the tactical heartbeat of your matchdays, earning individual praise in ${count} of your last ${windowSize} debriefs${matchClause}. Your post-match notes show consistent reliance on his execution when matches are on the line.`,
+            `Across your recent 5-match window, ${name} has been singled out ${count} times as a standout performer${matchClause}. His form and tactical adherence have set the benchmark for the rest of the squad.`,
+          ],
+          seed,
+          "body"
+        );
+      }
+
+      return pickVariant(
+        [
+          `Your recent match debriefs show a clear trend: ${name} has been named as a key contributor in ${count} of your last ${windowSize} matches${matchClause}. He is gaining your trust as a reliable tactical option.`,
+          `${name}'s influence is growing in your post-match notes, with ${count} standout mentions over the last ${windowSize} debriefs${matchClause}. He is consistently fulfilling his tactical assignments.`,
+        ],
+        seed,
+        "body"
+      );
+    }
   }
 }
 
@@ -675,6 +992,8 @@ export function composeStoryline(
       )}.`
     );
   }
+  const risk = riskFor(thread.category, leading, yearFromInGameDate(inGameDate), seed);
+  if (risk) parts.push(risk);
   parts.push(askFor(thread.category, leading, seed));
 
   return {

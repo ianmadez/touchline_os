@@ -5,6 +5,7 @@ import {
   playerSnapshots,
   playerUserProfiles,
   careerSnapshots,
+  worldPlayers,
   Provenance,
 } from "../db/schema";
 import { UNKNOWN_POSITION, calculateAgeFromBirthdate } from "../parser/interface";
@@ -49,6 +50,16 @@ export interface EnrichedPlayer {
    * is visible in one place instead of being re-discovered.
    */
   injury: number | null;
+  /**
+   * Every face stat, exactly as the save stores it.
+   *
+   * These are NOT on the `players` table, which carries no attribute column at all. They are read
+   * from the world pool by EA player id: the pool is rebuilt on every sync and covers every man in
+   * the save, the manager's own squad included, so this is the same data the scouting dossier shows
+   * rather than a second copy of it. Null when the player is absent from the pool or the stored blob
+   * cannot be read - the drawer loses its attribute panel, never the player.
+   */
+  attributes: Record<string, unknown> | null;
   isYouthProspect: boolean;
   provenance: Provenance;
   latestSnapshotId: string | null;
@@ -100,6 +111,22 @@ function deriveDisplayAge(
   return calculateAgeFromBirthdate(birthdate, null, reference) ?? storedAge;
 }
 
+/**
+ * The pool stores face stats as JSON text. An unreadable blob must cost only the attribute panel,
+ * never the drawer, so a parse failure returns null rather than throwing.
+ */
+function parseFaceStats(json: string | null | undefined): Record<string, unknown> | null {
+  if (!json) return null;
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return parsed !== null && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export class SquadService {
   /**
    * Retrieves the active current-state squad with user profile overlays.
@@ -120,6 +147,14 @@ export class SquadService {
 
     const profileMap = new Map(userProfiles.map((p) => [p.playerId, p]));
 
+    // One extra read for the whole squad rather than a lookup per player: the pool is small and this
+    // keeps the drawer's data on the same path as everything else here.
+    const faceStats = await db
+      .select({ eaPlayerId: worldPlayers.eaPlayerId, attributesJson: worldPlayers.attributesJson })
+      .from(worldPlayers)
+      .where(eq(worldPlayers.careerId, careerId));
+    const faceStatsById = new Map(faceStats.map((row) => [row.eaPlayerId, row.attributesJson]));
+
     return rawPlayers.map((player) => {
       const profile = profileMap.get(player.id);
       return {
@@ -132,6 +167,7 @@ export class SquadService {
         age: deriveDisplayAge(player.birthdate, player.age, inGameDate),
         wageProvenance: player.wageProvenance as Provenance,
         provenance: player.provenance as Provenance,
+        attributes: parseFaceStats(faceStatsById.get(player.eaPlayerId)),
         userProfile: profile
           ? {
               assignedRole: profile.assignedRole,
@@ -197,6 +233,9 @@ export class SquadService {
       form: p.form,
       contractValidUntil: p.contractValidUntil,
       injury: p.injury,
+      // Snapshot rows carry no face stats, and the world pool only describes the PRESENT: joining a
+      // past snapshot to it would quietly show today's numbers under a historical heading. Null.
+      attributes: null,
       isYouthProspect: p.isYouthProspect,
       provenance: p.provenance as Provenance,
     }));
