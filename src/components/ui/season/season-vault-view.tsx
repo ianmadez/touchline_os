@@ -9,6 +9,7 @@ import type {
 } from "@/lib/services/season-archive-service";
 import { leagueLabel } from "@/lib/ui/leagues";
 
+import { apiFetch } from "@/lib/platform/api-client";
 /**
  * The Season Vault: one season, in two halves that are never blended.
  *
@@ -56,7 +57,7 @@ export function SeasonVaultView({
     const season = active.season;
     let cancelled = false;
 
-    fetch(`/api/season/dossier?careerId=${encodeURIComponent(careerId)}&season=${season}`)
+    apiFetch(`/api/season/dossier?careerId=${encodeURIComponent(careerId)}&season=${season}`)
       .then(async (response) => {
         const body = (await response.json()) as {
           success?: boolean;

@@ -1,12 +1,7 @@
-import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
-import { SeasonService } from "@/lib/services/season-service";
-import { TargetBlockService, type TargetBlock } from "@/lib/services/target-block-service";
-import { db } from "@/lib/db/client";
-import { careerEvents } from "@/lib/db/schema";
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+import { SeasonService } from "../services/season-service";
+import { TargetBlockService, type TargetBlock } from "../services/target-block-service";
+import { EventService } from "../services/event-service";
+import { at, failed, ok, type OperationResult } from "./types";
 
 /**
  * Mirrors a group debrief's reported matches into the diary as ordinary match events.
@@ -24,15 +19,8 @@ export const dynamic = "force-dynamic";
  * rows describe the same fixture.
  */
 async function syncGroupDebriefEvents(block: TargetBlock): Promise<void> {
-  await db
-    .delete(careerEvents)
-    .where(
-      and(
-        eq(careerEvents.careerId, block.careerId),
-        eq(careerEvents.entityType, "TARGET_BLOCK"),
-        eq(careerEvents.entityId, block.id)
-      )
-    );
+  const eventService = new EventService();
+  await eventService.deleteEventsForEntity(block.careerId, "TARGET_BLOCK", block.id);
 
   // Only a match with a reported scoreline becomes a diary entry: a target with no result is a
   // plan, not a result, and inventing an event for it would put a fixture in the record that was
@@ -42,7 +30,7 @@ async function syncGroupDebriefEvents(block: TargetBlock): Promise<void> {
   );
   if (reported.length === 0) return;
 
-  await db.insert(careerEvents).values(
+  await eventService.appendEvents(
     reported.map((match) => ({
       id: `grp_${block.id}_${match.matchday}`,
       careerId: block.careerId,
@@ -86,15 +74,16 @@ async function targetPositionFor(careerId: string): Promise<number | null> {
   return withTarget.at(-1)?.targetPosition ?? null;
 }
 
-/** GET /api/season/blocks?careerId=&season= - every block for a season, each with its summary. */
-export async function GET(request: Request) {
+/** Every block for a season, each with its summary. */
+export async function readTargetBlocks(
+  careerId: string | null,
+  season: string | null
+): Promise<OperationResult<unknown>> {
   try {
-    const url = new URL(request.url);
-    const careerId = url.searchParams.get("careerId");
     if (!careerId) {
-      return NextResponse.json({ success: false, error: "careerId is required." }, { status: 400 });
+      return at(400, { success: false, error: "careerId is required." });
     }
-    const seasonParam = Number(url.searchParams.get("season"));
+    const seasonParam = Number(season);
     const seasonNumber = Number.isFinite(seasonParam) ? seasonParam : undefined;
 
     const service = new TargetBlockService();
@@ -103,7 +92,7 @@ export async function GET(request: Request) {
       targetPositionFor(careerId),
     ]);
 
-    return NextResponse.json({
+    return ok({
       success: true,
       targetPosition,
       blocks: blocks.map((block) => ({
@@ -113,30 +102,37 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("[api/season/blocks] list failed:", error);
-    return NextResponse.json(
-      { success: false, error: (error as Error).message ?? "Could not read target blocks." },
-      { status: 500 }
-    );
+    return failed(500, (error as Error).message ?? "Could not read target blocks.");
   }
 }
 
-/** PUT /api/season/blocks - create or update one block (keyed by career + season + block index). */
-export async function PUT(request: Request) {
+/**
+ * Create or update one block (keyed by career + season + block index).
+ *
+ * Takes the raw body text because the route parsed it inside its own `try`, so a body that is not
+ * JSON produced a 500 rather than a 400. Parsing here keeps that.
+ */
+export async function saveTargetBlock(rawBody: string): Promise<OperationResult<unknown>> {
+  // Parsed in its own guard, BEFORE the main `try`, so a body that is not JSON is the caller's 400.
+  // See `logMatchDebrief` for why this is not done with `instanceof SyntaxError` in the outer catch.
+  let body: {
+    careerId?: string;
+    seasonNumber?: number;
+    blockIndex?: number;
+  };
   try {
-    const body = (await request.json()) as {
-      careerId?: string;
-      seasonNumber?: number;
-      blockIndex?: number;
-    };
+    body = JSON.parse(rawBody) as typeof body;
+  } catch {
+    return at(400, { success: false, error: "Request body must be valid JSON." });
+  }
+
+  try {
     if (
       !body.careerId ||
       typeof body.seasonNumber !== "number" ||
       typeof body.blockIndex !== "number"
     ) {
-      return NextResponse.json(
-        { success: false, error: "careerId, seasonNumber and blockIndex are required." },
-        { status: 400 }
-      );
+      return at(400, { success: false, error: "careerId, seasonNumber and blockIndex are required." });
     }
 
     const service = new TargetBlockService();
@@ -147,50 +143,33 @@ export async function PUT(request: Request) {
     await syncGroupDebriefEvents(block);
     const targetPosition = await targetPositionFor(body.careerId);
 
-    return NextResponse.json({
+    return ok({
       success: true,
       block,
       summary: service.summarise(block, targetPosition),
     });
   } catch (error) {
     console.error("[api/season/blocks] save failed:", error);
-    return NextResponse.json(
-      { success: false, error: (error as Error).message ?? "Could not save the target block." },
-      { status: 500 }
-    );
+    return failed(500, (error as Error).message ?? "Could not save the target block.");
   }
 }
 
-/** DELETE /api/season/blocks?careerId=&id= - removes one block. */
-export async function DELETE(request: Request) {
+/** Removes one block, and the diary entries mirrored from it. */
+export async function deleteTargetBlock(
+  careerId: string | null,
+  id: string | null
+): Promise<OperationResult<unknown>> {
   try {
-    const url = new URL(request.url);
-    const careerId = url.searchParams.get("careerId");
-    const id = url.searchParams.get("id");
     if (!careerId || !id) {
-      return NextResponse.json(
-        { success: false, error: "careerId and id are required." },
-        { status: 400 }
-      );
+      return at(400, { success: false, error: "careerId and id are required." });
     }
     await new TargetBlockService().deleteBlock(careerId, id);
     // The mirrored diary entries go with the block - a deleted block must not leave five results
     // behind it in the record.
-    await db
-      .delete(careerEvents)
-      .where(
-        and(
-          eq(careerEvents.careerId, careerId),
-          eq(careerEvents.entityType, "TARGET_BLOCK"),
-          eq(careerEvents.entityId, id)
-        )
-      );
-    return NextResponse.json({ success: true });
+    await new EventService().deleteEventsForEntity(careerId, "TARGET_BLOCK", id);
+    return ok({ success: true });
   } catch (error) {
     console.error("[api/season/blocks] delete failed:", error);
-    return NextResponse.json(
-      { success: false, error: (error as Error).message ?? "Could not delete the target block." },
-      { status: 500 }
-    );
+    return failed(500, (error as Error).message ?? "Could not delete the target block.");
   }
 }

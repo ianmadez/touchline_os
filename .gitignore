@@ -1,5 +1,4 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
 /node_modules
 /.pnp
@@ -16,6 +15,14 @@
 # next.js
 /.next/
 /out/
+
+# the browser target's export, which is also its build directory (see next.config.ts)
+/out-browser/
+
+# browser target assets
+# The SQLite engine is staged from node_modules by scripts/with-target.mjs. The parser's reference data
+# is committed in public/parse-resources/ - see the README there for its provenance and licensing.
+/public/sql-wasm.wasm
 
 # production
 /build

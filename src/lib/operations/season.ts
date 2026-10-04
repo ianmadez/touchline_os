@@ -1,10 +1,7 @@
-import { NextResponse } from "next/server";
-import { SeasonService } from "@/lib/services/season-service";
+import { SeasonService } from "../services/season-service";
+import { failed, ok, type OperationResult } from "./types";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-interface SeasonRequest {
+export interface SeasonInput {
   careerId?: string;
   /** The manager's own league position. USER provenance - the save holds no live table for it. */
   leaguePosition?: number;
@@ -18,23 +15,14 @@ interface SeasonRequest {
 }
 
 /**
- * POST /api/season
- *
  * Records the two things the save cannot supply for the manager's own division: where the club
  * currently sits, and what the board has asked for. Both are USER provenance and are stored as
  * such - the position is cross-checked against the save's own points record and a disagreement is
  * returned as a flag rather than silently correcting what was entered.
  */
-export async function POST(request: Request) {
-  let body: SeasonRequest;
-  try {
-    body = (await request.json()) as SeasonRequest;
-  } catch {
-    return NextResponse.json({ success: false, error: "Request body must be valid JSON." }, { status: 400 });
-  }
-
+export async function recordSeason(body: SeasonInput): Promise<OperationResult<unknown>> {
   if (!body.careerId) {
-    return NextResponse.json({ success: false, error: "careerId is required." }, { status: 400 });
+    return failed(400, "careerId is required.");
   }
 
   if (body.leaguePosition !== undefined) {
@@ -44,10 +32,7 @@ export async function POST(request: Request) {
       body.leaguePosition < 1 ||
       body.leaguePosition > 200
     ) {
-      return NextResponse.json(
-        { success: false, error: "leaguePosition must be a whole number between 1 and 200." },
-        { status: 400 }
-      );
+      return failed(400, "leaguePosition must be a whole number between 1 and 200.");
     }
   }
 
@@ -58,31 +43,22 @@ export async function POST(request: Request) {
       body.targetPosition < 1 ||
       body.targetPosition > 200
     ) {
-      return NextResponse.json(
-        { success: false, error: "targetPosition must be a whole number between 1 and 200." },
-        { status: 400 }
-      );
+      return failed(400, "targetPosition must be a whole number between 1 and 200.");
     }
   }
 
   if (body.leaguePosition === undefined && body.objectiveText === undefined) {
-    return NextResponse.json(
-      { success: false, error: "Nothing to record: pass leaguePosition or objectiveText." },
-      { status: 400 }
-    );
+    return failed(400, "Nothing to record: pass leaguePosition or objectiveText.");
   }
 
   try {
     const seasonService = new SeasonService();
     const history = await seasonService.getSeasonHistory(body.careerId);
     if (history.length === 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "NO_SEASON_HISTORY",
-          message: "This career has no season history yet. Sync the save first.",
-        },
-        { status: 409 }
+      return failed(
+        409,
+        "NO_SEASON_HISTORY",
+        "This career has no season history yet. Sync the save first."
       );
     }
 
@@ -100,7 +76,7 @@ export async function POST(request: Request) {
     }
 
     const seasonState = await seasonService.getState(body.careerId);
-    return NextResponse.json({
+    return ok({
       success: true,
       disputed: positionResult?.disputed ?? false,
       note: positionResult?.note ?? null,
@@ -108,30 +84,22 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("[api/season] save failed:", error);
-    return NextResponse.json(
-      { success: false, error: (error as Error).message ?? "Could not record season data." },
-      { status: 500 }
-    );
+    return failed(500, (error as Error).message ?? "Could not record season data.");
   }
 }
 
-/**
- * GET /api/season?careerId=...
- * The season state on its own, for a panel that wants it without a full hydration.
- */
-export async function GET(request: Request) {
-  const careerId = new URL(request.url).searchParams.get("careerId");
+/** The season state on its own, for a panel that wants it without a full hydration. */
+export async function readSeasonState(
+  careerId: string | null
+): Promise<OperationResult<unknown>> {
   if (!careerId) {
-    return NextResponse.json({ success: false, error: "careerId is required." }, { status: 400 });
+    return failed(400, "careerId is required.");
   }
   try {
     const seasonState = await new SeasonService().getState(careerId);
-    return NextResponse.json({ success: true, seasonState });
+    return ok({ success: true, seasonState });
   } catch (error) {
     console.error("[api/season] read failed:", error);
-    return NextResponse.json(
-      { success: false, error: (error as Error).message ?? "Could not read season data." },
-      { status: 500 }
-    );
+    return failed(500, (error as Error).message ?? "Could not read season data.");
   }
 }

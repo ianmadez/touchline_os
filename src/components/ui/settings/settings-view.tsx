@@ -74,6 +74,13 @@ interface SettingsViewProps {
   onSetTheme: (mode: ThemeMode) => void;
   onRefreshDiagnostics: () => void;
   onExport: () => Promise<ActionResult>;
+  /**
+   * Applies a backup file the manager chose.
+   *
+   * Takes the file's text rather than a path: the local build could read a path, but a page cannot,
+   * and the same handler serves both.
+   */
+  onImport: (contents: string) => Promise<ActionResult>;
   onResetCareer: () => Promise<ActionResult>;
 }
 
@@ -219,12 +226,14 @@ export function SettingsView({
   onSetTheme,
   onRefreshDiagnostics,
   onExport,
+  onImport,
   onResetCareer,
 }: SettingsViewProps) {
   const [subTab, setSubTab] = useState<SettingsSubTab>("PREFERENCES");
   const [confirmText, setConfirmText] = useState("");
-  const [busy, setBusy] = useState<"export" | "reset" | null>(null);
+  const [busy, setBusy] = useState<"export" | "import" | "reset" | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
+  const importInput = React.useRef<HTMLInputElement>(null);
 
   const activeCareerId = diagnostics?.activeCareer?.careerId ?? null;
   const canReset = activeCareerId !== null && confirmText === activeCareerId && busy === null;
@@ -255,6 +264,22 @@ export function SettingsView({
       setResult(await onExport());
     } finally {
       setBusy(null);
+    }
+  };
+
+  const runImport = async (file: File) => {
+    setBusy("import");
+    setResult(null);
+    try {
+      // Read as text here rather than streaming the file: the whole package is parsed in one go on
+      // either runtime, and a page has no path to hand over instead.
+      setResult(await onImport(await file.text()));
+    } catch (error) {
+      setResult({ ok: false, message: (error as Error).message ?? "Could not read that file." });
+    } finally {
+      setBusy(null);
+      // Cleared so choosing the same file twice still fires a change event.
+      if (importInput.current) importInput.current.value = "";
     }
   };
 
@@ -525,14 +550,39 @@ export function SettingsView({
               >
                 {busy === "export" ? "Exporting…" : "Export career to JSON"}
               </button>
+              <button
+                type="button"
+                onClick={() => importInput.current?.click()}
+                disabled={busy !== null}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-sub text-[11px] font-bold uppercase cursor-pointer transition-colors hover:border-[#E11D48] hover:text-[#E11D48] disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {busy === "import" ? "Importing…" : "Import career from JSON"}
+              </button>
+              <input
+                ref={importInput}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void runImport(file);
+                }}
+              />
             </div>
 
             <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
               Export writes a full backup to{" "}
               <span className="font-mono">
-                {diagnostics?.exportsDirectory ?? "data/exports"}
+                {diagnostics?.exportsDirectory ?? "a file this browser downloads"}
               </span>
               . Always export before resetting.
+            </p>
+
+            <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
+              Import adds a career from one of those files and refuses if it is already here — it is
+              one-way, one-time, and nothing moves on its own. It carries the nine tables the export
+              writes; a career that already exists is left alone rather than partly overwritten, so
+              delete it first if you mean to replace it.
             </p>
           </Section>
 

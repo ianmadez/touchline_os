@@ -42,6 +42,7 @@ import {
 } from "@/lib/session";
 import type { AppSettingsPatch, ClientAppSettings } from "@/lib/settings-vocabulary";
 
+import { apiFetch } from "@/lib/platform/api-client";
 interface HydrationResponse extends Partial<CareerHydrationPayload> {
   success: boolean;
   error?: string;
@@ -151,6 +152,8 @@ export default function TouchlineApp() {
   const [bootError, setBootError] = useState<string | null>(null);
   const [saveCandidates, setSaveCandidates] = useState<SaveCandidate[]>([]);
   const [saveScanComplete, setSaveScanComplete] = useState(false);
+  const [savesUnavailableReason, setSavesUnavailableReason] = useState<string | null>(null);
+  const [saveSourceMode, setSaveSourceMode] = useState<"folders" | "picker">("folders");
   const [squad, setSquad] = useState<EnrichedPlayer[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<EnrichedPlayer | null>(null);
   // The storyline whose evidence view is open. Kept in the session as well, so a refresh lands
@@ -261,7 +264,7 @@ export default function TouchlineApp() {
   const loadSaveCandidates = useCallback(async () => {
     setSaveScanComplete(false);
     try {
-      const res = await fetch("/api/saves", { cache: "no-store" });
+      const res = await apiFetch("/api/saves", { cache: "no-store" });
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.error ?? `Save scan failed (HTTP ${res.status}).`);
@@ -269,6 +272,10 @@ export default function TouchlineApp() {
       const candidates = (data.saves ?? []) as Array<
         Omit<SaveCandidate, "lastModified"> & { lastModified: string }
       >;
+      setSavesUnavailableReason(
+        typeof data.unavailableReason === "string" ? data.unavailableReason : null
+      );
+      setSaveSourceMode(data.saveSourceMode === "picker" ? "picker" : "folders");
       setSaveCandidates(
         candidates.map((candidate) => ({
           ...candidate,
@@ -282,7 +289,13 @@ export default function TouchlineApp() {
       setSaveScanComplete(true);
     }
     // Setters are stable, so declaring them keeps this callback's identity stable.
-  }, [setSaveCandidates, setSaveScanComplete, setAppError]);
+  }, [
+    setSaveCandidates,
+    setSaveScanComplete,
+    setSavesUnavailableReason,
+    setSaveSourceMode,
+    setAppError,
+  ]);
 
   // Restore persisted session and prevent re-entering onboarding wizard if career exists
   useEffect(() => {
@@ -316,7 +329,7 @@ export default function TouchlineApp() {
         const query = session?.careerId
           ? `?careerId=${encodeURIComponent(session.careerId)}`
           : "";
-        const res = await fetch(`/api/career${query}`, { cache: "no-store" });
+        const res = await apiFetch(`/api/career${query}`, { cache: "no-store" });
         const data: HydrationResponse = await res.json();
         if (cancelled) return;
 
@@ -451,7 +464,7 @@ export default function TouchlineApp() {
     setEntrySyncError(null);
 
     try {
-      const res = await fetch("/api/parse-save", {
+      const res = await apiFetch("/api/parse-save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -530,7 +543,7 @@ export default function TouchlineApp() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/settings", { cache: "no-store" });
+        const res = await apiFetch("/api/settings", { cache: "no-store" });
         const data = await res.json();
         if (cancelled) return;
         if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -546,7 +559,7 @@ export default function TouchlineApp() {
 
   const refreshDiagnostics = useCallback(async () => {
     try {
-      const res = await fetch("/api/diagnostics", { cache: "no-store" });
+      const res = await apiFetch("/api/diagnostics", { cache: "no-store" });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`);
       setDiagnostics(data as Diagnostics);
@@ -571,7 +584,7 @@ export default function TouchlineApp() {
     setSavingField(field);
     setSettingsError(null);
     try {
-      const res = await fetch("/api/settings", {
+      const res = await apiFetch("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
@@ -589,7 +602,7 @@ export default function TouchlineApp() {
   const handleExportCareer = async (): Promise<ActionResult> => {
     if (!careerId) return { ok: false, message: "No active career to export." };
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/career/export?careerId=${encodeURIComponent(careerId)}`,
         { cache: "no-store" }
       );
@@ -604,10 +617,53 @@ export default function TouchlineApp() {
     }
   };
 
+  /**
+   * Applies a career backup the manager picked in Settings.
+   *
+   * The mirror of `handleExportCareer`: one file, chosen by hand, in the format the export writes.
+   * Nothing is read from disk on the app's own initiative and nothing transfers automatically.
+   */
+  const handleImportCareer = async (contents: string): Promise<ActionResult> => {
+    try {
+      const res = await apiFetch("/api/career/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: contents,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`);
+
+      // The career arrived without a page reload, so the shell has to be told about it: hydrate from
+      // the operation's own follow-up, or the manager would be looking at the career that was there
+      // before the import.
+      const hydrated = await apiFetch(
+        `/api/career?careerId=${encodeURIComponent(data.careerId)}`,
+        { cache: "no-store" }
+      );
+      const payload: HydrationResponse = await hydrated.json();
+      if (hydrated.ok && payload.success) {
+        applyHydration(payload);
+        setIsOnboardingComplete(true);
+      }
+
+      const counts = (data.imported ?? {}) as Record<string, number>;
+      const summary = Object.entries(counts)
+        .filter(([, value]) => value > 0)
+        .map(([table, value]) => `${value} ${table}`)
+        .join(", ");
+      return {
+        ok: true,
+        message: `Imported ${data.careerId}${summary ? ` — ${summary}` : ""}.`,
+      };
+    } catch (error) {
+      return { ok: false, message: (error as Error).message };
+    }
+  };
+
   const handleResetCareer = async (): Promise<ActionResult> => {
     if (!careerId) return { ok: false, message: "No active career to reset." };
     try {
-      const res = await fetch(`/api/career?careerId=${encodeURIComponent(careerId)}`, {
+      const res = await apiFetch(`/api/career?careerId=${encodeURIComponent(careerId)}`, {
         method: "DELETE",
       });
       const data = await res.json();
@@ -643,7 +699,7 @@ export default function TouchlineApp() {
     setStatusMessage(null);
 
     try {
-      const res = await fetch("/api/parse-save", {
+      const res = await apiFetch("/api/parse-save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -676,7 +732,7 @@ export default function TouchlineApp() {
       // successful parse: a failed parse should not leave a preference behind from an onboarding that
       // never completed. Failure is swallowed because a settings write is not worth failing the
       // onboarding over - the manager can still set it in Settings.
-      await fetch("/api/settings", {
+      await apiFetch("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ realismLevel: data.realismLevel }),
@@ -745,7 +801,7 @@ export default function TouchlineApp() {
 
     const targetCareerId = careerId;
     if (!targetCareerId) return;
-    void fetch("/api/career", {
+    void apiFetch("/api/career", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ careerId: targetCareerId, playerProfile: profileData }),
@@ -790,7 +846,7 @@ export default function TouchlineApp() {
 
     const targetCareerId = careerId;
     if (!targetCareerId) return;
-    void fetch("/api/career", {
+    void apiFetch("/api/career", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -813,7 +869,7 @@ export default function TouchlineApp() {
     const targetCareerId = careerId;
     if (!targetCareerId) return;
     setAppError(null);
-    void fetch("/api/career", {
+    void apiFetch("/api/career", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -981,13 +1037,13 @@ export default function TouchlineApp() {
                     disabled={isLoading}
                     className="font-sub text-[10px] font-bold uppercase text-[#E11D48] dark:text-[#FF8C7A] hover:underline cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    Re-scan
+                    {saveSourceMode === "picker" ? "Choose save file…" : "Re-scan"}
                   </button>
                 </div>
 
                 {!saveScanComplete ? (
                   <p className="font-sub text-xs text-slate-500 dark:text-slate-400">
-                    Scanning your save folders…
+                    {saveSourceMode === "picker" ? "Waiting for a save file…" : "Scanning your save folders…"}
                   </p>
                 ) : latestSaveCandidate ? (
                   <p className="font-sub text-xs font-bold text-slate-900 dark:text-slate-100 break-all">
@@ -998,7 +1054,8 @@ export default function TouchlineApp() {
                   </p>
                 ) : (
                   <p className="font-sub text-xs text-amber-600 dark:text-amber-400">
-                    No career save found. You can still enter with the career already loaded.
+                    {savesUnavailableReason ??
+                      "No career save found. You can still enter with the career already loaded."}
                   </p>
                 )}
 
@@ -1153,6 +1210,8 @@ export default function TouchlineApp() {
           <OnboardingWizard
             saveCandidates={saveCandidates}
             saveScanComplete={saveScanComplete}
+            saveSourceMode={saveSourceMode}
+            savesUnavailableReason={savesUnavailableReason}
             onRescan={() => void loadSaveCandidates()}
             onCompleteOnboarding={handleCompleteOnboarding}
           />
@@ -1238,7 +1297,7 @@ export default function TouchlineApp() {
             seasonNumber={seasonState?.outlook?.seasonNumber ?? null}
             onDebriefSubmitted={() => {
               if (careerId) {
-                fetch(`/api/career?careerId=${encodeURIComponent(careerId)}`)
+                apiFetch(`/api/career?careerId=${encodeURIComponent(careerId)}`)
                   .then((res) => res.json())
                   .then((data) => {
                     if (data.success) applyHydration(data);
@@ -1263,6 +1322,7 @@ export default function TouchlineApp() {
             onSetTheme={handleSetTheme}
             onRefreshDiagnostics={() => void refreshDiagnostics()}
             onExport={handleExportCareer}
+            onImport={handleImportCareer}
             onResetCareer={handleResetCareer}
           />
         )}

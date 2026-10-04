@@ -1,11 +1,18 @@
-import { FeasibilitySaveParser } from "../src/lib/parser/feasibility-parser";
+import { saveSource } from "../src/lib/platform/save-source";
 import { SyncService } from "../src/lib/sync/sync-service";
 
 async function runSyncTest() {
   console.log("=== TOUCHLINE OS: PHASE 2 SYNC & DIFF ENGINE TEST ===");
 
-  const parser = new FeasibilitySaveParser();
-  const candidates = await parser.detectSaves();
+  // Refuses the live database. This test writes snapshots, events and cache rows, so pointing it at
+  // `data/touchline.db` would change the manager's own career - the same guard the other scripts in
+  // this folder carry, for the same reason.
+  if (!process.env.DATABASE_URL?.includes("sync-test")) {
+    console.error("Refusing to run: DATABASE_URL must point at a sync-test copy, not the live database.");
+    process.exit(1);
+  }
+
+  const candidates = await saveSource.detectSaves();
 
   if (candidates.length === 0) {
     console.error("No save candidate found to test sync. Exiting.");

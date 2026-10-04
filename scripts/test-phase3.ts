@@ -5,6 +5,14 @@ import { UserProfileService } from "../src/lib/services/user-profile-service";
 async function runPhase3Test() {
   console.log("=== TOUCHLINE OS: PHASE 3 DATA SERVICES TEST ===");
 
+  // Refuses the live database. Step 2 of this test writes a user profile onto a real squad player, so
+  // pointing it at `data/touchline.db` would change the manager's own career - the same guard the
+  // other scripts in this folder carry, for the same reason.
+  if (!process.env.DATABASE_URL?.includes("phase3-test")) {
+    console.error("Refusing to run: DATABASE_URL must point at a phase3-test copy, not the live database.");
+    process.exit(1);
+  }
+
   const squadService = new SquadService();
   const eventService = new EventService();
   const userProfileService = new UserProfileService();

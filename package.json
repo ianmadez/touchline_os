@@ -1,11 +1,13 @@
 {
   "name": "touchline-os",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "dev:browser": "node scripts/with-target.mjs browser dev",
+    "build:browser": "node scripts/with-target.mjs browser build",
     "lint": "eslint",
     "spike": "tsx scripts/spike-parser.ts",
     "db:init": "tsx scripts/init-db.ts",
@@ -21,6 +23,7 @@
     "next": "16.3.6",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "sql.js": "^1.14.2",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -29,6 +32,7 @@
     "@types/node": "^20.19.43",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/sql.js": "^1.4.11",
     "drizzle-kit": "^0.31.11",
     "eslint": "^9",
     "eslint-config-next": "16.3.6",

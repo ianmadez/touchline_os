@@ -1,6 +1,6 @@
-import crypto from "crypto";
 import { eq, desc } from "drizzle-orm";
-import { db } from "../db/client";
+import { sha256Hex } from "../parser/sha";
+import { storage } from "../platform/storage";
 import {
   careers,
   careerSnapshots,
@@ -24,8 +24,9 @@ import {
   type SeasonHistoryRow,
   type WorldPlayerEntry,
 } from "../parser/interface";
-import { ensureFacesForSquad } from "../services/face-service";
-import { FeasibilitySaveParser } from "../parser/feasibility-parser";
+import { assetStore } from "../platform/asset-store";
+import { createSaveParser } from "../platform/parse-resources";
+import { saveSource } from "../platform/save-source";
 import { SeasonService } from "../services/season-service";
 import { WorldValueModelService } from "../services/world-value-model";
 import { DeterministicDiffEngine, SnapshotStateRecord } from "../events/diff-engine";
@@ -99,7 +100,7 @@ export interface SyncResult {
 export const SYNC_PIPELINE_VERSION = "11";
 
 export class SyncService {
-  private parser = new FeasibilitySaveParser();
+  private parser = createSaveParser();
 
   /**
    * Builds the insertable world pool, value bands included.
@@ -164,21 +165,19 @@ export class SyncService {
   }
 
   async syncCandidate(save: SaveCandidate): Promise<SyncResult> {
-    // 1. Asynchronously read and parse save container before DB transaction
-    const rawData = await this.parser.parse(save);
+    // 1. Read the bytes, then parse the container - both before the DB transaction
+    const bytes = await saveSource.readBytes(save);
+    const rawData = await this.parser.parse(save, bytes);
     
     // 2. Compute a deterministic payload hash (raw container + pipeline version)
     //    so real save edits create a new snapshot, while pipeline upgrades re-derive.
-    const payloadHash = crypto
-      .createHash("sha256")
-      .update(
-        JSON.stringify({
-          pipeline: SYNC_PIPELINE_VERSION,
-          rawPayload: rawData.rawPayload,
-          extractedTables: rawData.extractedTables,
-        })
-      )
-      .digest("hex");
+    const payloadHash = sha256Hex(
+      JSON.stringify({
+        pipeline: SYNC_PIPELINE_VERSION,
+        rawPayload: rawData.rawPayload,
+        extractedTables: rawData.extractedTables,
+      })
+    );
 
     const managerName = rawData.saveMetadata.managerName || "Unknown Manager";
     const clubName = rawData.saveMetadata.clubName || "Unknown Club";
@@ -210,11 +209,11 @@ export class SyncService {
         ? leagueLinks.filter((link) => Number(link.leagueid) === ownLeagueId).length
         : null;
 
-    // 3. Execute atomic synchronous transaction for better-sqlite3
+    // 3. Execute atomic synchronous transaction through the storage port
     // The world pool's bands are fitted out here, not inside the transaction below.
     const worldPoolValues = await this.buildWorldPool(careerId, rawData.worldPlayers ?? []);
 
-    const result = db.transaction<SyncResult>((tx) => {
+    const result = storage.withTransaction<SyncResult>((tx) => {
       // Ensure career identity exists
       const existingCareer = tx
         .select()
@@ -910,7 +909,7 @@ export class SyncService {
       }
 
       try {
-        await ensureFacesForSquad(careerId);
+        await assetStore.refreshSquadFaces(careerId);
       } catch {
         // Deliberately swallowed. Faces are presentation, and a dead CDN must not fail a sync.
       }

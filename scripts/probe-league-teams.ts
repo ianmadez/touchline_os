@@ -12,7 +12,7 @@
  */
 import fs from "fs";
 import path from "path";
-import { FeasibilitySaveParser } from "../src/lib/parser/feasibility-parser";
+import { createSaveParser } from "../src/lib/platform/parse-resources";
 
 type Row = Record<string, unknown>;
 
@@ -39,13 +39,16 @@ async function main() {
   const size = fs.statSync(savePath).size;
   console.log(`save: ${path.basename(savePath)} (${size} bytes)`);
 
-  const parsed = await new FeasibilitySaveParser().parse({
-    id: "probe",
-    filePath: savePath,
-    fileName: path.basename(savePath),
-    lastModified: new Date(),
-    fileSizeBytes: size,
-  });
+  const parsed = await createSaveParser().parse(
+    {
+      id: "probe",
+      filePath: savePath,
+      fileName: path.basename(savePath),
+      lastModified: new Date(),
+      fileSizeBytes: size,
+    },
+    new Uint8Array(fs.readFileSync(savePath))
+  );
   const tables = parsed.extractedTables;
   if (!tables) {
     console.log("NO extractedTables on the parse result - cannot probe.");

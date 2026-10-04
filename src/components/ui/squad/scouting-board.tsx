@@ -5,6 +5,7 @@ import type { ScoutAssessment } from "@/lib/services/scouting-service";
 import type { ScoutTargetPriority, ScoutTargetStatus } from "@/lib/db/schema";
 import { IconCheck, IconTrash, IconUserEntry } from "@/components/ui/icons";
 
+import { apiFetch } from "@/lib/platform/api-client";
 /**
  * The shortlist - a hand-picked layer on top of the world search.
  *
@@ -67,7 +68,7 @@ export function ShortlistPanel({
 
   const load = useCallback(async () => {
     try {
-      const response = await fetch(`/api/scouting?careerId=${encodeURIComponent(careerId)}`, {
+      const response = await apiFetch(`/api/scouting?careerId=${encodeURIComponent(careerId)}`, {
         cache: "no-store",
       });
       const payload = (await response.json()) as {
@@ -96,7 +97,7 @@ export function ShortlistPanel({
 
   const mutate = useCallback(
     async (init: RequestInit & { url: string }) => {
-      const response = await fetch(init.url, init);
+      const response = await apiFetch(init.url, init);
       const payload = (await response.json()) as {
         success?: boolean;
         board?: { assessments: ScoutAssessment[] };

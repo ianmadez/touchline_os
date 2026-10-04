@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/squad/scouting-board";
 import { IconAlert, IconCheck, IconTrend, IconUserEntry, IconWallet } from "@/components/ui/icons";
 
+import { apiFetch } from "@/lib/platform/api-client";
 /**
  * The transfers desk.
  *
@@ -28,7 +29,7 @@ export function TransferDesk({ careerId, currencySymbol = "£" }: { careerId: st
 
   const load = useCallback(async () => {
     try {
-      const response = await fetch(`/api/scouting?careerId=${encodeURIComponent(careerId)}`, {
+      const response = await apiFetch(`/api/scouting?careerId=${encodeURIComponent(careerId)}`, {
         cache: "no-store",
       });
       const payload = (await response.json()) as { success?: boolean; board?: Board; error?: string };

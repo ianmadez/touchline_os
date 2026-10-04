@@ -18,6 +18,7 @@ import {
 } from "@/lib/objectives-vocabulary";
 import { IconCheck, IconFlag, IconPlus, IconTarget, IconTrash } from "@/components/ui/icons";
 
+import { apiFetch } from "@/lib/platform/api-client";
 /**
  * The board-objective tracker.
  *
@@ -51,7 +52,7 @@ export function BoardObjectivesPanel({
   const load = useCallback(async () => {
     if (!careerId) return;
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `/api/objectives?careerId=${encodeURIComponent(careerId)}&season=${seasonNumber}`,
         { cache: "no-store" }
       );
@@ -81,7 +82,7 @@ export function BoardObjectivesPanel({
 
   const send = useCallback(
     async (url: string, init: RequestInit): Promise<void> => {
-      const response = await fetch(url, init);
+      const response = await apiFetch(url, init);
       const payload = (await response.json()) as {
         success?: boolean;
         objectives?: BoardObjective[];

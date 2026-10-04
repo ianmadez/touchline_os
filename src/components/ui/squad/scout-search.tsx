@@ -19,6 +19,7 @@ import {
 import { ShortlistPanel } from "@/components/ui/squad/scouting-board";
 import { AttributeBars } from "@/components/ui/squad/attribute-bars";
 
+import { apiFetch } from "@/lib/platform/api-client";
 /**
  * Scouting search over the world pool.
  *
@@ -131,7 +132,7 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
       if (minRating.trim()) params.set("minRating", minRating.trim());
       if (maxAge.trim()) params.set("maxAge", maxAge.trim());
 
-      const response = await fetch(`/api/scouting/search?${params.toString()}`, { cache: "no-store" });
+      const response = await apiFetch(`/api/scouting/search?${params.toString()}`, { cache: "no-store" });
       const payload = (await response.json()) as {
         success?: boolean;
         result?: ScoutSearchResult;
@@ -171,7 +172,7 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
     async (eaPlayerId: number) => {
       setSelectedId(eaPlayerId);
       try {
-        const response = await fetch(
+        const response = await apiFetch(
           `/api/scouting/search?careerId=${encodeURIComponent(careerId)}&playerId=${eaPlayerId}`,
           { cache: "no-store" }
         );
@@ -195,7 +196,7 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
     async (row: ScoutSearchRow) => {
       setPinningId(row.eaPlayerId);
       try {
-        await fetch("/api/scouting", {
+        await apiFetch("/api/scouting", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -223,7 +224,7 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
       if (selectedId === null) return;
       setSavingFoot(true);
       try {
-        const response = await fetch("/api/scouting/search", {
+        const response = await apiFetch("/api/scouting/search", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ careerId, eaPlayerId: selectedId, preferredFoot: foot }),

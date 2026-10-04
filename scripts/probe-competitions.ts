@@ -22,7 +22,7 @@ import {
 const savePath =
   process.argv[2] ?? path.join("data", "saves", "ManagerCareer20260925214344463");
 const clubId = Number(process.argv[3] ?? 1917);
-const metaPath = path.join("references", "fc26companion", "data", "fifa_ng_db-meta.xml");
+const metaPath = path.join("public", "parse-resources", "fifa_ng_db-meta.xml");
 
 const meta = parseDbMeta(fs.readFileSync(metaPath, "utf8"));
 const blocks = unpackDatabases(fs.readFileSync(savePath));

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { apiFetch } from "@/lib/platform/api-client";
 /**
  * The academy: the save's own unpromoted prospects.
  *
@@ -96,7 +97,7 @@ export function YouthAcademyPanel({ careerId, query }: { careerId: string; query
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/youth?careerId=${encodeURIComponent(careerId)}`, { cache: "no-store" })
+    apiFetch(`/api/youth?careerId=${encodeURIComponent(careerId)}`, { cache: "no-store" })
       .then(async (response) => {
         const body = (await response.json()) as {
           success?: boolean;

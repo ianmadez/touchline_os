@@ -80,4 +80,51 @@ export class EventService {
       payload: JSON.parse(evt.payloadJson),
     }));
   }
+
+  /** Appends one raw career event. */
+  async appendEvent(event: typeof careerEvents.$inferInsert): Promise<void> {
+    await db.insert(careerEvents).values(event);
+  }
+
+  /** Appends several raw career events in one statement; a no-op for an empty list. */
+  async appendEvents(events: (typeof careerEvents.$inferInsert)[]): Promise<void> {
+    if (events.length === 0) return;
+    await db.insert(careerEvents).values(events);
+  }
+
+  /** Removes every event mirrored from one entity, e.g. one target block's matches. */
+  async deleteEventsForEntity(
+    careerId: string,
+    entityType: string,
+    entityId: string
+  ): Promise<void> {
+    await db
+      .delete(careerEvents)
+      .where(
+        and(
+          eq(careerEvents.careerId, careerId),
+          eq(careerEvents.entityType, entityType),
+          eq(careerEvents.entityId, entityId)
+        )
+      );
+  }
+
+  /**
+   * Removes one manager-logged debrief.
+   *
+   * Deliberately narrow: only a row that is BOTH a `MATCH_DEBRIEF` and USER-sourced can be removed,
+   * so a stale id or a crafted request cannot take out a career transition from the spine.
+   */
+  async deleteUserDebrief(id: string): Promise<{ id: string; careerId: string }[]> {
+    return db
+      .delete(careerEvents)
+      .where(
+        and(
+          eq(careerEvents.id, id),
+          eq(careerEvents.eventType, "MATCH_DEBRIEF"),
+          eq(careerEvents.source, "USER")
+        )
+      )
+      .returning({ id: careerEvents.id, careerId: careerEvents.careerId });
+  }
 }

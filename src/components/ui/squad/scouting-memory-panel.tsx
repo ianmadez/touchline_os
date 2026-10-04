@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { apiFetch } from "@/lib/platform/api-client";
 /**
  * Scouting memory: the targets the manager set aside, and whether anything has changed.
  *
@@ -60,8 +61,8 @@ export function ScoutingMemoryPanel({ careerId }: { careerId: string }) {
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      fetch(`/api/scouting/memory?careerId=${encodeURIComponent(careerId)}`, { cache: "no-store" }),
-      fetch(`/api/scouting?careerId=${encodeURIComponent(careerId)}`, { cache: "no-store" }),
+      apiFetch(`/api/scouting/memory?careerId=${encodeURIComponent(careerId)}`, { cache: "no-store" }),
+      apiFetch(`/api/scouting?careerId=${encodeURIComponent(careerId)}`, { cache: "no-store" }),
     ])
       .then(async ([memoryResponse, boardResponse]) => {
         const memory = (await memoryResponse.json()) as {
@@ -92,7 +93,7 @@ export function ScoutingMemoryPanel({ careerId }: { careerId: string }) {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/scouting/memory", {
+      const response = await apiFetch("/api/scouting/memory", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ careerId, targetId, reason }),
@@ -116,7 +117,7 @@ export function ScoutingMemoryPanel({ careerId }: { careerId: string }) {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(
+      const response = await apiFetch(
         `/api/scouting/memory?careerId=${encodeURIComponent(careerId)}&targetId=${encodeURIComponent(id)}`,
         { method: "DELETE" }
       );

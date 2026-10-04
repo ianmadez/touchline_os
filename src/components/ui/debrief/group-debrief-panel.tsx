@@ -19,6 +19,7 @@ import {
   IconWhistle,
 } from "@/components/ui/icons";
 
+import { apiFetch } from "@/lib/platform/api-client";
 /**
  * Group Debrief.
  *
@@ -195,7 +196,7 @@ export function GroupDebriefPanel({
   const load = useCallback(async () => {
     if (!careerId) return;
     try {
-      const response = await fetch(`/api/season/blocks?careerId=${encodeURIComponent(careerId)}`, {
+      const response = await apiFetch(`/api/season/blocks?careerId=${encodeURIComponent(careerId)}`, {
         cache: "no-store",
       });
       const payload = (await response.json()) as {
@@ -246,7 +247,7 @@ export function GroupDebriefPanel({
     }
     setSaving(true);
     try {
-      const response = await fetch("/api/season/blocks", {
+      const response = await apiFetch("/api/season/blocks", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -296,7 +297,7 @@ export function GroupDebriefPanel({
   };
 
   const remove = async (block: TargetBlock) => {
-    const response = await fetch(
+    const response = await apiFetch(
       `/api/season/blocks?careerId=${encodeURIComponent(careerId)}&id=${encodeURIComponent(block.id)}`,
       { method: "DELETE" }
     );

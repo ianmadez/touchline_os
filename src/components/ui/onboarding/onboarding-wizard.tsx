@@ -36,6 +36,20 @@ interface OnboardingWizardProps {
   onCompleteOnboarding: (data: OnboardingSubmission) => void | Promise<void>;
   saveScanComplete?: boolean;
   onRescan?: () => void;
+  /**
+   * How this runtime gets a save. `picker` means the manager chooses the file, and "re-scan folders"
+   * would describe something a page cannot do.
+   */
+  saveSourceMode?: "folders" | "picker";
+  /**
+   * Why this runtime cannot offer saves by itself, if it cannot.
+   *
+   * Null on the local build, which scans folders on its own. The browser build sets it on browsers
+   * without the File System Access API, and then these screens must not tell the manager to look in
+   * `data/saves/` - there is no such folder in a page, and saying so would be the silent failure the
+   * message exists to prevent.
+   */
+  savesUnavailableReason?: string | null;
 }
 
 export function OnboardingWizard({
@@ -43,6 +57,8 @@ export function OnboardingWizard({
   onCompleteOnboarding,
   saveScanComplete = false,
   onRescan,
+  saveSourceMode = "folders",
+  savesUnavailableReason = null,
 }: OnboardingWizardProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedSave, setSelectedSave] = useState<SaveCandidate | null>(
@@ -132,7 +148,7 @@ export function OnboardingWizard({
       {/* Header */}
       <div className="border-b border-slate-100 dark:border-slate-800 pb-4 mb-4 text-center">
         <h1 className="font-heading text-xl sm:text-2xl text-slate-900 dark:text-slate-100 uppercase tracking-wider mb-1">
-          Manager Appointment Protocol
+          Manager Appointment Onboarding
         </h1>
         <p className="font-sans text-xs sm:text-sm text-slate-600 dark:text-slate-300">
           Configure save connectivity, managerial philosophy, transfer bounds, and career objectives.
@@ -208,18 +224,37 @@ export function OnboardingWizard({
           {saveCandidates.length === 0 && (
             <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-950/40 p-6 text-center space-y-2">
               <p className="font-heading text-sm text-slate-900 dark:text-slate-100 uppercase">
-                {saveScanComplete ? "No EA SPORTS FC save detected" : "Scanning for local saves…"}
+                {savesUnavailableReason
+                  ? "Local file access unavailable"
+                  : saveScanComplete
+                    ? "No EA SPORTS FC save detected"
+                    : "Scanning for local saves…"}
               </p>
               <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                TouchlineOS reads manager careers from your EA SPORTS FC settings folders and from{" "}
-                <code className="font-mono text-slate-900 dark:text-slate-100">data/saves/</code>.
+                {savesUnavailableReason ? (
+                  savesUnavailableReason
+                ) : saveSourceMode === "picker" ? (
+                  <>
+                    TouchlineOS reads the save file you choose. Nothing is uploaded — the file is
+                    opened, parsed and kept in this browser.
+                  </>
+                ) : (
+                  <>
+                    TouchlineOS reads manager careers from your EA SPORTS FC settings folders and from{" "}
+                    <code className="font-mono text-slate-900 dark:text-slate-100">data/saves/</code>.
+                  </>
+                )}
               </p>
               {onRescan && (
                 <button
                   onClick={onRescan}
                   className="mt-1 px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-sub uppercase tracking-wider text-slate-700 dark:text-slate-200 hover:border-[#E11D48] hover:text-[#E11D48] transition-all cursor-pointer"
                 >
-                  Re-scan save folders
+                  {savesUnavailableReason
+                    ? "Try again"
+                    : saveSourceMode === "picker"
+                      ? "Choose save file…"
+                      : "Re-scan save folders"}
                 </button>
               )}
             </div>

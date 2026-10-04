@@ -13,6 +13,7 @@ import {
   DebriefHistoryPayload,
 } from "@/lib/events/debrief-anomalies";
 
+import { apiFetch } from "@/lib/platform/api-client";
 interface DebriefViewProps {
   careerId: string | null;
   players: EnrichedPlayer[];
@@ -383,7 +384,7 @@ export function DebriefView({
       .filter((p) => p.answer.length > 0);
 
     try {
-      const res = await fetch("/api/debrief", {
+      const res = await apiFetch("/api/debrief", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -456,7 +457,7 @@ export function DebriefView({
     setDeletingId(id);
     setMessage(null);
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/debrief?id=${encodeURIComponent(id)}&careerId=${encodeURIComponent(careerId)}`,
         { method: "DELETE" }
       );

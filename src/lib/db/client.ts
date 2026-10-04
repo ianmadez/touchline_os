@@ -1,19 +1,10 @@
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
-import fs from "fs";
-import path from "path";
-import { config } from "../config";
-import * as schema from "./schema";
+/**
+ * The shared Drizzle handle.
+ *
+ * The driver itself lives behind the platform `Storage` port (`@/lib/platform/storage`); this module
+ * only re-exports it, so the existing `import { db } from "../db/client"` call sites keep working
+ * unchanged while the target's driver is swapped underneath them.
+ */
+import { storage } from "../platform/storage";
 
-const dbDir = path.dirname(config.databasePath);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
-
-const sqlite = new Database(config.databasePath);
-
-// Enforce foreign keys and WAL mode for high performance and integrity
-sqlite.pragma("journal_mode = WAL");
-sqlite.pragma("foreign_keys = ON");
-
-export const db = drizzle(sqlite, { schema });
+export const db = storage.db;

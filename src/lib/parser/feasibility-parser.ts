@@ -2,10 +2,14 @@
  * TouchlineOS — Phase 0 feasibility parser.
  * Reads FIFA/FC bit-packed DB\0\x08 blocks and tagged career blobs (mlop/mrni).
  */
-import fs from "fs";
-import path from "path";
-import { createHash } from "node:crypto";
-import { gunzipSync, inflateSync } from "node:zlib";
+import {
+  asciiBytes,
+  hexText,
+  indexOfBytes,
+  latin1Text,
+  readUInt16LE,
+  readUInt32LE,
+} from "./bytes";
 
 import {
   SAVE_PROVENANCE,
@@ -25,8 +29,6 @@ import {
   type SaveCandidate,
   type SaveFact,
   type SaveFingerprint,
-  type SaveSearchLocation,
-  type SaveSlotKind,
   type SeasonHistoryRow,
   type YouthProspectRow,
   type PresignedDeal,
@@ -37,37 +39,25 @@ import {
   type TableStat,
 } from "./interface";
 
-const DB_HEADER = Buffer.from([0x44, 0x42, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00]);
-const FBCHUNKS_TAG = Buffer.from("FBCHUNKS", "latin1");
-const SQLITE_TAG = Buffer.from("SQLite format 3\u0000", "latin1");
-const GZIP_MAGIC = Buffer.from([0x1f, 0x8b, 0x08]);
-const LZ4_FRAME_MAGIC = Buffer.from([0x04, 0x22, 0x4d, 0x18]);
+const DB_HEADER = new Uint8Array([0x44, 0x42, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00]);
+const FBCHUNKS_TAG = asciiBytes("FBCHUNKS");
+const SQLITE_TAG = asciiBytes("SQLite format 3\u0000");
+const GZIP_MAGIC = new Uint8Array([0x1f, 0x8b, 0x08]);
+const LZ4_FRAME_MAGIC = new Uint8Array([0x04, 0x22, 0x4d, 0x18]);
 const ZLIB_MAGICS = [
-  Buffer.from([0x78, 0x01]),
-  Buffer.from([0x78, 0x5e]),
-  Buffer.from([0x78, 0x9c]),
-  Buffer.from([0x78, 0xda]),
+  new Uint8Array([0x78, 0x01]),
+  new Uint8Array([0x78, 0x5e]),
+  new Uint8Array([0x78, 0x9c]),
+  new Uint8Array([0x78, 0xda]),
 ];
 
 const FIELD_STRING = 0;
 const FIELD_INT = 3;
 const FIELD_FLOAT = 4;
 
-const MAX_SCAN_DEPTH = 3;
-const MAX_DIR_ENTRIES = 5000;
 const MAX_TABLE_COUNT = 4096;
 const MAX_SCANNED_ROWS = 250_000;
 const MAX_INCOMPLETE_NAMES = 200;
-
-const NON_CAREER_RE = /^(CmPlr|Squads|FutSquads|MatchDay|Settings|Assets|UltimateTeam|FUT|Temp)/i;
-const SAVE_EXT_RE = /\.(db|sav|fcsave|fc25|fc26|bin|dat)$/i;
-
-const SLOT_PATTERNS: { re: RegExp; kind: SaveSlotKind }[] = [
-  { re: /^CmMgrC(\d{17})$/i, kind: "manager-career" },
-  { re: /^ManagerCareer(\d{8,})$/i, kind: "manager-career" },
-  { re: /^Career(\d{8,})$/i, kind: "career" },
-  { re: /^CmPlrC?(\d{8,})$/i, kind: "player-career" },
-];
 
 const IDENTITY_TABLES = [
   "career_users",
@@ -180,19 +170,21 @@ const DATE_SOURCES: [string, string][] = [
   ["career_playercontract", "last_status_change_date"],
 ];
 
-export class BufferReader {
-  readonly buffer: Buffer;
+export class ByteReader {
+  readonly bytes: Uint8Array;
   position: number;
+  private readonly view: DataView;
 
-  constructor(buffer: Buffer, position = 0) {
-    this.buffer = buffer;
+  constructor(bytes: Uint8Array, position = 0) {
+    this.bytes = bytes;
+    this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     this.position = position;
   }
 
   private require(bytes: number): number {
     const at = this.position;
-    if (at < 0 || at + bytes > this.buffer.length) {
-      throw new RangeError(`read of ${bytes} byte(s) at ${at} exceeds length ${this.buffer.length}`);
+    if (at < 0 || at + bytes > this.bytes.length) {
+      throw new RangeError(`read of ${bytes} byte(s) at ${at} exceeds length ${this.bytes.length}`);
     }
     return at;
   }
@@ -200,25 +192,25 @@ export class BufferReader {
   readUInt8(): number {
     const at = this.require(1);
     this.position = at + 1;
-    return this.buffer[at];
+    return this.bytes[at];
   }
 
   readUInt16LE(): number {
     const at = this.require(2);
     this.position = at + 2;
-    return this.buffer.readUInt16LE(at);
+    return this.view.getUint16(at, true);
   }
 
   readUInt32LE(): number {
     const at = this.require(4);
     this.position = at + 4;
-    return this.buffer.readUInt32LE(at);
+    return this.view.getUint32(at, true);
   }
 
-  readBytes(length: number): Buffer {
+  readBytes(length: number): Uint8Array {
     const at = this.require(length);
     this.position = at + length;
-    return this.buffer.subarray(at, at + length);
+    return this.bytes.subarray(at, at + length);
   }
 
   skip(length: number): void {
@@ -236,18 +228,18 @@ export interface DecodedName {
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 
-function decodeUtf8OrLatin1(bytes: Buffer): string {
+function decodeUtf8OrLatin1(bytes: Uint8Array): string {
   if (bytes.length === 0) return "";
   let text: string;
   try {
     text = utf8.decode(bytes);
   } catch {
-    text = bytes.toString("latin1");
+    text = latin1Text(bytes);
   }
   return text.replace(CONTROL_CHARS, "").trim();
 }
 
-export function decodeName(field: Buffer): DecodedName {
+export function decodeName(field: Uint8Array): DecodedName {
   if (field.length === 0) return { text: "", complete: true };
 
   const terminator = field.indexOf(0);
@@ -390,17 +382,17 @@ export function parseNameTable(csv: string): Map<number, string> {
   return byPlayerId;
 }
 
-export function unpackDatabases(save: Buffer): Buffer[] {
-  const blocks: Buffer[] = [];
-  let offset = save.indexOf(DB_HEADER);
+export function unpackDatabases(save: Uint8Array): Uint8Array[] {
+  const blocks: Uint8Array[] = [];
+  let offset = indexOfBytes(save, DB_HEADER);
   while (offset >= 0) {
     if (offset + DB_HEADER.length + 4 > save.length) break;
-    const size = save.readUInt32LE(offset + DB_HEADER.length);
+    const size = readUInt32LE(save, offset + DB_HEADER.length);
     if (size <= 0 || offset + size > save.length) {
       throw new Error(`database at offset ${offset} declares invalid size ${size}`);
     }
     blocks.push(save.subarray(offset, offset + size));
-    offset = save.indexOf(DB_HEADER, offset + size);
+    offset = indexOfBytes(save, DB_HEADER, offset + size);
   }
   return blocks;
 }
@@ -432,8 +424,8 @@ interface HeaderRead {
   stats: TableStat[];
 }
 
-export function readTableHeaders(block: Buffer, meta: DbMeta | null, database: number): HeaderRead {
-  const reader = new BufferReader(block, DB_HEADER.length);
+export function readTableHeaders(block: Uint8Array, meta: DbMeta | null, database: number): HeaderRead {
+  const reader = new ByteReader(block, DB_HEADER.length);
 
   const declaredSize = reader.readUInt32LE();
   if (declaredSize !== block.length) {
@@ -449,7 +441,7 @@ export function readTableHeaders(block: Buffer, meta: DbMeta | null, database: n
   const entries: { shortName: string; offset: number }[] = [];
   for (let i = 0; i < tableCount; i++) {
     entries.push({
-      shortName: reader.readBytes(4).toString("latin1"),
+      shortName: latin1Text(reader.readBytes(4)),
       offset: reader.readUInt32LE(),
     });
   }
@@ -488,7 +480,7 @@ export function readTableHeaders(block: Buffer, meta: DbMeta | null, database: n
     for (let f = 0; f < fieldCount; f++) {
       const type = reader.readUInt32LE();
       const bitOffset = reader.readUInt32LE();
-      const shortField = reader.readBytes(4).toString("latin1");
+      const shortField = latin1Text(reader.readBytes(4));
       const bitDepth = reader.readUInt32LE();
       const known = tableName ? fieldNameFor(meta as DbMeta, tableName, shortField) : undefined;
       declared.push({
@@ -538,7 +530,7 @@ interface RowRead {
 }
 
 export function decodeRows(
-  block: Buffer,
+  block: Uint8Array,
   header: TableHeader,
   meta: DbMeta,
   options: {
@@ -563,7 +555,7 @@ export function decodeRows(
   const fields = header.fields;
   const rangeLow = fields.map((f) => (f.known ? meta.fieldRange.get(tableName + f.key) ?? 0 : 0));
 
-  const reader = new BufferReader(block, header.recordsStart);
+  const reader = new ByteReader(block, header.recordsStart);
   const rows: Row[] = [];
   const incompleteNames: IncompleteName[] = [];
   let scanned = 0;
@@ -652,27 +644,27 @@ export function decodeRows(
   return { rows, scanned, kept: rows.length, complete, incompleteNames };
 }
 
-function blobStart(save: Buffer): number {
-  let at = save.indexOf(DB_HEADER);
+function blobStart(save: Uint8Array): number {
+  let at = indexOfBytes(save, DB_HEADER);
   if (at < 0) return -1;
   let past = 0;
   while (at >= 0) {
-    const size = save.readUInt32LE(at + DB_HEADER.length);
+    const size = readUInt32LE(save, at + DB_HEADER.length);
     if (size <= 0 || at + size > save.length) break;
     past = at + size;
-    at = save.indexOf(DB_HEADER, past);
+    at = indexOfBytes(save, DB_HEADER, past);
   }
   return past;
 }
 
-export function blobSections(save: Buffer): BlobSectionInfo[] {
+export function blobSections(save: Uint8Array): BlobSectionInfo[] {
   const from = blobStart(save);
   if (from <= 0) return [];
 
   const marks: { tag: string; at: number }[] = [];
   for (let i = from; i < save.length - 12; i++) {
-    if (save[i] !== 0x01 || save.readUInt32LE(i + 1) !== 4) continue;
-    const tag = save.subarray(i + 5, i + 9).toString("latin1");
+    if (save[i] !== 0x01 || readUInt32LE(save, i + 1) !== 4) continue;
+    const tag = latin1Text(save.subarray(i + 5, i + 9));
     if (!/^[a-z]{4}$/.test(tag)) continue;
     marks.push({ tag, at: i });
     i += 8;
@@ -701,25 +693,25 @@ function readGoals(value: number): number | null | false {
 
 const FIXTURE_STRIDE = 22;
 
-export function readFixtureLedger(save: Buffer): SlotFixture[] | null {
+export function readFixtureLedger(save: Uint8Array): SlotFixture[] | null {
   const section = blobSections(save).find((s) => s.tag === "mlop");
   if (!section) return null;
 
   const out: SlotFixture[] = [];
   for (let i = section.start; i + FIXTURE_STRIDE <= section.end; i++) {
     if (save[i + 9] !== 0xff || save[i + 13] !== 0xff) continue;
-    const date = save.readUInt32LE(i);
+    const date = readUInt32LE(save, i);
     if (!plausibleDate(date)) continue;
     const goalsA = readGoals(save[i + 8]);
     const goalsB = readGoals(save[i + 12]);
     if (goalsA === false || goalsB === false) continue;
-    const kickoff = save.readUInt16LE(i + 4);
+    const kickoff = readUInt16LE(save, i + 4);
     out.push({
       date,
       kickoff: kickoff >= 0 && kickoff <= 2359 ? kickoff : null,
-      comp: save.readUInt16LE(i + 19),
-      slotA: save.readUInt16LE(i + 6),
-      slotB: save.readUInt16LE(i + 10),
+      comp: readUInt16LE(save, i + 19),
+      slotA: readUInt16LE(save, i + 6),
+      slotB: readUInt16LE(save, i + 10),
       goalsA,
       goalsB,
     });
@@ -730,7 +722,7 @@ export function readFixtureLedger(save: Buffer): SlotFixture[] | null {
 const RESULT_STRIDE = 49;
 
 export function readLatestResults(
-  save: Buffer,
+  save: Uint8Array,
   leagueOfTeam: (teamId: number) => number | null,
   isPlayerId: (id: number) => boolean = () => false
 ): MatchResult[] | null {
@@ -740,23 +732,23 @@ export function readLatestResults(
   const out: MatchResult[] = [];
   const seen = new Set<string>();
   for (let i = section.start; i + RESULT_STRIDE <= section.end; i++) {
-    const date = save.readUInt32LE(i);
+    const date = readUInt32LE(save, i);
     if (!plausibleDate(date)) continue;
-    const home = save.readUInt32LE(i + 6);
-    const away = save.readUInt32LE(i + 10);
+    const home = readUInt32LE(save, i + 6);
+    const away = readUInt32LE(save, i + 10);
     if (home === away) continue;
     const league = leagueOfTeam(home);
     if (league === null || league !== leagueOfTeam(away)) continue;
-    const homeGoals = save.readUInt32LE(i + 14);
-    const awayGoals = save.readUInt32LE(i + 18);
+    const homeGoals = readUInt32LE(save, i + 14);
+    const awayGoals = readUInt32LE(save, i + 18);
     if (homeGoals > MAX_GOALS || awayGoals > MAX_GOALS) continue;
-    if (save.readUInt16LE(i + 22) !== league) continue;
+    if (readUInt16LE(save, i + 22) !== league) continue;
 
     const key = `${date}:${home}:${away}:${homeGoals}:${awayGoals}`;
     if (seen.has(key)) continue;
     seen.add(key);
 
-    const standout = save.readUInt32LE(i + 26);
+    const standout = readUInt32LE(save, i + 26);
     out.push({
       date,
       homeTeamId: home,
@@ -770,28 +762,53 @@ export function readLatestResults(
   return out.length ? out : null;
 }
 
-function firstZlibOffset(buffer: Buffer): number {
+/**
+ * Decompresses a gzip or zlib (RFC1950) stream.
+ *
+ * `DecompressionStream` is available in browsers and in Node 18+, so one implementation serves both
+ * runtimes and the parser keeps no `node:zlib` import.
+ */
+async function inflate(bytes: Uint8Array, format: "gzip" | "deflate"): Promise<Uint8Array> {
+  const decompressor = new DecompressionStream(format);
+  const writer = decompressor.writable.getWriter();
+
+  // Pump the compressed bytes in without awaiting: on a large payload, awaiting the write before
+  // draining the readable would let the writable's queue fill and deadlock. A failure here surfaces
+  // on `reader.read()` below, which is what the caller's try/catch sees.
+  const pump = (async () => {
+    // `write` is declared against `ArrayBufferView<ArrayBuffer>` in the DOM lib, which is narrower
+    // than the `Uint8Array<ArrayBufferLike>` the decoder hands us. Both are plain views, so this is
+    // a type-level gap rather than a runtime one.
+    await writer.write(bytes as unknown as BufferSource);
+    await writer.close();
+  })().catch(() => {});
+
+  const reader = decompressor.readable.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.length;
+  }
+  await pump;
+
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.length;
+  }
+  return out;
+}
+
+function firstZlibOffset(buffer: Uint8Array): number {
   for (const magic of ZLIB_MAGICS) {
-    const at = buffer.indexOf(magic);
+    const at = indexOfBytes(buffer, magic);
     if (at >= 0) return at;
   }
   return -1;
-}
-
-function classifySlot(fileName: string): { kind: SaveSlotKind; stamp: string | null } {
-  for (const pattern of SLOT_PATTERNS) {
-    const match = pattern.re.exec(fileName);
-    if (match) return { kind: pattern.kind, stamp: match[1] };
-  }
-  if (SAVE_EXT_RE.test(fileName)) return { kind: "database", stamp: null };
-  if (/career/i.test(fileName)) return { kind: "career", stamp: null };
-  if (/^DATA/i.test(fileName)) return { kind: "database", stamp: null };
-  return { kind: "unknown", stamp: null };
-}
-
-function looksLikeSaveFile(fileName: string): boolean {
-  if (NON_CAREER_RE.test(fileName)) return false;
-  return classifySlot(fileName).kind !== "unknown";
 }
 
 const num = (row: Row | undefined, key: string): number | null => {
@@ -813,15 +830,14 @@ const asDate = (yyyymmdd: number | null): string | null => {
 
 export class FeasibilitySaveParser implements CareerDataProvider {
   private readonly options: {
-    metaPath: string | null;
-    nameTablePath: string | null;
+    metaXml: string | null;
+    metaSource: string | null;
+    nameTableCsv: string | null;
+    nameTableSource: string | null;
     rowLimit: number;
     allTables: boolean;
     sampleRows: number;
   };
-
-  lastScan: SaveSearchLocation[] = [];
-  lastSkippedFiles: string[] = [];
 
   private meta: DbMeta | null = null;
   private metaSource: string | null = null;
@@ -830,194 +846,54 @@ export class FeasibilitySaveParser implements CareerDataProvider {
 
   constructor(options: ParseOptions = {}) {
     this.options = {
-      metaPath: options.metaPath ?? null,
-      nameTablePath: options.nameTablePath ?? null,
+      metaXml: options.metaXml ?? null,
+      metaSource: options.metaSource ?? null,
+      nameTableCsv: options.nameTableCsv ?? null,
+      nameTableSource: options.nameTableSource ?? null,
       rowLimit: options.rowLimit ?? 60,
       allTables: options.allTables ?? false,
       sampleRows: options.sampleRows ?? 3,
     };
   }
 
-  searchLocations(): SaveSearchLocation[] {
-    const env = process.env;
-    const home = env.USERPROFILE || env.HOME || "";
-    const localAppData = env.LOCALAPPDATA || path.join(home, "AppData", "Local");
-    const roaming = env.APPDATA || path.join(home, "AppData", "Roaming");
-    const cwd = process.cwd();
-
-    const candidates: [string, string][] = [
-      [path.join(home, "Documents", "FC 25", "settings"), "FC 25 · Documents/settings"],
-      [
-        path.join(home, "OneDrive", "Documents", "FC 25", "settings"),
-        "FC 25 · OneDrive Documents/settings",
-      ],
-      [path.join(localAppData, "EA SPORTS FC 25"), "FC 25 · AppData/Local"],
-      [path.join(localAppData, "EA SPORTS FC 25", "settings"), "FC 25 · AppData/Local/settings"],
-      [path.join(cwd, "data", "saves"), "workspace · data/saves"],
-      [path.join(localAppData, "EA SPORTS FC 26", "settings"), "FC 26 · AppData/Local/settings"],
-      [path.join(home, "Documents", "FC 26", "settings"), "FC 26 · Documents/settings"],
-      [path.join(roaming, "EA Sports", "FC 25"), "FC 25 · AppData/Roaming/EA Sports"],
-      [path.join(roaming, "EA Sports", "FC 26"), "FC 26 · AppData/Roaming/EA Sports"],
-    ];
-
-    for (const key of ["OneDrive", "OneDriveCommercial", "OneDriveConsumer"]) {
-      const root = env[key];
-      if (!root) continue;
-      candidates.push([
-        path.join(root, "Documents", "FC 25", "settings"),
-        `FC 25 · ${key}/Documents/settings`,
-      ]);
-      candidates.push([
-        path.join(root, "Documents", "FC 26", "settings"),
-        `FC 26 · ${key}/Documents/settings`,
-      ]);
-    }
-
-    const out: SaveSearchLocation[] = [];
-    const seen = new Set<string>();
-    for (const [dir, label] of candidates) {
-      if (!dir || seen.has(dir.toLowerCase())) continue;
-      seen.add(dir.toLowerCase());
-      out.push({ path: dir, label, exists: fs.existsSync(dir) });
-    }
-    return out;
-  }
-
-  private walk(dir: string, depth: number, out: string[]): string[] {
-    if (depth < 0 || out.length >= MAX_DIR_ENTRIES) return out;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return out;
-    }
-    for (const entry of entries) {
-      if (out.length >= MAX_DIR_ENTRIES) break;
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        this.walk(full, depth - 1, out);
-      } else if (entry.isFile()) {
-        out.push(full);
-      }
-    }
-    return out;
-  }
-
-  async detectSaves(saveDirectory?: string): Promise<SaveCandidate[]> {
-    const locations: SaveSearchLocation[] = saveDirectory
-      ? [
-          {
-            path: path.resolve(saveDirectory),
-            label: "explicit path",
-            exists: fs.existsSync(path.resolve(saveDirectory)),
-          },
-        ]
-      : this.searchLocations();
-
-    this.lastScan = locations;
-    this.lastSkippedFiles = [];
-
-    const candidates: SaveCandidate[] = [];
-    const seen = new Set<string>();
-
-    for (const location of locations) {
-      let stat: fs.Stats | null = null;
-      try {
-        stat = fs.statSync(location.path);
-      } catch {
-        continue;
-      }
-
-      const isFile = stat.isFile();
-      const files = isFile ? [location.path] : this.walk(location.path, MAX_SCAN_DEPTH, []);
-
-      for (const filePath of files) {
-        const key = filePath.toLowerCase();
-        if (seen.has(key)) continue;
-
-        const fileName = path.basename(filePath);
-        if (!isFile && !looksLikeSaveFile(fileName)) {
-          this.lastSkippedFiles.push(filePath);
-          continue;
-        }
-
-        let fileStat: fs.Stats;
-        try {
-          fileStat = fs.statSync(filePath);
-        } catch {
-          continue;
-        }
-        if (!fileStat.isFile()) continue;
-
-        seen.add(key);
-        const slot = classifySlot(fileName);
-        candidates.push({
-          id: createHash("sha1").update(filePath).digest("hex").slice(0, 16),
-          filePath,
-          fileName,
-          lastModified: fileStat.mtime,
-          fileSizeBytes: fileStat.size,
-          slotKind: slot.kind,
-          foundIn: location.label,
-          ...(slot.stamp ? { slotStamp: slot.stamp } : {}),
-        });
-      }
-    }
-
-    return candidates.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
-  }
-
   private loadMeta(): void {
     if (this.meta !== null || this.metaSource === "none") return;
 
-    const roots = [
-      this.options.metaPath,
-      process.env.FC_META_XML ?? null,
-      path.join(process.cwd(), "data", "fifa_ng_db-meta.xml"),
-      path.join(process.cwd(), "references", "fc26companion", "data", "fifa_ng_db-meta.xml"),
-    ];
-
-    for (const candidate of roots) {
-      if (!candidate) continue;
-      try {
-        if (!fs.existsSync(candidate)) continue;
-        this.meta = parseDbMeta(fs.readFileSync(candidate, "utf8"));
-        this.metaSource = candidate;
-        return;
-      } catch {
-        continue;
-      }
+    const xml = this.options.metaXml;
+    if (xml === null) {
+      this.metaSource = "none";
+      return;
     }
-    this.metaSource = "none";
+    try {
+      this.meta = parseDbMeta(xml);
+      this.metaSource = this.options.metaSource ?? "provided";
+    } catch {
+      this.metaSource = "none";
+    }
   }
 
   private loadNames(): void {
     if (this.nameTableSource !== null) return;
 
-    const roots = [
-      this.options.nameTablePath,
-      process.env.FC_NAME_TABLE ?? null,
-      path.join(process.cwd(), "data", "playernames_fc26.csv"),
-      path.join(process.cwd(), "references", "fc26companion", "data", "playernames_fc26.csv"),
-    ];
-
-    for (const candidate of roots) {
-      if (!candidate) continue;
-      try {
-        if (!fs.existsSync(candidate)) continue;
-        const table = parseNameTable(fs.readFileSync(candidate, "utf8"));
-        if (table.size === 0) continue;
-        this.names = table;
-        this.nameTableSource = candidate;
-        return;
-      } catch {
-        continue;
-      }
+    const csv = this.options.nameTableCsv;
+    if (csv === null) {
+      this.nameTableSource = "none";
+      return;
     }
-    this.nameTableSource = "none";
+    try {
+      const table = parseNameTable(csv);
+      if (table.size === 0) {
+        this.nameTableSource = "none";
+        return;
+      }
+      this.names = table;
+      this.nameTableSource = this.options.nameTableSource ?? "provided";
+    } catch {
+      this.nameTableSource = "none";
+    }
   }
 
-  async parse(save: SaveCandidate): Promise<SpikeCareerData> {
+  async parse(save: SaveCandidate, bytes: Uint8Array): Promise<SpikeCareerData> {
     const startedAt = performance.now();
     const warnings: string[] = [];
     const facts: SaveFact[] = [];
@@ -1025,18 +901,13 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     const truncatedTables: SpikeCareerData["truncatedTables"] = [];
     const decodedTables: Record<string, number> = {};
 
-    if (!fs.existsSync(save.filePath)) {
-      throw new Error(`Save file not found at path: ${save.filePath}`);
-    }
-
-    let bytes = fs.readFileSync(save.filePath);
     const fingerprint = this.fingerprint(bytes);
     let decompressedFrom: string | null = null;
 
     if (fingerprint.databaseBlocks === 0) {
-      const inflated = this.tryInflate(bytes);
+      const inflated = await this.tryInflate(bytes);
       if (inflated) {
-        bytes = Buffer.from(inflated.bytes);
+        bytes = inflated.bytes;
         decompressedFrom = `${inflated.strategy}@${inflated.offset}`;
         warnings.push(
           `Save is not a DB container: decompressed with ${inflated.strategy} at offset ${inflated.offset} before parsing.`
@@ -1056,8 +927,8 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     this.loadNames();
     const meta = this.meta;
 
-    const blocks: Buffer[] = [];
-    if (bytes.indexOf(DB_HEADER) >= 0) {
+    const blocks: Uint8Array[] = [];
+    if (indexOfBytes(bytes, DB_HEADER) >= 0) {
       try {
         blocks.push(...unpackDatabases(bytes));
       } catch (error) {
@@ -1901,25 +1772,25 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     };
   }
 
-  private fingerprint(bytes: Buffer): SaveFingerprint {
+  private fingerprint(bytes: Uint8Array): SaveFingerprint {
     const offsets = {
-      db: bytes.indexOf(DB_HEADER),
-      fbchunks: bytes.indexOf(FBCHUNKS_TAG),
-      sqlite: bytes.indexOf(SQLITE_TAG),
-      gzip: bytes.indexOf(GZIP_MAGIC),
+      db: indexOfBytes(bytes, DB_HEADER),
+      fbchunks: indexOfBytes(bytes, FBCHUNKS_TAG),
+      sqlite: indexOfBytes(bytes, SQLITE_TAG),
+      gzip: indexOfBytes(bytes, GZIP_MAGIC),
       zlib: firstZlibOffset(bytes),
-      lz4: bytes.indexOf(LZ4_FRAME_MAGIC),
+      lz4: indexOfBytes(bytes, LZ4_FRAME_MAGIC),
     };
 
     let databaseBlocks = 0;
     let databaseBytes = 0;
     let cursor = offsets.db;
     while (cursor >= 0) {
-      const size = bytes.readUInt32LE(cursor + DB_HEADER.length);
+      const size = readUInt32LE(bytes, cursor + DB_HEADER.length);
       if (size <= 0 || cursor + size > bytes.length) break;
       databaseBlocks++;
       databaseBytes += size;
-      cursor = bytes.indexOf(DB_HEADER, cursor + size);
+      cursor = indexOfBytes(bytes, DB_HEADER, cursor + size);
     }
 
     const container: SaveFingerprint["container"] =
@@ -1939,7 +1810,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
 
     return {
       container,
-      headHex: bytes.subarray(0, 16).toString("hex"),
+      headHex: hexText(bytes.subarray(0, 16)),
       sizeBytes: bytes.length,
       databaseBlocks,
       databaseBytes,
@@ -1953,18 +1824,28 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     };
   }
 
-  private tryInflate(bytes: Buffer): { bytes: Buffer; strategy: string; offset: number } | null {
-    const gzipAt = bytes.indexOf(GZIP_MAGIC);
+  private async tryInflate(
+    bytes: Uint8Array
+  ): Promise<{ bytes: Uint8Array; strategy: string; offset: number } | null> {
+    const gzipAt = indexOfBytes(bytes, GZIP_MAGIC);
     if (gzipAt >= 0) {
       try {
-        return { bytes: gunzipSync(bytes.subarray(gzipAt)), strategy: "gzip", offset: gzipAt };
+        return {
+          bytes: await inflate(bytes.subarray(gzipAt), "gzip"),
+          strategy: "gzip",
+          offset: gzipAt,
+        };
       } catch {}
     }
 
     const zlibAt = firstZlibOffset(bytes);
     if (zlibAt >= 0) {
       try {
-        return { bytes: inflateSync(bytes.subarray(zlibAt)), strategy: "zlib", offset: zlibAt };
+        return {
+          bytes: await inflate(bytes.subarray(zlibAt), "deflate"),
+          strategy: "zlib",
+          offset: zlibAt,
+        };
       } catch {}
     }
     return null;

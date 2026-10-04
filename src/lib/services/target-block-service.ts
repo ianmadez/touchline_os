@@ -10,7 +10,6 @@
  * requirement's example being 8-10 wanted, 11-12 a dream, 6 or fewer a concern. The band is the
  * manager's judgement, not a model output, so it is stored rather than computed.
  */
-import crypto from "crypto";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { targetBlocks } from "../db/schema";

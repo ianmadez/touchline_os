@@ -8,6 +8,7 @@ import { SeasonPanel } from "@/components/ui/dashboard/season-panel";
 import { SeasonVaultView } from "./season-vault-view";
 import { BoardObjectivesPanel } from "./board-objectives-panel";
 
+import { apiFetch } from "@/lib/platform/api-client";
 interface SeasonViewProps {
   careerId: string;
   seasonState: SeasonState | null;
@@ -78,7 +79,7 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
   const loadBlockTargets = useCallback(async () => {
     if (!careerId) return;
     try {
-      const response = await fetch(`/api/season/blocks?careerId=${encodeURIComponent(careerId)}`, {
+      const response = await apiFetch(`/api/season/blocks?careerId=${encodeURIComponent(careerId)}`, {
         cache: "no-store",
       });
       const payload = (await response.json()) as {

@@ -12,6 +12,7 @@ import {
   IconWallet,
 } from "@/components/ui/icons";
 
+import { apiFetch } from "@/lib/platform/api-client";
 /**
  * The Finances screen.
  *
@@ -35,7 +36,7 @@ export function FinanceView({ careerId }: { careerId: string | null }) {
       return;
     }
     try {
-      const response = await fetch(`/api/finance?careerId=${encodeURIComponent(careerId)}`, {
+      const response = await apiFetch(`/api/finance?careerId=${encodeURIComponent(careerId)}`, {
         cache: "no-store",
       });
       const payload = (await response.json()) as {
@@ -67,7 +68,7 @@ export function FinanceView({ careerId }: { careerId: string | null }) {
       if (!careerId) return;
       setSaving(true);
       try {
-        const response = await fetch("/api/finance", {
+        const response = await apiFetch("/api/finance", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ careerId, [field]: value }),

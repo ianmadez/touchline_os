@@ -42,7 +42,7 @@
  * returns plain facts. Deciding how alarming they are, and how to phrase the thread, happens later
  * and separately (see `composeStoryline`), so re-wording a card never rewrites history.
  */
-import { createHash } from "crypto";
+import { sha1Hex } from "../parser/sha";
 import type { Provenance } from "../db/schema";
 import type { EnrichedPlayer } from "../services/squad-service";
 import type { PitchSlotAssignment } from "../services/tactics-service";
@@ -123,10 +123,7 @@ export function storylineClosureEventId(
   storylineId: string,
   status: "RESOLVED" | "STALE"
 ): string {
-  const digest = createHash("sha1")
-    .update(["close", careerId, storylineId, status].join("|"))
-    .digest("hex")
-    .slice(0, 24);
+  const digest = sha1Hex(["close", careerId, storylineId, status].join("|")).slice(0, 24);
   return `evt_ev_${digest}`;
 }
 
@@ -137,19 +134,13 @@ export function storylineClosureEventId(
  * canonical string into a short collision-resistant id.
  */
 export function evidenceEventId(careerId: string, fact: EvidenceFact): string {
-  const digest = createHash("sha1")
-    .update([careerId, fact.eventType, fact.entityId, fact.key].join("|"))
-    .digest("hex")
-    .slice(0, 24);
+  const digest = sha1Hex([careerId, fact.eventType, fact.entityId, fact.key].join("|")).slice(0, 24);
   return `evt_ev_${digest}`;
 }
 
 /** Deterministic id for a thread's opening fact, so re-evaluating cannot open it twice. */
 export function storylineOpenedEventId(careerId: string, storylineId: string): string {
-  const digest = createHash("sha1")
-    .update(["open", careerId, storylineId].join("|"))
-    .digest("hex")
-    .slice(0, 24);
+  const digest = sha1Hex(["open", careerId, storylineId].join("|")).slice(0, 24);
   return `evt_ev_${digest}`;
 }
 

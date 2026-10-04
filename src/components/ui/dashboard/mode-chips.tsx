@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { labelFor, REALISM_HINTS, type RealismLevel } from "@/lib/settings-vocabulary";
 import { normalisePlaystyle, PLAYSTYLE_DEFINITIONS, type Playstyle } from "@/lib/playstyles";
 
+import { apiFetch } from "@/lib/platform/api-client";
 /**
  * The two modes TouchlineOS is judging this career by, shown on the dashboard.
  *
@@ -31,7 +32,7 @@ export function ModeChips() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/settings", { cache: "no-store" })
+    apiFetch("/api/settings", { cache: "no-store" })
       .then((response) => response.json())
       .then((body: { settings?: { realismLevel?: string; playstyle?: string } }) => {
         if (cancelled) return;

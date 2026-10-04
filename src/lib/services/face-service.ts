@@ -42,7 +42,13 @@ export interface FaceImportSummary {
   errors: number;
 }
 
-function facePathFor(eaPlayerId: number): string {
+/**
+ * The on-disk path for one player's sprite.
+ *
+ * Exported so the platform `AssetStore` shares this single definition of where faces live rather
+ * than repeating the path.
+ */
+export function facePathFor(eaPlayerId: number): string {
   return path.join(FACE_DIR, `${eaPlayerId}.png`);
 }
 
@@ -53,6 +59,21 @@ export function hasCachedFace(eaPlayerId: number): boolean {
   } catch {
     return false;
   }
+}
+
+/** The cached sprite bytes, or null when this player has no cached face. */
+export function readFaceBytes(eaPlayerId: number): Uint8Array | null {
+  try {
+    return fs.readFileSync(facePathFor(eaPlayerId));
+  } catch {
+    return null;
+  }
+}
+
+/** Caches sprite bytes for one player, creating the faces directory if it does not exist yet. */
+export function writeFaceBytes(eaPlayerId: number, bytes: Uint8Array): void {
+  fs.mkdirSync(FACE_DIR, { recursive: true });
+  fs.writeFileSync(facePathFor(eaPlayerId), bytes);
 }
 
 /**
@@ -74,11 +95,10 @@ export async function ensureFace(eaPlayerId: number): Promise<FaceOutcome> {
     });
     if (!response.ok) return "no-sprite";
 
-    const bytes = Buffer.from(await response.arrayBuffer());
+    const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength < MIN_SPRITE_BYTES) return "no-sprite";
 
-    fs.mkdirSync(FACE_DIR, { recursive: true });
-    fs.writeFileSync(facePathFor(eaPlayerId), bytes);
+    writeFaceBytes(eaPlayerId, bytes);
     return "fetched";
   } catch {
     // A timeout or a network failure is not evidence that the player has no face, so this is

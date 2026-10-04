@@ -14,7 +14,6 @@
  * The season-end pass is idempotent: it may only write where it actually transitions something, so
  * re-running it over unchanged data produces no rows and no events.
  */
-import crypto from "crypto";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "../db/client";
 import {

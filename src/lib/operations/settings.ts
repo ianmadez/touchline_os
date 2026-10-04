@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { PLAYSTYLES } from "../playstyles";
 import {
   AI_PROVIDERS,
   AppSettingsPatch,
@@ -9,11 +9,8 @@ import {
   SettingsService,
   WAGE_FORMATS,
   toClientSettings,
-} from "@/lib/services/settings-service";
-import { PLAYSTYLES } from "@/lib/playstyles";
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+} from "../services/settings-service";
+import { failed, ok, type OperationResult } from "./types";
 
 function isMember<T extends string>(list: readonly T[], value: unknown): value is T {
   return typeof value === "string" && (list as readonly string[]).includes(value);
@@ -123,51 +120,32 @@ function parsePatch(body: unknown): { patch: AppSettingsPatch; problems: string[
   return { patch, problems };
 }
 
-/** GET /api/settings - read the global settings (never includes the API key). */
-export async function GET() {
+/** Read the global settings (never includes the API key). */
+export async function readSettings(): Promise<OperationResult<unknown>> {
   try {
     const settings = await new SettingsService().getSettings();
-    return NextResponse.json({ success: true, settings: toClientSettings(settings) });
+    return ok({ success: true, settings: toClientSettings(settings) });
   } catch (error) {
     console.error("[api/settings] read failed:", error);
-    return NextResponse.json(
-      { success: false, error: (error as Error).message ?? "Could not read settings." },
-      { status: 500 }
-    );
+    return failed(500, (error as Error).message ?? "Could not read settings.");
   }
 }
 
-/** PATCH /api/settings - partial update. Omitted fields are left untouched. */
-export async function PATCH(request: Request) {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { success: false, error: "Request body must be valid JSON." },
-      { status: 400 }
-    );
-  }
-
+/** Partial update. Omitted fields are left untouched. */
+export async function patchSettings(body: unknown): Promise<OperationResult<unknown>> {
   const { patch, problems } = parsePatch(body);
   if (problems.length > 0) {
-    return NextResponse.json({ success: false, error: problems.join(" ") }, { status: 400 });
+    return failed(400, problems.join(" "));
   }
   if (Object.keys(patch).length === 0) {
-    return NextResponse.json(
-      { success: false, error: "No recognised settings were supplied." },
-      { status: 400 }
-    );
+    return failed(400, "No recognised settings were supplied.");
   }
 
   try {
     const settings = await new SettingsService().saveSettings(patch);
-    return NextResponse.json({ success: true, settings: toClientSettings(settings) });
+    return ok({ success: true, settings: toClientSettings(settings) });
   } catch (error) {
     console.error("[api/settings] write failed:", error);
-    return NextResponse.json(
-      { success: false, error: (error as Error).message ?? "Could not save settings." },
-      { status: 500 }
-    );
+    return failed(500, (error as Error).message ?? "Could not save settings.");
   }
 }

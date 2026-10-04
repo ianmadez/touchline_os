@@ -20,7 +20,7 @@ import { and, eq } from "drizzle-orm";
 import { TargetBlockService } from "../src/lib/services/target-block-service";
 import { db } from "../src/lib/db/client";
 import { careerEvents } from "../src/lib/db/schema";
-import { PUT, DELETE } from "../src/app/api/season/blocks/route";
+import { deleteTargetBlock, saveTargetBlock } from "../src/lib/operations/season-blocks";
 
 const CAREER = process.argv[2] ?? "career_club_1917";
 const SEASON = 2026;
@@ -143,12 +143,11 @@ async function main(): Promise<void> {
   const all = await svc.listBlocks(CAREER, SEASON);
   check("editing does not add a second block", all.filter((b) => b.blockIndex === BLOCK_INDEX).length === 1);
 
-  // ---- 4. The API mirrors each reported match into the diary --------------------------------
-  const response = await PUT(
-    new Request("http://localhost/api/season/blocks", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+  // ---- 4. The operation mirrors each reported match into the diary --------------------------
+  // Called directly rather than through the route handler: the route is now a one-line adapter, and
+  // what this gate exists to prove is the behaviour, not the HTTP plumbing.
+  const outcome = await saveTargetBlock(
+    JSON.stringify({
         careerId: CAREER, seasonNumber: SEASON, blockIndex: BLOCK_INDEX,
         matches: reread.matches.map((m) => ({
           matchday: m.matchday, opponent: m.opponent, opponentPosition: m.opponentPosition,
@@ -158,11 +157,10 @@ async function main(): Promise<void> {
         targetMin: 8, targetMax: 10, dreamPoints: 12, concernPoints: 6,
         gamesPlayedBefore: 36, pointsBefore: 48, positionBefore: 12, goalDifferenceBefore: 1,
         tablePosition: 13, notes: "Next two are must wins.",
-      }),
     })
   );
-  const putBody = (await response.json()) as { success?: boolean; error?: string };
-  check("PUT succeeds through the API", response.ok && putBody.success === true, putBody.error ?? String(response.status));
+  const putBody = outcome.body as { success?: boolean; error?: string };
+  check("saving succeeds", outcome.status === 200 && putBody.success === true, putBody.error ?? String(outcome.status));
 
   const mirrored = await db
     .select()
@@ -178,15 +176,11 @@ async function main(): Promise<void> {
   check("outcome matches the scoreline", watfordPayload.result === "LOSS", String(watfordPayload.result));
 
   // Re-saving must not stack a second set of five on top of the first.
-  await PUT(
-    new Request("http://localhost/api/season/blocks", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+  await saveTargetBlock(
+    JSON.stringify({
         careerId: CAREER, seasonNumber: SEASON, blockIndex: BLOCK_INDEX,
         matches: reread.matches.map((m) => ({ ...m })),
         targetMin: 8, targetMax: 10, dreamPoints: 12, concernPoints: 6,
-      }),
     })
   );
   const afterResave = await db
@@ -196,9 +190,7 @@ async function main(): Promise<void> {
   check("re-saving does not duplicate the diary entries", afterResave.length === 5, String(afterResave.length));
 
   // Deleting the block must take its results with it.
-  await DELETE(
-    new Request(`http://localhost/api/season/blocks?careerId=${CAREER}&id=${saved.id}`, { method: "DELETE" })
-  );
+  await deleteTargetBlock(CAREER, saved.id);
   const afterDelete = await db
     .select()
     .from(careerEvents)

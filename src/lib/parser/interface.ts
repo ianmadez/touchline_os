@@ -45,8 +45,13 @@ export interface RawCareerData {
 }
 
 export interface CareerDataProvider {
-  detectSaves(saveDirectory?: string): Promise<SaveCandidate[]>;
-  parse(save: SaveCandidate): Promise<RawCareerData>;
+  /**
+   * Decodes one save's bytes.
+   *
+   * The bytes are supplied by the caller rather than read here: the local build reads them off disk
+   * and the browser build reads them from a handle the user picked, and neither belongs in a decoder.
+   */
+  parse(save: SaveCandidate, bytes: Uint8Array): Promise<RawCareerData>;
 }
 
 export type FieldValue = string | number | null;
@@ -136,8 +141,7 @@ export const UNKNOWN_POSITION = "UNKNOWN";
 
 /**
  * Canonical EA FC position codes as stored in `teamplayerlinks.position` and
- * `players.preferredposition1..4`. Mirrors the game-accurate table in
- * `references/fc26companion/src/domain/attributes.ts`.
+ * `players.preferredposition1..4`. Matches the game-accurate table.
  *
  * Codes are collapsed to their BASE role (sided variants fold into the group) so the
  * result can be compared against formation roles in `src/lib/tactics/formations.ts`,
@@ -487,8 +491,14 @@ export interface PresignedDeal {
 }
 
 export interface ParseOptions {
-  metaPath?: string | null;
-  nameTablePath?: string | null;
+  /** Contents of the meta XML, already read. Absent means names/fields decode as unknown. */
+  metaXml?: string | null;
+  /** Where that meta came from, carried through to the report. */
+  metaSource?: string | null;
+  /** Contents of the player-name CSV, already read. */
+  nameTableCsv?: string | null;
+  /** Where that name table came from, carried through to the report. */
+  nameTableSource?: string | null;
   rowLimit?: number;
   allTables?: boolean;
   sampleRows?: number;

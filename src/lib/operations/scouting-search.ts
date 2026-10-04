@@ -1,9 +1,6 @@
-import { NextResponse } from "next/server";
-import { ScoutingSearchService, type ScoutStrategy } from "@/lib/services/scouting-search-service";
-import { FinanceService } from "@/lib/services/finance-service";
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+import { FinanceService } from "../services/finance-service";
+import { ScoutingSearchService, type ScoutStrategy } from "../services/scouting-search-service";
+import { failed, ok, type OperationResult } from "./types";
 
 const STRATEGIES: readonly ScoutStrategy[] = [
   "SUGGESTED",
@@ -12,6 +9,12 @@ const STRATEGIES: readonly ScoutStrategy[] = [
   "PROSPECT",
   "VALUE",
 ];
+
+export interface FootOverrideInput {
+  careerId?: string;
+  eaPlayerId?: number;
+  preferredFoot?: number | null;
+}
 
 /**
  * The manager's transfer budget PLUS his wage budget, combined per target: a signing costs both.
@@ -37,18 +40,12 @@ async function resolveBudget(careerId: string): Promise<number | null> {
  * A separate table from `world_players` on purpose: the pool is a SAVE fact rewritten on every sync,
  * so a USER value living on it would be lost or would stop tracking the save.
  */
-export async function PUT(request: Request) {
+export async function saveFootOverride(
+  body: FootOverrideInput
+): Promise<OperationResult<unknown>> {
   try {
-    const body = (await request.json()) as {
-      careerId?: string;
-      eaPlayerId?: number;
-      preferredFoot?: number | null;
-    };
     if (!body.careerId || typeof body.eaPlayerId !== "number") {
-      return NextResponse.json(
-        { success: false, error: "careerId and eaPlayerId are required." },
-        { status: 400 }
-      );
+      return failed(400, "careerId and eaPlayerId are required.");
     }
 
     const service = new ScoutingSearchService();
@@ -60,7 +57,7 @@ export async function PUT(request: Request) {
           : null;
     await service.setFootOverride(body.careerId, body.eaPlayerId, foot);
 
-    return NextResponse.json({
+    return ok({
       success: true,
       dossier: await service.dossier(
         body.careerId,
@@ -70,10 +67,7 @@ export async function PUT(request: Request) {
     });
   } catch (error) {
     console.error("[api/scouting/search] foot override failed:", error);
-    return NextResponse.json(
-      { success: false, error: (error as Error).message ?? "Could not save that foot." },
-      { status: 500 }
-    );
+    return failed(500, (error as Error).message ?? "Could not save that foot.");
   }
 }
 
@@ -87,12 +81,13 @@ export async function PUT(request: Request) {
  * because a signing costs both. It is read from the same finance report the Finances screen shows, so
  * the two can never disagree about how much money there is.
  */
-export async function GET(request: Request) {
+export async function searchScoutPool(
+  params: URLSearchParams
+): Promise<OperationResult<unknown>> {
   try {
-    const params = new URL(request.url).searchParams;
     const careerId = params.get("careerId");
     if (!careerId) {
-      return NextResponse.json({ success: false, error: "careerId is required." }, { status: 400 });
+      return failed(400, "careerId is required.");
     }
 
     const service = new ScoutingSearchService();
@@ -105,9 +100,9 @@ export async function GET(request: Request) {
         await resolveBudget(careerId)
       );
       if (!dossier) {
-        return NextResponse.json({ success: false, error: "No such player in this save." }, { status: 404 });
+        return failed(404, "No such player in this save.");
       }
-      return NextResponse.json({ success: true, dossier });
+      return ok({ success: true, dossier });
     }
 
     const report = await new FinanceService().getReport(careerId);
@@ -151,7 +146,7 @@ export async function GET(request: Request) {
       pageSize: number("pageSize") ?? 20,
     });
 
-    return NextResponse.json({
+    return ok({
       success: true,
       result,
       /** So the UI can say where the budget came from rather than presenting it as a bare figure. */
@@ -164,9 +159,6 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("[api/scouting/search] failed:", error);
-    return NextResponse.json(
-      { success: false, error: (error as Error).message ?? "Could not run that search." },
-      { status: 500 }
-    );
+    return failed(500, (error as Error).message ?? "Could not run that search.");
   }
 }

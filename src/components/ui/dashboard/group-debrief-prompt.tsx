@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { IconNote, IconWhistle } from "@/components/ui/icons";
 
+import { apiFetch } from "@/lib/platform/api-client";
 /**
  * The group-debrief nudge.
  *
@@ -37,7 +38,7 @@ export function GroupDebriefPrompt({
     try {
       // Scoped to the season being counted: `matchesPlayed` is this season's, so a block written
       // last season must not read as covering it.
-      const response = await fetch(
+      const response = await apiFetch(
         `/api/season/blocks?careerId=${encodeURIComponent(careerId)}&season=${seasonNumber}`,
         { cache: "no-store" }
       );

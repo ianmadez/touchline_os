@@ -1,13 +1,8 @@
-import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
-import { db } from "@/lib/db/client";
-import { careerEvents } from "@/lib/db/schema";
-import { CareerService } from "@/lib/services/career-service";
-import { SeasonService } from "@/lib/services/season-service";
-import { MatchContribution } from "@/lib/events/types";
-import crypto from "crypto";
-
-export const runtime = "nodejs";
+import { CareerService } from "../services/career-service";
+import { SeasonService } from "../services/season-service";
+import { EventService } from "../services/event-service";
+import { MatchContribution } from "../events/types";
+import { at, failed, ok, type OperationResult } from "./types";
 
 export interface MatchDebriefPayload {
   careerId: string;
@@ -70,18 +65,29 @@ function asMatchDate(value: unknown): string | null {
 }
 
 /**
- * POST /api/debrief
- * Writes a structured MATCH_DEBRIEF event into career_events table.
+ * Writes a structured MATCH_DEBRIEF event into career_events.
+ *
+ * Takes the raw body text rather than a parsed object because the route parsed it inside its own
+ * `try`, so a body that is not JSON produced a 500 rather than a 400. Parsing here keeps that.
  */
-export async function POST(request: Request) {
+export async function logMatchDebrief(rawBody: string): Promise<OperationResult<unknown>> {
+  // Parsed in its own guard, BEFORE the main `try`, so a body that is not JSON is the caller's 400.
+  //
+  // The comment above promises exactly this and the code did not deliver it: every `SyntaxError` fell
+  // into the catch below and came back as a 500, which made "you sent nonsense" indistinguishable
+  // from "the server is broken". Doing it here rather than by testing `instanceof SyntaxError` in the
+  // outer catch matters - that would also swallow a `SyntaxError` thrown by something INTERNAL, and
+  // report our own bug as the caller's mistake.
+  let body: MatchDebriefPayload;
   try {
-    const body = (await request.json()) as MatchDebriefPayload;
+    body = JSON.parse(rawBody) as MatchDebriefPayload;
+  } catch {
+    return at(400, { success: false, error: "Request body must be valid JSON." });
+  }
 
+  try {
     if (!body.careerId || !body.opponent || typeof body.homeScore !== "number" || typeof body.awayScore !== "number") {
-      return NextResponse.json(
-        { success: false, error: "Missing required debrief fields (careerId, opponent, scores)." },
-        { status: 400 }
-      );
+      return at(400, { success: false, error: "Missing required debrief fields (careerId, opponent, scores)." });
     }
 
     const eventId = `evt_debrief_${crypto.randomUUID()}`;
@@ -153,7 +159,7 @@ export async function POST(request: Request) {
       },
     });
 
-    await db.insert(careerEvents).values({
+    await new EventService().appendEvent({
       id: eventId,
       careerId: body.careerId,
       eventType: "MATCH_DEBRIEF",
@@ -170,57 +176,36 @@ export async function POST(request: Request) {
     const careerService = new CareerService();
     const updatedPayload = await careerService.hydrate(body.careerId);
 
-    return NextResponse.json({
+    return ok({
       success: true,
       message: "Match debrief logged successfully.",
       ...updatedPayload,
     });
   } catch (error) {
     console.error("[api/debrief] Failed to log match debrief:", error);
-    return NextResponse.json(
-      { success: false, error: (error as Error).message ?? "Failed to save debrief." },
-      { status: 500 }
-    );
+    return failed(500, (error as Error).message ?? "Failed to save debrief.");
   }
 }
 
 /**
- * DELETE /api/debrief?id=...&careerId=...
- *
  * Removes one match debrief. Deliberately narrow: it will only ever delete a row that is both a
  * `MATCH_DEBRIEF` and USER-sourced, so a stale id or a crafted request cannot take out a career
  * transition from the spine. Deleting a debrief is a correction of something the manager typed, and
  * the rest of the timeline is not theirs to erase.
  */
-export async function DELETE(request: Request) {
+export async function deleteDebrief(
+  id: string | null,
+  careerId: string | null
+): Promise<OperationResult<unknown>> {
   try {
-    const url = new URL(request.url);
-    const id = url.searchParams.get("id");
-    const careerId = url.searchParams.get("careerId");
-
     if (!id) {
-      return NextResponse.json(
-        { success: false, error: "A debrief id is required." },
-        { status: 400 }
-      );
+      return at(400, { success: false, error: "A debrief id is required." });
     }
 
-    const deleted = await db
-      .delete(careerEvents)
-      .where(
-        and(
-          eq(careerEvents.id, id),
-          eq(careerEvents.eventType, "MATCH_DEBRIEF"),
-          eq(careerEvents.source, "USER")
-        )
-      )
-      .returning({ id: careerEvents.id, careerId: careerEvents.careerId });
+    const deleted = await new EventService().deleteUserDebrief(id);
 
     if (deleted.length === 0) {
-      return NextResponse.json(
-        { success: false, error: "That debrief no longer exists." },
-        { status: 404 }
-      );
+      return at(404, { success: false, error: "That debrief no longer exists." });
     }
 
     // Re-hydrate so the caller gets the same shape it gets from every other write, rather than
@@ -232,16 +217,13 @@ export async function DELETE(request: Request) {
     const careerService = new CareerService();
     const updatedPayload = await careerService.hydrate(targetCareer);
 
-    return NextResponse.json({
+    return ok({
       success: true,
       message: "Debrief deleted.",
       ...updatedPayload,
     });
   } catch (error) {
     console.error("[api/debrief] Failed to delete match debrief:", error);
-    return NextResponse.json(
-      { success: false, error: (error as Error).message ?? "Failed to delete debrief." },
-      { status: 500 }
-    );
+    return failed(500, (error as Error).message ?? "Failed to delete debrief.");
   }
 }

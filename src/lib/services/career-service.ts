@@ -1,5 +1,5 @@
-import crypto from "crypto";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { sha1Hex } from "../parser/sha";
 import { db } from "../db/client";
 import {
   careers,
@@ -61,11 +61,7 @@ function deterministicStorylineId(
   category: StorylineCategory,
   discriminator: string
 ): string {
-  const digest = crypto
-    .createHash("sha1")
-    .update([careerId, category, discriminator].join("|"))
-    .digest("hex")
-    .slice(0, 24);
+  const digest = sha1Hex([careerId, category, discriminator].join("|")).slice(0, 24);
   return `st_${digest}`;
 }
 
@@ -163,6 +159,11 @@ export class CareerService {
   private seasonService = new SeasonService();
   private valueService = new ValueService();
   private userProfileService = new UserProfileService();
+
+  /** Deletes a career row; its child rows follow via the schema's foreign keys. */
+  async deleteCareer(careerId: string): Promise<void> {
+    await db.delete(careers).where(eq(careers.id, careerId));
+  }
 
   async getCareerRow(careerId: string) {
     return db.select().from(careers).where(eq(careers.id, careerId)).get();

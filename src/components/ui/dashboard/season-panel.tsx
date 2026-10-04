@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import type { SeasonState } from "@/lib/services/season-service";
 import { statusLabel } from "@/lib/ui/labels";
 
+import { apiFetch } from "@/lib/platform/api-client";
 interface SeasonPanelProps {
   careerId: string;
   seasonState: SeasonState;
@@ -61,7 +62,7 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
     setSaving(true);
     setMessage(null);
     try {
-      const res = await fetch("/api/season", {
+      const res = await apiFetch("/api/season", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ careerId, ...payload }),

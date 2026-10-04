@@ -1,14 +1,17 @@
 /**
  * Read-only: does the meta XML actually match the schema of the save it is decoding?
  *
- * Our meta is a reference file that ships with `references/fc26companion`, while a career save can
- * come from any EA SPORTS FC title. If the save holds a table or a field the meta does not know, the
+ * Our meta is the committed reference file in `public/parse-resources`, while a career save can come
+ * from any EA SPORTS FC title. If the save holds a table or a field the meta does not know, the
  * decode still "succeeds" - but values are read off unnamed columns. `parse()` now reports that as a
  * parser warning; this script prints the warnings and the underlying drift counts.
  *
  * `--cripple` is the positive test: it renames one known field away in a COPY of the meta, parses
  * with that copy, and shows the warning firing. The copy is written to the OS temp directory, so the
  * repo's reference meta is never modified.
+ *
+ * Read `scripts/../public/parse-resources/README.md` for where that meta came from and the licensing
+ * position on shipping it.
  *
  *   npx tsx scripts/probe-schema-drift.ts
  *   npx tsx scripts/probe-schema-drift.ts --cripple
@@ -17,9 +20,10 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { FeasibilitySaveParser } from "../src/lib/parser/feasibility-parser";
+import { createSaveParser } from "../src/lib/platform/parse-resources";
+import { saveSource } from "../src/lib/platform/save-source";
 
-const META = path.join("references", "fc26companion", "data", "fifa_ng_db-meta.xml");
+const META = path.join("public", "parse-resources", "fifa_ng_db-meta.xml");
 const DEFAULT_SAVE = path.join("data", "saves");
 
 const args = process.argv.slice(2);
@@ -27,12 +31,13 @@ const wantsCripple = args.includes("--cripple");
 const saveArg = args.find((arg) => !arg.startsWith("--")) ?? DEFAULT_SAVE;
 
 async function run(label: string, metaPath: string | null): Promise<void> {
-  const parser = new FeasibilitySaveParser(metaPath === null ? {} : { metaPath });
-  const candidates = await parser.detectSaves(saveArg);
+  const parser = createSaveParser(metaPath === null ? {} : { metaPath });
+  const candidates = await saveSource.detectSaves(saveArg);
   if (candidates.length === 0) throw new Error(`No save candidates found under ${saveArg}`);
 
   const save = candidates[0];
-  const data = await parser.parse(save);
+  const bytes = await saveSource.readBytes(save);
+  const data = await parser.parse(save, bytes);
   const drifted = data.tableStats.filter((stat) => stat.unknownFields.length > 0);
 
   console.log(`\n=== ${label} ===`);

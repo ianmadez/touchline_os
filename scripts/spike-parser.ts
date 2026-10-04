@@ -5,7 +5,8 @@
 import fs from "fs";
 import path from "path";
 
-import { FeasibilitySaveParser } from "../src/lib/parser/feasibility-parser";
+import { createSaveParser } from "../src/lib/platform/parse-resources";
+import { saveSource, searchLocations } from "../src/lib/platform/save-source";
 import type {
   FactCategory,
   SaveCandidate,
@@ -161,7 +162,7 @@ async function main(): Promise<void> {
 
   console.log("=== TOUCHLINE OS: PHASE 0 PARSER FEASIBILITY SPIKE ===");
 
-  const parser = new FeasibilitySaveParser({
+  const parser = createSaveParser({
     rowLimit: args.rows,
     allTables: args.all,
     metaPath: args.metaPath,
@@ -169,10 +170,10 @@ async function main(): Promise<void> {
   });
 
   if (!args.savePath && !args.dir) {
-    printLocations(parser.searchLocations());
+    printLocations(searchLocations());
   }
 
-  const candidates = await parser.detectSaves(args.savePath || args.dir || undefined);
+  const candidates = await saveSource.detectSaves(args.savePath || args.dir || undefined);
 
   if (candidates.length === 0) {
     console.log("\nNo FC save file detected in local search paths.");
@@ -186,7 +187,8 @@ async function main(): Promise<void> {
   for (const save of targets) {
     console.log(`\n${rule()}`);
     console.log(`Parsing: ${save.fileName} (${save.filePath})`);
-    const data = await parser.parse(save);
+    const bytes = await saveSource.readBytes(save);
+    const data = await parser.parse(save, bytes);
 
     printFingerprint(data, save);
     printTables(data.tableStats);
