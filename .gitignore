@@ -50,3 +50,8 @@ next-env.d.ts
 references/fc26companion/
 references/manager-companion/
 references/ 
+
+/data/*.db
+/data/.db-wal
+/data/.db-shm
+*.sqlite
