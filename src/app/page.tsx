@@ -1144,7 +1144,7 @@ export default function TouchlineApp() {
 
           {/* Footer Copyright */}
           <div className="relative z-10 border-t border-slate-200 dark:border-slate-800 pt-4 text-center font-sub text-[10px] text-slate-400 dark:text-slate-500 space-y-0.5 animate-fade-in-up [animation-delay:380ms]">
-            <p>© 2026 TouchlineOS. All rights reserved. Read-only EA FC career companion.</p>
+            <p>© 2026 TouchlineOS. All rights reserved. Read-only EA FC career companion app.</p>
             <p>Not affiliated with or endorsed by Electronic Arts Inc.</p>
           </div>
         </div>
