@@ -187,13 +187,22 @@ export function LandingPage({
           </div>
         )}
 
-        <BridgePanel
-          state={bridge}
-          onPair={(code) => onPairBridge?.(code)}
-          onDisconnect={() => onDisconnectBridge?.()}
-          busy={bridgeBusy}
-          error={bridgeError}
-        />
+        {/* Spaced and sized like the save card above it, rather than left flush against the ENTER PORTAL
+            button. The hero is a plain flex column, so each child owns its own spacing - and the bridge
+            card had none, which put it hard against the button.
+            Rendered only when there is a bridge to talk about, so a runtime without one keeps the
+            original rhythm instead of gaining a gap where nothing is. */}
+        {bridge !== "unsupported" && (
+          <div className="w-full max-w-md mb-5">
+            <BridgePanel
+              state={bridge}
+              onPair={(code) => onPairBridge?.(code)}
+              onDisconnect={() => onDisconnectBridge?.()}
+              busy={bridgeBusy}
+              error={bridgeError}
+            />
+          </div>
+        )}
 
         {/* Primary Red CTA Button */}
         <button
