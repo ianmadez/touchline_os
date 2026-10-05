@@ -127,7 +127,13 @@ export const STRATEGY_WEIGHTS: Record<ScoutStrategy, StrategyWeights> = {
   },
 };
 
-/** Grouped so a manager can ask for "a defender" without picking a side. */
+/**
+ * Grouped so a manager can ask for "a defender" without picking a side.
+ *
+ * Kept complete, including roles no save in front of us currently uses (RWB, LWB, SW, CF). This is a
+ * matching rule rather than a menu: if a save ever does assign one of them, "All defenders" must find
+ * him. The filter menu that offers these groups is deliberately narrower - see `scout-search.tsx`.
+ */
 const POSITION_GROUPS: Record<string, readonly string[]> = {
   GK: ["GK"],
   DEF: ["LB", "CB", "RB", "LWB", "RWB", "SW"],

@@ -43,19 +43,17 @@ const STRATEGY_ICONS: Record<ScoutStrategy, React.ReactNode> = {
 };
 
 /**
- * Plain-language names for the game's positions, keyed by the code the save uses.
+ * Plain-language names for the positions this build offers as a filter.
  *
- * The vocabulary is the save format's own - `positionCodeToRole` in `lib/parser/interface.ts` - so
- * this lists what the game actually fields rather than an approximation of it. `DEF`, `MID` and `ATT`
- * are wider still: they are entries the search service expands into their roles.
+ * The vocabulary is the save format's own - `positionCodeToRole` in `lib/parser/interface.ts` - lists
+ * what the game fields, so the list is the game's rather than an approximation of it. `DEF`, `MID` and
+ * `ATT` are wider still: they are entries the search service expands into their roles.
  */
 const POSITION_NAMES: Record<string, string> = {
   GK: "Goalkeeper",
   RB: "Right back",
-  RWB: "Right wing-back",
   CB: "Centre back",
   LB: "Left back",
-  LWB: "Left wing-back",
   CDM: "Defensive midfield",
   CM: "Central midfield",
   CAM: "Attacking midfield",
@@ -63,7 +61,6 @@ const POSITION_NAMES: Record<string, string> = {
   LM: "Left midfield",
   RW: "Right winger",
   LW: "Left winger",
-  CF: "Centre forward",
   ST: "Striker",
   DEF: "All defenders",
   MID: "All midfielders",
@@ -73,17 +70,20 @@ const POSITION_NAMES: Record<string, string> = {
 /**
  * The position filter, in the order a manager scans a squad: keeper, back line, middle, front.
  *
- * Every position the game fields is offered, including ones nobody in a given save plays. An empty
- * result for "LWB" is a true answer - this career has no left wing-backs - and leaving the position
- * out would be this screen deciding what the manager is allowed to ask. The three group entries are
- * expanded by the search service, so "All defenders" covers wing-backs and full-backs together.
+ * Only positions a career save actually assigns are offered. The game's code table also knows RWB,
+ * LWB and CF, but measured against a real career - 18,926 players - not one has any of the three as a
+ * primary position, so offering them would be three entries that can only ever return nothing.
+ *
+ * The group entries are the place that stays complete: the search service expands "All defenders"
+ * into every defensive role including the ones listed above, so if a save ever does contain one he is
+ * still found by the group filter rather than dropped from it.
  */
 const POSITION_GROUPS: { label: string; values: readonly string[] }[] = [
   { label: "Any position", values: ["", "DEF", "MID", "ATT"] },
   { label: "Goalkeeper", values: ["GK"] },
-  { label: "Defence", values: ["RB", "RWB", "CB", "LB", "LWB"] },
+  { label: "Defence", values: ["RB", "CB", "LB"] },
   { label: "Midfield", values: ["CDM", "CM", "CAM", "RM", "LM"] },
-  { label: "Attack", values: ["RW", "LW", "CF", "ST"] },
+  { label: "Attack", values: ["RW", "LW", "ST"] },
 ];
 
 const BUDGET_PRESETS = [10_000_000, 25_000_000, 50_000_000, 100_000_000];
@@ -539,10 +539,12 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
                           )}
                         </td>
                         {/* The save's own position for this player, not a best-fit guess: without it
-                            a row is a rating with no idea what you are looking at. */}
+                            a row is a rating with no idea what you are looking at. The title is only
+                            set when the code has a plain name to give - a tooltip repeating the cell
+                            would say nothing. */}
                         <td
                           className="px-4 py-2.5 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300"
-                          title={POSITION_NAMES[row.primaryPosition] ?? row.primaryPosition}
+                          title={POSITION_NAMES[row.primaryPosition]}
                         >
                           {row.primaryPosition}
                         </td>
