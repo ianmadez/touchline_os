@@ -50,7 +50,7 @@ export function BridgePanel({
   if (state === "unsupported") return null;
 
   const card =
-    "rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3 text-left";
+    "py-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3 text-left";
   const label =
     "font-sub text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200";
   const body = "font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed";

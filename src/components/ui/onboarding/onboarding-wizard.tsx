@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { SaveCandidate } from "@/lib/parser/interface";
 import type { BridgeState, SaveSourceMode } from "@/lib/platform/types";
+import { saveEmptyLabel, saveRefreshLabel, saveScanningLabel } from "@/lib/ui/save-source-copy";
 import { FORMATIONS_REGISTRY, FormationDefinition } from "@/lib/tactics/formations";
 import { labelFor, REALISM_HINTS, REALISM_LEVELS, RealismLevel } from "@/lib/settings-vocabulary";
 import { BridgePanel } from "../bridge/bridge-panel";
@@ -315,8 +316,8 @@ export function OnboardingWizard({
                   : savesUnavailableReason
                     ? "Local file access unavailable"
                     : saveScanComplete
-                      ? "No EA SPORTS FC save detected"
-                      : "Scanning for local saves…"}
+                      ? saveEmptyLabel(saveSourceMode)
+                      : saveScanningLabel(saveSourceMode)}
               </p>
               <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                 {rememberedSave === "needs-permission" ? (
@@ -331,6 +332,12 @@ export function OnboardingWizard({
                   <>
                     TouchlineOS reads the save file you choose. Nothing is uploaded — the file is
                     opened, parsed and kept in this browser.
+                  </>
+                ) : saveSourceMode === "bridge" ? (
+                  <>
+                    TouchlineOS is reading your save from the local bridge you set up, so there is
+                    nothing to pick. Nothing is uploaded — the bridge serves the file on your own
+                    machine and it is parsed in this browser.
                   </>
                 ) : (
                   <>
@@ -353,11 +360,7 @@ export function OnboardingWizard({
                     onClick={onRescan}
                     className="mt-1 px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-sub uppercase tracking-wider text-slate-700 dark:text-slate-200 hover:border-[#E11D48] hover:text-[#E11D48] transition-all cursor-pointer"
                   >
-                    {savesUnavailableReason
-                      ? "Try again"
-                      : saveSourceMode === "picker"
-                        ? "Choose save file…"
-                        : "Re-scan save folders"}
+                    {savesUnavailableReason ? "Try again" : saveRefreshLabel(saveSourceMode)}
                   </button>
                 )
               )}

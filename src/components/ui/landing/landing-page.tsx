@@ -4,6 +4,12 @@ import React, { useState } from "react";
 import Image from "next/image";
 import { SaveCandidate } from "@/lib/parser/interface";
 import type { BridgeState, SaveSourceMode } from "@/lib/platform/types";
+import {
+  saveEmptyLabel,
+  saveProvenanceLabel,
+  saveRefreshLabel,
+  saveScanningLabel,
+} from "@/lib/ui/save-source-copy";
 import { BridgePanel } from "../bridge/bridge-panel";
 import { LegalDocType } from "./legal-modal";
 import { LocalStorageNotice } from "./local-storage-notice";
@@ -137,8 +143,11 @@ export function LandingPage({
             <h3 className="font-heading text-xs text-slate-900 dark:text-slate-100 truncate">
               {saveCandidate.fileName}
             </h3>
+            {/* One line, and it says where the save came from rather than echoing a path. On the
+                desktop build `foundIn` already names the exact folder that was probed; in a browser the
+                path is only ever the file name, so it said nothing while the provenance says everything. */}
             <p className="font-sub text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
-              {saveCandidate.filePath}
+              {saveProvenanceLabel(saveCandidate.foundIn) ?? saveCandidate.filePath}
             </p>
           </div>
         ) : (
@@ -147,12 +156,8 @@ export function LandingPage({
               {rememberedSave === "needs-permission"
                 ? "Your save file is still remembered — confirm access to carry on"
                 : noSaveDetected
-                  ? saveSourceMode === "picker"
-                    ? "No save file chosen yet"
-                    : "No EA SPORTS FC career save detected on this machine yet"
-                  : saveSourceMode === "picker"
-                    ? "Choose your EA SPORTS FC career save to begin"
-                    : "Scanning for EA SPORTS FC career saves..."}
+                  ? saveEmptyLabel(saveSourceMode)
+                  : saveScanningLabel(saveSourceMode)}
             </span>
             {rememberedSave === "needs-permission" && onRegrant ? (
               <>
@@ -175,7 +180,7 @@ export function LandingPage({
                   onClick={onRescan}
                   className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 font-sub text-[11px] uppercase tracking-wider text-slate-600 dark:text-slate-300 hover:border-[#E11D48] hover:text-[#E11D48] dark:hover:text-[#FF8C7A] transition-all cursor-pointer"
                 >
-                  {saveSourceMode === "picker" ? "Choose save file…" : "Re-scan save folders"}
+                  {saveRefreshLabel(saveSourceMode)}
                 </button>
               )
             )}

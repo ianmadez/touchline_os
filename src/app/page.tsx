@@ -20,6 +20,13 @@ import { SettingsView, Diagnostics, ActionResult } from "@/components/ui/setting
 import { SquadTableSkeleton } from "@/components/ui/skeleton";
 import type { SaveCandidate } from "@/lib/parser/interface";
 import type { BridgeState, SaveSourceMode } from "@/lib/platform/types";
+import {
+  saveEmptyLabel,
+  saveProvenanceLabel,
+  saveRefreshLabel,
+  saveScanningLabel,
+} from "@/lib/ui/save-source-copy";
+import { BridgePanel } from "@/components/ui/bridge/bridge-panel";
 import type { EnrichedPlayer } from "@/lib/services/squad-service";
 import type { PitchSlotAssignment, TacticalSystemState } from "@/lib/services/tactics-service";
 import type { CareerHydrationPayload, LeagueTeamSummary } from "@/lib/services/career-service";
@@ -1207,25 +1214,35 @@ export default function TouchlineApp() {
                     disabled={isLoading}
                     className="font-sub text-[10px] font-bold uppercase text-[#E11D48] dark:text-[#FF8C7A] hover:underline cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    {saveSourceMode === "picker" ? "Choose save file…" : "Re-scan"}
+                    {saveRefreshLabel(saveSourceMode)}
                   </button>
                 </div>
 
                 {!saveScanComplete ? (
                   <p className="font-sub text-xs text-slate-500 dark:text-slate-400">
-                    {saveSourceMode === "picker" ? "Waiting for a save file…" : "Scanning your save folders…"}
+                    {saveScanningLabel(saveSourceMode)}
                   </p>
                 ) : latestSaveCandidate ? (
-                  <p className="font-sub text-xs font-bold text-slate-900 dark:text-slate-100 break-all">
-                    {latestSaveCandidate.fileName}
-                    <span className="ml-2 font-normal text-slate-500 dark:text-slate-400">
-                      {(latestSaveCandidate.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB
-                    </span>
-                  </p>
+                  <>
+                    <p className="font-sub text-xs font-bold text-slate-900 dark:text-slate-100 break-all">
+                      {latestSaveCandidate.fileName}
+                      <span className="ml-2 font-normal text-slate-500 dark:text-slate-400">
+                        {(latestSaveCandidate.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB
+                      </span>
+                    </p>
+                    {/* Where it came from. The card used to read identically whether the save was read
+                        from a folder, chosen by hand, or served by the bridge - so the one screen that
+                        tells the manager what is about to be synced never said where it got it. */}
+                    {saveProvenanceLabel(latestSaveCandidate.foundIn) && (
+                      <p className="font-sub text-[10px] text-slate-500 dark:text-slate-400">
+                        {saveProvenanceLabel(latestSaveCandidate.foundIn)}
+                      </p>
+                    )}
+                  </>
                 ) : (
                   <p className="font-sub text-xs text-amber-600 dark:text-amber-400">
                     {savesUnavailableReason ??
-                      "No career save found. You can still enter with the career already loaded."}
+                      `${saveEmptyLabel(saveSourceMode)}. You can still enter with the career already loaded.`}
                   </p>
                 )}
 
@@ -1287,6 +1304,17 @@ export default function TouchlineApp() {
                   {isLoading ? "Syncing…" : entrySync ? "Sync again" : "Sync latest save"}
                 </button>
               </div>
+
+              {/* The same panel the landing page and wizard use, so the bridge's state stays visible and
+                  it can be disconnected from the screen the manager actually returns to. Renders nothing
+                  unless a bridge is in play. */}
+              <BridgePanel
+                state={bridgeState}
+                onPair={(code) => void handlePairBridge(code)}
+                onDisconnect={() => void handleDisconnectBridge()}
+                busy={pairingBridge}
+                error={bridgeError}
+              />
 
               <button
                 onClick={() => {

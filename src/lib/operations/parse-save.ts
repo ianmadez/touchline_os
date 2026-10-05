@@ -1,6 +1,7 @@
 import { CareerService, OnboardingInput } from "../services/career-service";
 import { SyncService } from "../sync/sync-service";
 import { saveSource } from "../platform/save-source";
+import { saveUnreadableMessage } from "../ui/save-source-copy";
 import { at, failed, ok, type OperationResult } from "./types";
 
 interface ParseSaveRequest {
@@ -29,11 +30,11 @@ export async function parseAndSyncSave(rawBody: string): Promise<OperationResult
   try {
     const candidate = await saveSource.resolveCandidate(body);
     if (!candidate) {
-      return at(404, {
-        success: false,
-        error:
-          "No EA SPORTS FC career save found at that location. Re-scan saves and select one of the detected files.",
-      });
+      // Wording comes from the mode-aware vocabulary rather than being hardcoded here. It used to tell
+      // every runtime to "re-scan saves and select one of the detected files", which in a browser names a
+      // folder list that does not exist and a control that is not on the screen. This module returns a
+      // sentence the manager reads, so it has to speak the same vocabulary as the screens do.
+      return at(404, { success: false, error: saveUnreadableMessage(saveSource.mode) });
     }
 
     const syncResult = await new SyncService().syncCandidate(candidate);

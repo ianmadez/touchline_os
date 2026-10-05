@@ -406,6 +406,19 @@ export const saveSource: SaveSource = {
    */
   resolveCandidate: async (request) => {
     if (!request.saveId) return null;
+
+    // A bridge candidate was never "picked", so it is not in `picked` - it is re-fetched from the
+    // bridge, which re-reads the file and hands back the id the list already gave out.
+    //
+    // Without this branch, a sync asked for a save the page had literally just displayed and got a 404,
+    // which surfaced as "No EA SPORTS FC career save found at that location" sitting directly beneath the
+    // card naming that save. Resolving by id rather than trusting the cached list means a bridge that has
+    // since stopped answering reports itself, instead of returning a candidate whose bytes cannot be read.
+    if (fromBridge.has(request.saveId)) {
+      const response = await fetchBridgeSaves(readBridgeSettings());
+      return response?.saves.find((entry) => entry.id === request.saveId) ?? null;
+    }
+
     return picked.get(request.saveId)?.candidate ?? null;
   },
 
