@@ -98,6 +98,15 @@ interface OnboardingWizardProps {
   saveScanComplete?: boolean;
   onRescan?: () => void;
   /**
+   * Whether this browser can still read the save it was given earlier.
+   *
+   * `needs-permission` is the one state a page cannot resolve by itself: a browser never re-grants
+   * access to a file without a click, so the only honest thing to do is say so and offer the click.
+   */
+  rememberedSave?: "none" | "granted" | "needs-permission";
+  onRegrant?: () => void;
+  regranting?: boolean;
+  /**
    * How this runtime gets a save. `picker` means the manager chooses the file, and "re-scan folders"
    * would describe something a page cannot do.
    */
@@ -119,6 +128,9 @@ export function OnboardingWizard({
   saveScanComplete = false,
   onRescan,
   saveSourceMode = "folders",
+  rememberedSave = "none",
+  onRegrant,
+  regranting = false,
   savesUnavailableReason = null,
 }: OnboardingWizardProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -285,14 +297,22 @@ export function OnboardingWizard({
           {saveCandidates.length === 0 && (
             <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-950/40 p-6 text-center space-y-2">
               <p className="font-heading text-sm text-slate-900 dark:text-slate-100 uppercase">
-                {savesUnavailableReason
-                  ? "Local file access unavailable"
-                  : saveScanComplete
-                    ? "No EA SPORTS FC save detected"
-                    : "Scanning for local saves…"}
+                {rememberedSave === "needs-permission"
+                  ? "Confirm access to your save"
+                  : savesUnavailableReason
+                    ? "Local file access unavailable"
+                    : saveScanComplete
+                      ? "No EA SPORTS FC save detected"
+                      : "Scanning for local saves…"}
               </p>
               <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                {savesUnavailableReason ? (
+                {rememberedSave === "needs-permission" ? (
+                  <>
+                    Your save file is still remembered, so there is nothing to find again — but a
+                    browser never lets a page reopen a file on its own. One click restores access and
+                    everything carries on from where it left off.
+                  </>
+                ) : savesUnavailableReason ? (
                   savesUnavailableReason
                 ) : saveSourceMode === "picker" ? (
                   <>
@@ -306,17 +326,27 @@ export function OnboardingWizard({
                   </>
                 )}
               </p>
-              {onRescan && (
+              {rememberedSave === "needs-permission" && onRegrant ? (
                 <button
-                  onClick={onRescan}
-                  className="mt-1 px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-sub uppercase tracking-wider text-slate-700 dark:text-slate-200 hover:border-[#E11D48] hover:text-[#E11D48] transition-all cursor-pointer"
+                  onClick={onRegrant}
+                  disabled={regranting}
+                  className="mt-1 px-4 py-2 rounded-xl bg-[#E11D48] hover:bg-[#FF8C7A] text-xs font-sub font-bold uppercase tracking-wider text-white transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {savesUnavailableReason
-                    ? "Try again"
-                    : saveSourceMode === "picker"
-                      ? "Choose save file…"
-                      : "Re-scan save folders"}
+                  {regranting ? "Confirming…" : "Re-grant access to continue syncing"}
                 </button>
+              ) : (
+                onRescan && (
+                  <button
+                    onClick={onRescan}
+                    className="mt-1 px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-sub uppercase tracking-wider text-slate-700 dark:text-slate-200 hover:border-[#E11D48] hover:text-[#E11D48] transition-all cursor-pointer"
+                  >
+                    {savesUnavailableReason
+                      ? "Try again"
+                      : saveSourceMode === "picker"
+                        ? "Choose save file…"
+                        : "Re-scan save folders"}
+                  </button>
+                )
               )}
             </div>
           )}

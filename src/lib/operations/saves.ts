@@ -40,9 +40,56 @@ export async function listSaveCandidates(): Promise<OperationResult<unknown>> {
       // reports the sentence the wizard shows on browsers with no File System Access API, so a
       // picker that cannot work says so instead of looking like a folder with nothing in it.
       unavailableReason: saveSource.unavailableReason(),
+      // Whether the browser is still allowed to read a save it was given earlier, so the wizard can
+      // offer one click to re-confirm access instead of the whole choose-a-file flow again.
+      rememberedSave: await saveSource.rememberedSave(),
     });
   } catch (error) {
     console.error("[api/saves] save detection failed:", error);
     return failed(500, (error as Error).message ?? "Save detection failed.");
+  }
+}
+
+/**
+ * Re-establishes access to the save this browser already remembers, from a click.
+ *
+ * Deliberately separate from `listSaveCandidates`, and deliberately a POST: asking a browser for
+ * access to a file requires a user gesture behind the call, so it can never be folded into the scan
+ * that runs on load. A refusal is reported as a conflict with the reason, not as a server fault -
+ * the manager said no, and nothing here has gone wrong.
+ */
+export async function reconnectRememberedSave(): Promise<OperationResult<unknown>> {
+  try {
+    const candidate = await saveSource.reconnectRememberedSave();
+    if (!candidate) {
+      return failed(
+        409,
+        "Access to the remembered save was not granted. Choose the save file to continue."
+      );
+    }
+
+    return ok({
+      success: true,
+      save: { ...candidate, lastModified: candidate.lastModified.toISOString() },
+    });
+  } catch (error) {
+    console.error("[api/saves] reconnect failed:", error);
+    return failed(500, (error as Error).message ?? "Reconnecting to the save failed.");
+  }
+}
+
+/**
+ * Forgets the remembered save, so the next scan asks for a file.
+ *
+ * The escape hatch for "use a different save": without it, a browser holding a granted handle would
+ * keep handing back that same save and there would be no way to point the app at another one.
+ */
+export async function forgetRememberedSave(): Promise<OperationResult<unknown>> {
+  try {
+    await saveSource.forgetRememberedSave();
+    return ok({ success: true });
+  } catch (error) {
+    console.error("[api/saves] forget failed:", error);
+    return failed(500, (error as Error).message ?? "Forgetting the saved file failed.");
   }
 }

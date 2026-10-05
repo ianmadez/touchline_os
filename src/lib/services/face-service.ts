@@ -13,7 +13,7 @@
  */
 import fs from "fs";
 import path from "path";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { players } from "../db/schema";
 import { cacheFaces, faceFileName, fetchSprite, type FaceImportSummary } from "./face-source";
@@ -77,18 +77,18 @@ export async function ensureFace(eaPlayerId: number): Promise<FaceOutcome> {
 }
 
 /**
- * Fetches faces for every player on the books, skipping anyone already cached.
+ * Fetches faces for every senior player, skipping anyone already cached.
  *
- * The `players` table only ever holds the manager's own squad and youth, so scoping to a career is
- * itself the "squad and youth only" rule - there is no wider roster to leak out to. A new signing is
- * simply a row that is not on disk yet, which is why his face arrives on the next sync with nothing
- * for the manager to press.
+ * Scoped to the career and to `is_youth_prospect = 0`: the squad's faces, not the academy's. The
+ * career filter keeps this to the manager's own club, since `players` holds nobody else's squad, so
+ * there is no wider roster to leak out to. A new signing is simply a row that is not on disk yet,
+ * which is why his face arrives on its own with nothing for the manager to press.
  */
 export async function ensureFacesForSquad(careerId: string): Promise<FaceImportSummary> {
   const squad = await db
     .select({ eaPlayerId: players.eaPlayerId })
     .from(players)
-    .where(eq(players.careerId, careerId))
+    .where(and(eq(players.careerId, careerId), eq(players.isYouthProspect, false)))
     .orderBy(desc(players.overallRating));
 
   return cacheFaces(

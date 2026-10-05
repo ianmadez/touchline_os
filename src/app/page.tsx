@@ -154,6 +154,12 @@ export default function TouchlineApp() {
   const [saveScanComplete, setSaveScanComplete] = useState(false);
   const [savesUnavailableReason, setSavesUnavailableReason] = useState<string | null>(null);
   const [saveSourceMode, setSaveSourceMode] = useState<"folders" | "picker">("folders");
+  // Whether this browser is still allowed to read the save it was given earlier. "granted" is what
+  // lets a visit sync with no interaction; "needs-permission" is the one state that needs a click.
+  const [rememberedSave, setRememberedSave] = useState<
+    "none" | "granted" | "needs-permission"
+  >("none");
+  const [regranting, setRegranting] = useState(false);
   const [squad, setSquad] = useState<EnrichedPlayer[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<EnrichedPlayer | null>(null);
   // The storyline whose evidence view is open. Kept in the session as well, so a refresh lands
@@ -276,6 +282,11 @@ export default function TouchlineApp() {
         typeof data.unavailableReason === "string" ? data.unavailableReason : null
       );
       setSaveSourceMode(data.saveSourceMode === "picker" ? "picker" : "folders");
+      setRememberedSave(
+        data.rememberedSave === "granted" || data.rememberedSave === "needs-permission"
+          ? data.rememberedSave
+          : "none"
+      );
       setSaveCandidates(
         candidates.map((candidate) => ({
           ...candidate,
@@ -294,8 +305,62 @@ export default function TouchlineApp() {
     setSaveScanComplete,
     setSavesUnavailableReason,
     setSaveSourceMode,
+    setRememberedSave,
     setAppError,
   ]);
+
+  /**
+   * Re-grants access to the save this browser remembers, from a click.
+   *
+   * The click is load-bearing rather than decorative: a browser refuses to grant access to a file
+   * without a user gesture behind the call, so this can never be folded into the load-time scan.
+   * That is the whole boundary of the feature - the goal is one pick ever, not access without asking.
+   *
+   * On success the scan is re-run, and because permission is then granted it resolves the remembered
+   * save with no dialog at all, so everything downstream behaves exactly as if the file had just
+   * been chosen.
+   */
+  const handleRegrantSave = useCallback(async () => {
+    setRegranting(true);
+    try {
+      const res = await apiFetch("/api/saves", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reconnect" }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`);
+      await loadSaveCandidates();
+    } catch (error) {
+      setAppError((error as Error).message);
+    } finally {
+      setRegranting(false);
+    }
+  }, [loadSaveCandidates, setRegranting, setAppError]);
+
+  /**
+   * Drops the remembered save so the next scan asks for a file instead.
+   *
+   * Needed because a browser holding a granted handle would otherwise keep handing back that same
+   * save, leaving no way to point the app at a different career.
+   */
+  const handleForgetSave = useCallback(async () => {
+    // Only asked for when there is something to forget. On the desktop build nothing is ever
+    // remembered, and that path should stay a plain re-scan of the save folders.
+    if (rememberedSave !== "none") {
+      try {
+        await apiFetch("/api/saves", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "forget" }),
+        });
+      } catch {
+        // Nothing to recover: the scan below falls back to the picker either way.
+      }
+    }
+    setRememberedSave("none");
+    await loadSaveCandidates();
+  }, [rememberedSave, loadSaveCandidates, setRememberedSave]);
 
   // Restore persisted session and prevent re-entering onboarding wizard if career exists
   useEffect(() => {
@@ -1225,8 +1290,12 @@ export default function TouchlineApp() {
           <LandingPage
             saveCandidate={saveCandidates[0] || null}
             noSaveDetected={saveScanComplete && saveCandidates.length === 0}
-            onRescan={() => void loadSaveCandidates()}
+            onRescan={() => void handleForgetSave()}
             saveSourceMode={saveSourceMode}
+            rememberedSave={rememberedSave}
+            onRegrant={() => void handleRegrantSave()}
+            regranting={regranting}
+            onOpenLegal={(doc) => setActiveLegalDoc(doc)}
             onEnterPortal={() => {
               if (isOnboardingComplete) {
                 setHasEntered(true);
@@ -1244,7 +1313,10 @@ export default function TouchlineApp() {
             saveScanComplete={saveScanComplete}
             saveSourceMode={saveSourceMode}
             savesUnavailableReason={savesUnavailableReason}
-            onRescan={() => void loadSaveCandidates()}
+            onRescan={() => void handleForgetSave()}
+            rememberedSave={rememberedSave}
+            onRegrant={() => void handleRegrantSave()}
+            regranting={regranting}
             onCompleteOnboarding={handleCompleteOnboarding}
           />
         )}

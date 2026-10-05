@@ -13,7 +13,7 @@
  *
  * This module is a build-time switch point, substituted for `./asset-store` by the browser target.
  */
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { players } from "../db/schema";
 import { cacheFaces } from "../services/face-source";
@@ -32,17 +32,22 @@ export const assetStore: AssetStore = {
   listFaces: async () => listCachedFaces(),
 
   /**
-   * Caches a face for everyone on the books, skipping anyone already held.
+   * Caches a face for everyone in the senior squad, skipping anyone already held.
    *
-   * The `players` table only ever holds the manager's own squad and youth, so scoping to a career is
-   * the whole of the "squad and youth only" rule - there is no wider roster to reach into. Newgens are
-   * skipped before any request is made.
+   * Scoped to the career and to `is_youth_prospect = 0`, which is the stated boundary: the squad's
+   * faces, not the academy's. The career filter is what keeps this to the manager's own club - the
+   * `players` table holds nobody else's squad - so there is no wider roster to reach into. A new
+   * signing is simply a row that is not held yet, which is why his face arrives on his own.
+   *
+   * Newgens are refused before any request is made. Academy players are almost all newgens, so the
+   * youth filter and the newgen check agree in practice; the filter is what makes the intent explicit
+   * rather than something that merely happens to be true.
    */
   refreshSquadFaces: async (careerId) => {
     const squad = await db
       .select({ eaPlayerId: players.eaPlayerId })
       .from(players)
-      .where(eq(players.careerId, careerId));
+      .where(and(eq(players.careerId, careerId), eq(players.isYouthProspect, false)));
 
     await cacheFaces(
       squad.map((row) => row.eaPlayerId),

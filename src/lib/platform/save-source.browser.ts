@@ -16,6 +16,13 @@
 import { sha1Hex } from "../parser/sha";
 import { classifySlot } from "../parser/save-naming";
 import type { SaveCandidate, SaveSearchLocation } from "../parser/interface";
+import {
+  forgetSaveHandle,
+  handlePermission,
+  loadSaveHandle,
+  rememberSaveHandle,
+  requestHandlePermission,
+} from "./save-handle-store.browser";
 import type { SaveSource } from "./types";
 
 interface FilePickerAcceptType {
@@ -37,6 +44,15 @@ declare global {
 /** The only case this can still be true: a page with no DOM at all, which cannot pick a file. */
 const UNSUPPORTED =
   "This browser gives pages no way to open a local file, so saves cannot be read here. Try Chrome, Edge, Firefox or Safari on a desktop.";
+
+/**
+ * What the wizard is told when a save is remembered but access has to be confirmed again.
+ *
+ * Worded as a state rather than a fault. A browser re-asking for access is normal and expected, and
+ * describing it as a failure would send a manager looking for a problem that does not exist.
+ */
+const REGRANT_REQUIRED =
+  "Your save file is still remembered. This browser needs you to confirm access to it again before TouchlineOS can read it.";
 
 /**
  * FC save files have no registered MIME type, so no `accept` filter is offered. A filter that does
@@ -153,9 +169,64 @@ function chooseFiles(): Promise<File[]> {
   });
 }
 
+/**
+ * The save this browser is already allowed to read, resolved without showing a dialog.
+ *
+ * The middle outcome is the whole reason the reconnect flow exists. A handle can outlive the page
+ * while the PERMISSION to read through it does not, and Chrome's own guidance is to treat that as
+ * ordinary rather than exceptional - so it is a state to report, not a fault to raise. Only a click
+ * can confirm access, which is why this never attempts to.
+ */
+async function resolveRememberedSave(): Promise<
+  { candidate: SaveCandidate } | "needs-permission" | "none"
+> {
+  const handle = await loadSaveHandle();
+  if (!handle) return "none";
+
+  const permission = await handlePermission(handle);
+  // A browser that cannot answer the permission question cannot honour a remembered handle either,
+  // so there is nothing here for it to read.
+  if (permission === "unsupported") return "none";
+  if (permission === "prompt") return "needs-permission";
+  if (permission !== "granted") {
+    // The manager refused this file. Asking again on every visit would be re-asking a question that
+    // has already been answered, so the handle is dropped and the picker takes over from here.
+    await forgetSaveHandle();
+    return "none";
+  }
+
+  try {
+    const file = await handle.getFile();
+    const candidate = acceptFiles([file]).candidates[0];
+    if (!candidate) return "none";
+
+    // Re-attached so a later sync reads the file as it is THEN. A `File` is only readable while the
+    // file underneath it has not changed, so holding one across sessions would read a stale save.
+    picked.set(candidate.id, { candidate, read: () => handle.getFile() });
+    return { candidate };
+  } catch {
+    // Moved, renamed or deleted since it was picked. The reference is dead, and keeping it would mean
+    // offering the same broken save on every future visit.
+    await forgetSaveHandle();
+    return "none";
+  }
+}
+
 export const saveSource: SaveSource = {
   mode: "picker",
   detectSaves: async () => {
+    // Tried before anything that could open a dialog. A save we are already allowed to read is
+    // resolved with no interaction at all, which is the entire point of remembering it.
+    const remembered = await resolveRememberedSave();
+    if (remembered === "needs-permission") {
+      scan = [{ path: "", label: REGRANT_REQUIRED, exists: false }];
+      return [];
+    }
+    if (remembered !== "none") {
+      scan = [{ path: "", label: remembered.candidate.filePath, exists: true }];
+      return [remembered.candidate];
+    }
+
     if (!hasPicker()) {
       if (!canUseFileInput()) {
         scan = [{ path: "", label: UNSUPPORTED, exists: false }];
@@ -195,10 +266,73 @@ export const saveSource: SaveSource = {
       if (candidate) picked.set(candidate.id, { candidate, read: () => handle.getFile() });
     });
 
+    // Remembered so the next visit needs no dialog at all: the handle is the only thing here that can
+    // outlive the page. The first handle that produced a usable candidate is the one worth keeping -
+    // a storage file sitting beside the save is not a save.
+    const usable = candidates.findIndex((candidate) => candidate.slotKind !== "database");
+    if (usable >= 0) {
+      const chosen = handles[usable];
+      if (chosen) await rememberSaveHandle(chosen);
+    }
+
     scan = filteredOut
       ? [{ path: "", label: filteredOut, exists: false }]
       : [{ path: "", label: "file picker", exists: true }];
     return candidates;
+  },
+
+  /**
+   * Whether a save is remembered, and whether it can currently be read.
+   *
+   * Answers a question about a reference, not about bytes: a handle can survive a reload while the
+   * permission to read through it does not, and the two have to be told apart for the UI to know
+   * whether to sync by itself or to ask for one click.
+   */
+  rememberedSave: async () => {
+    const handle = await loadSaveHandle();
+    if (!handle) return "none";
+
+    const permission = await handlePermission(handle);
+    if (permission === "granted") return "granted";
+    if (permission === "prompt") return "needs-permission";
+
+    // Refused, or a browser that cannot answer the question. Either way there is nothing here that
+    // could be reconnected, so the reference is dropped rather than offered again.
+    await forgetSaveHandle();
+    return "none";
+  },
+
+  /**
+   * Re-opens the remembered save from a click, asking for access on the way.
+   *
+   * The gesture is not a nicety: `requestPermission()` throws if there is no user activation behind
+   * it, so this is the only shape the re-grant flow can take. A refusal is reported by returning
+   * null, and the handle is dropped - the manager has answered, and asking again on every visit
+   * would be re-asking it.
+   */
+  reconnectRememberedSave: async () => {
+    const handle = await loadSaveHandle();
+    if (!handle) return null;
+
+    if ((await requestHandlePermission(handle)) !== "granted") {
+      await forgetSaveHandle();
+      return null;
+    }
+
+    try {
+      const file = await handle.getFile();
+      const candidate = acceptFiles([file]).candidates[0] ?? null;
+      if (candidate) picked.set(candidate.id, { candidate, read: () => handle.getFile() });
+      return candidate;
+    } catch {
+      // The file has gone since it was picked. Its handle is worth nothing now.
+      await forgetSaveHandle();
+      return null;
+    }
+  },
+
+  forgetRememberedSave: async () => {
+    await forgetSaveHandle();
   },
 
   /**

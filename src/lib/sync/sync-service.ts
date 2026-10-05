@@ -907,12 +907,20 @@ export class SyncService {
       } catch (err) {
         console.error("[sync-service] Failed to record matchday progress:", err);
       }
+    }
 
-      try {
-        await assetStore.refreshSquadFaces(careerId);
-      } catch {
-        // Deliberately swallowed. Faces are presentation, and a dead CDN must not fail a sync.
-      }
+    // Faces, for EVERY successful sync - not only one that wrote something.
+    //
+    // This used to sit inside the SYNCED branch, and that made an unresolved face permanent: a sync
+    // that finds nothing new returns NO_CHANGE and skipped this whole block, so a player whose sprite
+    // failed to arrive once - a dropped connection, a CDN blip - was never tried again on that save.
+    // The pass is idempotent and cheap once the cache is warm (one lookup per player, no request), so
+    // the only real cost is a genuinely new signing. A face that is still missing after this is
+    // retried the next time the player is rendered.
+    try {
+      await assetStore.refreshSquadFaces(careerId);
+    } catch {
+      // Deliberately swallowed. Faces are presentation, and a dead CDN must not fail a sync.
     }
 
     return result;

@@ -3,6 +3,8 @@
 import React, { useState } from "react";
 import Image from "next/image";
 import { SaveCandidate } from "@/lib/parser/interface";
+import { LegalDocType } from "./legal-modal";
+import { LocalStorageNotice } from "./local-storage-notice";
 
 interface LandingPageProps {
   saveCandidate: SaveCandidate | null;
@@ -15,6 +17,17 @@ interface LandingPageProps {
    * folders, and telling someone to re-scan them would describe a control that does not exist.
    */
   saveSourceMode?: "folders" | "picker";
+  /**
+   * Whether this browser can still read the save it was given earlier.
+   *
+   * `needs-permission` is the one state a page cannot resolve by itself: a browser never re-grants
+   * access to a file without a click, so the only honest thing to do is say so and offer the click.
+   */
+  rememberedSave?: "none" | "granted" | "needs-permission";
+  onRegrant?: () => void;
+  regranting?: boolean;
+  /** Opens one of the legal documents, so the notice can link to the cookie policy. */
+  onOpenLegal?: (doc: LegalDocType) => void;
 }
 
 export function LandingPage({
@@ -23,6 +36,10 @@ export function LandingPage({
   noSaveDetected = false,
   onRescan,
   saveSourceMode = "folders",
+  rememberedSave = "none",
+  onRegrant,
+  regranting = false,
+  onOpenLegal,
 }: LandingPageProps) {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
 
@@ -74,6 +91,9 @@ export function LandingPage({
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 py-8 space-y-24">
+      {/* Shown once per visitor. It explains what is stored locally rather than asking for consent,
+          because there is nothing to consent to - no tracking, no analytics, no uploads. */}
+      <LocalStorageNotice onOpenLegal={onOpenLegal} />
       {/* PUNCHY HERO SECTION - FULL VIEWPORT FIT */}
       <section className="flex flex-col items-center justify-center text-center py-4 sm:py-8 min-h-[calc(100vh-100px)]">
 
@@ -107,21 +127,40 @@ export function LandingPage({
         ) : (
           <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-md mb-5 text-center space-y-2">
             <span className="font-sub text-xs text-slate-500 dark:text-slate-400 block">
-              {noSaveDetected
-                ? saveSourceMode === "picker"
-                  ? "No save file chosen yet"
-                  : "No EA SPORTS FC career save detected on this machine yet"
-                : saveSourceMode === "picker"
-                  ? "Choose your EA SPORTS FC career save to begin"
-                  : "Scanning for EA SPORTS FC career saves..."}
+              {rememberedSave === "needs-permission"
+                ? "Your save file is still remembered — confirm access to carry on"
+                : noSaveDetected
+                  ? saveSourceMode === "picker"
+                    ? "No save file chosen yet"
+                    : "No EA SPORTS FC career save detected on this machine yet"
+                  : saveSourceMode === "picker"
+                    ? "Choose your EA SPORTS FC career save to begin"
+                    : "Scanning for EA SPORTS FC career saves..."}
             </span>
-            {noSaveDetected && onRescan && (
-              <button
-                onClick={onRescan}
-                className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 font-sub text-[11px] uppercase tracking-wider text-slate-600 dark:text-slate-300 hover:border-[#E11D48] hover:text-[#E11D48] dark:hover:text-[#FF8C7A] transition-all cursor-pointer"
-              >
-                {saveSourceMode === "picker" ? "Choose save file…" : "Re-scan save folders"}
-              </button>
+            {rememberedSave === "needs-permission" && onRegrant ? (
+              <>
+                <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Browsers never let a page reopen a file on its own. One click restores the save you
+                  already picked — there is no need to find it again.
+                </p>
+                <button
+                  onClick={onRegrant}
+                  disabled={regranting}
+                  className="px-3 py-1.5 rounded-lg bg-[#E11D48] hover:bg-[#FF8C7A] font-sub text-[11px] uppercase tracking-wider text-white transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {regranting ? "Confirming…" : "Re-grant access"}
+                </button>
+              </>
+            ) : (
+              noSaveDetected &&
+              onRescan && (
+                <button
+                  onClick={onRescan}
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 font-sub text-[11px] uppercase tracking-wider text-slate-600 dark:text-slate-300 hover:border-[#E11D48] hover:text-[#E11D48] dark:hover:text-[#FF8C7A] transition-all cursor-pointer"
+                >
+                  {saveSourceMode === "picker" ? "Choose save file…" : "Re-scan save folders"}
+                </button>
+              )
             )}
           </div>
         )}

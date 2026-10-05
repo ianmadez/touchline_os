@@ -200,4 +200,10 @@ export const saveSource: SaveSource = {
   lastScan: () => lastScan,
   // The desktop build can always enumerate the known save locations.
   unavailableReason: () => null,
+  // Nothing to remember: this build finds saves by walking its own folders, so there is no picked
+  // file to hold on to and no permission to re-establish. Answering `none` is what keeps the UI from
+  // offering a "reconnect" control that would have no meaning here.
+  rememberedSave: async () => "none",
+  reconnectRememberedSave: async () => null,
+  forgetRememberedSave: async () => {},
 };

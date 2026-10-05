@@ -15,7 +15,7 @@ import { readDiagnostics } from "../operations/diagnostics";
 import { readFinanceReport, saveFinanceInputs } from "../operations/finance";
 import { deleteObjective, readObjectives, saveObjective } from "../operations/objectives";
 import { parseAndSyncSave } from "../operations/parse-save";
-import { listSaveCandidates } from "../operations/saves";
+import { forgetRememberedSave, listSaveCandidates, reconnectRememberedSave } from "../operations/saves";
 import { archiveScoutTarget, readScoutingMemory, restoreScoutTarget } from "../operations/scouting-memory";
 import { saveFootOverride, searchScoutPool } from "../operations/scouting-search";
 import { deleteScoutTarget, readScoutingBoard, saveScoutTarget } from "../operations/scouting";
@@ -84,6 +84,17 @@ async function dispatch(call: Call): Promise<OperationResult<unknown>> {
   switch (`${method} ${path}`) {
     case "GET /api/saves":
       return listSaveCandidates();
+    case "POST /api/saves": {
+      const parsed = body(call);
+      if (parsed.failure) return parsed.failure;
+      const action = (parsed.value as { action?: unknown } | null)?.action;
+      if (action === "reconnect") return reconnectRememberedSave();
+      if (action === "forget") return forgetRememberedSave();
+      return {
+        status: 400,
+        body: { success: false, error: 'action must be "reconnect" or "forget".' },
+      };
+    }
 
     case "GET /api/career":
       return readCareer(params.get("careerId"));

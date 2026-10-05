@@ -66,6 +66,17 @@ export async function exportCareerToFile(
 export async function importCareerFromFile(payload: unknown): Promise<OperationResult<unknown>> {
   try {
     const summary = await importTransferPackage(payload);
+
+    // Faces for the career that just landed, and deliberately not awaited.
+    //
+    // An imported career has never been through a sync, so nothing has ever asked for its faces -
+    // and importing one is the ordinary way a career reaches the browser build. Kicking the pass here
+    // means the squad has faces without the manager waiting on a download to see the result of an
+    // import, and a player the CDN cannot supply simply keeps his initials disc either way.
+    void assetStore.refreshSquadFaces(summary.careerId).catch(() => {
+      // Faces are presentation. A failed import must not be reported as one because a CDN was down.
+    });
+
     return ok({ success: true, ...summary });
   } catch (error) {
     console.error("[api/career/import] failed:", error);
