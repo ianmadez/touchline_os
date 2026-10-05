@@ -611,11 +611,39 @@ export default function TouchlineApp() {
       );
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`);
+
+      // Delivered HERE, for both builds, instead of inside the platform layer.
+      //
+      // `assetStore.writeExport` is a build-time switch point: the Node build wrote the file to
+      // `data/exports/` and returned a path, while the browser build triggered the download itself.
+      // So on a local server, clicking Export produced a file on disk and nothing in the browser -
+      // which reads as "the button does nothing", and was reported as exactly that. Downloading here
+      // means the user gets the file in both runtimes; the local build additionally keeps its copy.
+      const contents = typeof data.contents === "string" ? data.contents : null;
+      if (!contents) throw new Error("The export produced no file contents to download.");
+
+      const blob = new Blob([contents], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = data.fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      // Released on the next task, once the download has been handed to the browser.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+
       const counts = (data.counts ?? {}) as Record<string, number>;
       const rows = Object.values(counts).reduce((total, value) => total + value, 0);
+      // Only mentioned when it is a real path. In the browser build `filePath` is just the file name,
+      // and telling a manager his download is "also at career_club_1917_....json" is noise.
+      const serverCopy =
+        typeof data.filePath === "string" && data.filePath !== data.fileName
+          ? data.filePath
+          : null;
       return {
         ok: true,
-        message: `Exported ${data.fileName} — ${data.counts.career_snapshots} snapshot(s), ${data.counts.career_events} event(s), ${rows.toLocaleString()} rows across ${Object.keys(counts).length} tables (${(data.sizeBytes / (1024 * 1024)).toFixed(1)} MB).`,
+        message: `Downloaded ${data.fileName} — ${data.counts.career_snapshots} snapshot(s), ${data.counts.career_events} event(s), ${rows.toLocaleString()} rows across ${Object.keys(counts).length} tables (${(data.sizeBytes / (1024 * 1024)).toFixed(1)} MB).${serverCopy ? ` A copy is also kept on the server at ${serverCopy}.` : ""}`,
       };
     } catch (error) {
       return { ok: false, message: (error as Error).message };

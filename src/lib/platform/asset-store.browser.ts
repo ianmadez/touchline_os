@@ -53,19 +53,19 @@ export const assetStore: AssetStore = {
     );
   },
 
-  writeExport: async (fileName, contents) => {
-    const blob = new Blob([contents], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = fileName;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    // Released on the next task, once the download has been handed to the browser.
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-    return { path: fileName, sizeBytes: blob.size };
-  },
+  /**
+   * Nothing to persist, and no download here any more.
+   *
+   * This used to trigger the download, and that is precisely why Export behaved differently in the two
+   * builds: here it downloaded from inside the operation, while the Node build wrote to
+   * `data/exports/` and downloaded nothing at all. A local user clicking Export saw no file appear and
+   * reasonably concluded the button was broken. Delivery now happens once, in the UI, for both
+   * runtimes, so this reports the size and stops.
+   */
+  writeExport: async (fileName, contents) => ({
+    path: fileName,
+    sizeBytes: new Blob([contents]).size,
+  }),
 
   // There is no exports directory to name. The export itself reports the file it downloaded.
   exportsLocation: () => null,

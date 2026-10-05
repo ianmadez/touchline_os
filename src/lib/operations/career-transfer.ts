@@ -17,6 +17,12 @@ function timestampSlug(): string {
  *
  * This is the export half of the transfer bridge: the artefact it leaves behind is the single file a
  * user can hand to another build. It is also what makes the destructive Reset action recoverable.
+ *
+ * The serialised backup is returned as well as written, because `assetStore.writeExport` means two
+ * different things per build - the Node build writes to `data/exports/`, the browser build has no
+ * folder and used to trigger the download itself. That made Export behave differently depending on
+ * where you ran it: locally it quietly produced a file on disk and nothing in the browser. The bytes
+ * travel back with the summary so the UI can deliver ONE download in both runtimes.
  */
 export async function exportCareerToFile(
   careerId: string | null
@@ -32,7 +38,8 @@ export async function exportCareerToFile(
     }
 
     const fileName = `${careerId}_${timestampSlug()}.json`;
-    const written = await assetStore.writeExport(fileName, JSON.stringify(pkg, null, 2));
+    const contents = JSON.stringify(pkg, null, 2);
+    const written = await assetStore.writeExport(fileName, contents);
 
     return ok({
       success: true,
@@ -41,6 +48,7 @@ export async function exportCareerToFile(
       filePath: written.path,
       sizeBytes: written.sizeBytes,
       counts: pkg.counts,
+      contents,
     });
   } catch (error) {
     console.error("[api/career/export] failed:", error);
