@@ -560,8 +560,11 @@ export default function TouchlineApp() {
   const refreshDiagnostics = useCallback(async () => {
     try {
       const res = await apiFetch("/api/diagnostics", { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`);
+      // A route that fails before its handler runs answers with a 500 and an empty body, so
+      // `res.json()` would surface the browser's own "unexpected end of data" message instead of
+      // the status that actually explains the failure.
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) throw new Error(data?.error ?? `HTTP ${res.status}`);
       setDiagnostics(data as Diagnostics);
       // Cleared on success rather than up-front, so this function has no synchronous setState and
       // can be safely called from an effect.

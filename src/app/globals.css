@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* Runtime data, not source. Tailwind's automatic content detection walks the project root, and the
+   SQLite database it finds there (`data/*.db`, `-shm`, `-wal`) is held open by the dev server, so
+   reading the shared-memory file mid-write fails with a lock error. That error surfaces as a
+   Turbopack panic in the CSS step, which then 500s every page. Excluding the directory keeps the
+   scanner out of it; the sync'd saves and exports live under the same directory and are not source
+   either. */
+@source not "../../data";
+
 /* Class-based dark mode: the `dark:` utilities must follow the in-app theme
    toggle (.dark on <html>), NOT the operating system colour scheme.
    Without this, components render dark-mode text on light surfaces. */
