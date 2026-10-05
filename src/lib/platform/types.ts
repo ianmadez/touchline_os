@@ -26,6 +26,43 @@ export type AppDatabase = BetterSQLite3Database<typeof schema>;
  */
 export type RememberedSave = "none" | "granted" | "needs-permission";
 
+/**
+ * How a runtime gets at a save file.
+ *
+ * `folders` enumerates known locations on disk; `picker` has the manager choose a file; `bridge` asks a
+ * small helper program the manager runs on their own machine. All three produce the same candidates,
+ * which is why everything downstream of them is identical.
+ */
+export type SaveSourceMode = "folders" | "picker" | "bridge";
+
+/**
+ * What the optional local bridge is doing.
+ *
+ * Declared here rather than beside the browser implementation, because it is part of what the port
+ * promises the UI - and the UI has to be able to render this without knowing which runtime it is in.
+ */
+export type BridgeState =
+  /** Not switched on. Nothing has been requested, and nothing will be. */
+  | "off"
+  /** Switched on, but nothing answered on the port. The bridge is probably not running. */
+  | "unreachable"
+  /** Switched on, reachable, and the pairing code was accepted. */
+  | "paired"
+  /** Switched on and reachable, but there is no code yet or the bridge rejected it. */
+  | "needs-code"
+  /** This runtime has no bridge concept at all. The UI hides the feature rather than disabling it. */
+  | "unsupported";
+
+/**
+ * The bridge's default port.
+ *
+ * Lives here rather than beside the browser client so the operation layer can default it too: the port
+ * has to be quoted in two places or neither, and one of them drifting is how a "bridge not found" gets
+ * reported for a bridge that is running perfectly well. Chosen to avoid 4126, which the reference
+ * companion uses and which a manager may therefore already have occupied.
+ */
+export const DEFAULT_BRIDGE_PORT = 4977;
+
 /** Where save files come from, and how their bytes are read. */
 export interface SaveSource {
   /**
@@ -34,8 +71,12 @@ export interface SaveSource {
    * `folders` means it enumerates known locations on disk and "re-scan" is the honest word for it.
    * `picker` means the manager chooses the file, and telling them to re-scan folders would describe
    * something that does not exist.
+   *
+   * `bridge` is the browser build talking to the optional helper the manager runs themselves. It is only
+   * ever reported when a bridge is paired AND answering, so a browser reporting `picker` is one with no
+   * bridge in play rather than one where the feature has failed.
    */
-  readonly mode: "folders" | "picker";
+  readonly mode: SaveSourceMode;
   /** Candidates to offer, using the default save locations when `saveDirectory` is omitted. */
   detectSaves(saveDirectory?: string): Promise<SaveCandidate[]>;
   /**
@@ -82,6 +123,29 @@ export interface SaveSource {
    * another one.
    */
   forgetRememberedSave(): Promise<void>;
+  /**
+   * What the optional local bridge is doing.
+   *
+   * OPTIONAL, and absent on the desktop build on purpose. That build already scans this machine's save
+   * folders directly, so a helper process running alongside it would add a moving part and no
+   * capability at all. Absent means "this runtime has no bridge", which the UI answers by hiding the
+   * feature rather than by showing a control that could never work.
+   */
+  bridgeStatus?(): Promise<BridgeState>;
+  /**
+   * Switches the bridge on and checks a pairing code, reporting the state that left it in.
+   *
+   * Only ever called from a click. Pairing is a decision the manager makes; nothing should begin talking
+   * to a port on their machine because a page happened to load.
+   */
+  pairBridge?(port: number, code: string): Promise<BridgeState>;
+  /**
+   * Switches the bridge off and forgets the code, so no future visit requests anything.
+   *
+   * The counterpart to pairing, and it has to exist for the same reason the save-permission work needed
+   * a Disconnect: a connection the manager cannot see or end is not a feature, it is a leak.
+   */
+  forgetBridge?(): Promise<void>;
 }
 
 /** The persistence seam. */

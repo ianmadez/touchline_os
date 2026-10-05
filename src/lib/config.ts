@@ -1,24 +1,21 @@
+/**
+ * Runtime configuration for the local Node build.
+ *
+ * There used to be a second save-location list here, `savesSearchPaths`, and it is deliberately gone.
+ * Nothing ever read it - the scan uses `searchLocations()` in `platform/save-source.ts` - and by the
+ * time it was removed it had already drifted from that list: it built paths from
+ * `USERPROFILE/AppData/Local` instead of the `LOCALAPPDATA` the scan prefers, and knew nothing about
+ * the Roaming or OneDrive folders, including the env-var-driven OneDrive variants. Two lists of save
+ * locations that must agree, living in two files, updated at two different times, is exactly how a
+ * save gets found by one code path and silently missed by another. One list, in the module that
+ * actually performs the scan.
+ */
 import path from "path";
 
 export interface AppConfig {
   databasePath: string;
-  savesSearchPaths: string[];
 }
-
-const userProfile = process.env.USERPROFILE || process.env.HOME || "";
 
 export const config: AppConfig = {
   databasePath: process.env.DATABASE_URL || path.join(process.cwd(), "data", "touchline.db"),
-  savesSearchPaths: [
-    // Both titles' folders, kept in step with the parser's own candidate list. FC 26 writes its
-    // saves under a different folder and file-name pattern to FC 25, so assuming either one alone
-    // finds nothing for half of users.
-    path.join(userProfile, "Documents", "FC 26", "settings"),
-    path.join(userProfile, "Documents", "FC 25", "settings"),
-    path.join(userProfile, "OneDrive", "Documents", "FC 26", "settings"),
-    path.join(userProfile, "OneDrive", "Documents", "FC 25", "settings"),
-    path.join(userProfile, "AppData", "Local", "EA SPORTS FC 26"),
-    path.join(userProfile, "AppData", "Local", "EA SPORTS FC 25"),
-    path.join(process.cwd(), "data", "saves"),
-  ],
 };

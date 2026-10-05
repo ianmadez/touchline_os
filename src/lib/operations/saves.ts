@@ -1,4 +1,6 @@
 import { saveSource } from "../platform/save-source";
+import { DEFAULT_BRIDGE_PORT } from "../platform/types";
+import { SettingsService } from "../services/settings-service";
 import { failed, ok, type OperationResult } from "./types";
 
 /**
@@ -10,7 +12,23 @@ import { failed, ok, type OperationResult } from "./types";
  */
 export async function listSaveCandidates(): Promise<OperationResult<unknown>> {
   try {
-    const detected = await saveSource.detectSaves();
+    // The manager's configured folder, so the setting actually constrains the scan.
+    //
+    // It did not before. `detectSaves` has always accepted a directory, the setting has always existed
+    // end to end, and nothing ever read it here - so anyone who typed a folder into Settings got the
+    // built-in list anyway and no indication that their choice was being ignored. A setting that is
+    // visible in the UI and silently does nothing is worse than not offering it at all.
+    //
+    // Read defensively: an unreadable settings row must not take the whole scan down with it, because
+    // finding a save is the thing the app needs most. The folder is an override, not a dependency.
+    let saveDirectory: string | undefined;
+    try {
+      saveDirectory = (await new SettingsService().getSettings()).saveDirectory || undefined;
+    } catch {
+      saveDirectory = undefined;
+    }
+
+    const detected = await saveSource.detectSaves(saveDirectory);
 
     // The wizard only cares about career saves; `database` slots (storageInfo.bin, ...) cannot be
     // parsed into a squad and would only produce a broken onboarding step.
@@ -43,6 +61,10 @@ export async function listSaveCandidates(): Promise<OperationResult<unknown>> {
       // Whether the browser is still allowed to read a save it was given earlier, so the wizard can
       // offer one click to re-confirm access instead of the whole choose-a-file flow again.
       rememberedSave: await saveSource.rememberedSave(),
+      // What the optional local bridge is doing. `unsupported` on the desktop build, which has no bridge
+      // and needs none - it already scans this machine directly - so the UI hides the feature there
+      // rather than offering a control that could never work.
+      bridge: saveSource.bridgeStatus ? await saveSource.bridgeStatus() : "unsupported",
     });
   } catch (error) {
     console.error("[api/saves] save detection failed:", error);
@@ -91,5 +113,67 @@ export async function forgetRememberedSave(): Promise<OperationResult<unknown>> 
   } catch (error) {
     console.error("[api/saves] forget failed:", error);
     return failed(500, (error as Error).message ?? "Forgetting the saved file failed.");
+  }
+}
+
+/**
+ * Switches the local bridge on and checks a pairing code.
+ *
+ * The code is the only thing that authorises reading the save, so a wrong or unaccepted one is a
+ * conflict with the reason - the manager typed something wrong, and nothing here has broken. Reported as
+ * a 409 rather than a 500 so the distinction survives all the way to the screen.
+ */
+export async function pairLocalBridge(payload: unknown): Promise<OperationResult<unknown>> {
+  if (!saveSource.pairBridge) {
+    return failed(400, "This build has no local bridge to pair with.");
+  }
+
+  const input = payload as { port?: unknown; code?: unknown } | null;
+  const code = typeof input?.code === "string" ? input.code.trim() : "";
+  if (!code) return failed(400, "A pairing code is required.");
+
+  const requested = typeof input?.port === "number" ? input.port : Number(input?.port);
+  const port = Number.isInteger(requested) && requested > 0 ? requested : DEFAULT_BRIDGE_PORT;
+
+  try {
+    const state = await saveSource.pairBridge(port, code);
+
+    if (state === "unsupported") {
+      return failed(
+        400,
+        "This browser will not let the app remember a pairing, so the bridge cannot be used here."
+      );
+    }
+    if (state !== "paired") {
+      return failed(
+        409,
+        state === "unreachable"
+          ? "No bridge answered on that port. Check the bridge window is still open."
+          : "That pairing code was not accepted. Check the code shown in the bridge window."
+      );
+    }
+
+    return ok({ success: true, bridge: state });
+  } catch (error) {
+    console.error("[api/saves] bridge pairing failed:", error);
+    return failed(500, (error as Error).message ?? "Pairing with the local bridge failed.");
+  }
+}
+
+/**
+ * Switches the bridge off and forgets the code, so no future visit requests anything.
+ *
+ * Never fails in a way worth reporting: the effect is that nothing is remembered, and a store that could
+ * not be written has already achieved that.
+ */
+export async function forgetLocalBridge(): Promise<OperationResult<unknown>> {
+  if (!saveSource.forgetBridge) return ok({ success: true, bridge: "unsupported" });
+
+  try {
+    await saveSource.forgetBridge();
+    return ok({ success: true, bridge: "off" });
+  } catch (error) {
+    console.error("[api/saves] forgetting the bridge failed:", error);
+    return failed(500, (error as Error).message ?? "Disconnecting from the local bridge failed.");
   }
 }

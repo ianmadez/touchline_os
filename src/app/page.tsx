@@ -19,6 +19,7 @@ import { FinanceView } from "@/components/ui/finance/finance-view";
 import { SettingsView, Diagnostics, ActionResult } from "@/components/ui/settings/settings-view";
 import { SquadTableSkeleton } from "@/components/ui/skeleton";
 import type { SaveCandidate } from "@/lib/parser/interface";
+import type { BridgeState, SaveSourceMode } from "@/lib/platform/types";
 import type { EnrichedPlayer } from "@/lib/services/squad-service";
 import type { PitchSlotAssignment, TacticalSystemState } from "@/lib/services/tactics-service";
 import type { CareerHydrationPayload, LeagueTeamSummary } from "@/lib/services/career-service";
@@ -153,13 +154,19 @@ export default function TouchlineApp() {
   const [saveCandidates, setSaveCandidates] = useState<SaveCandidate[]>([]);
   const [saveScanComplete, setSaveScanComplete] = useState(false);
   const [savesUnavailableReason, setSavesUnavailableReason] = useState<string | null>(null);
-  const [saveSourceMode, setSaveSourceMode] = useState<"folders" | "picker">("folders");
+  const [saveSourceMode, setSaveSourceMode] = useState<SaveSourceMode>("folders");
   // Whether this browser is still allowed to read the save it was given earlier. "granted" is what
   // lets a visit sync with no interaction; "needs-permission" is the one state that needs a click.
   const [rememberedSave, setRememberedSave] = useState<
     "none" | "granted" | "needs-permission"
   >("none");
   const [regranting, setRegranting] = useState(false);
+  // What the optional local bridge is doing. Starts "unsupported" rather than "off" so the feature is
+  // hidden until a scan has actually reported on it, instead of flashing an offer the desktop build
+  // can never honour.
+  const [bridgeState, setBridgeState] = useState<BridgeState>("unsupported");
+  const [pairingBridge, setPairingBridge] = useState(false);
+  const [bridgeError, setBridgeError] = useState<string | null>(null);
   const [squad, setSquad] = useState<EnrichedPlayer[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<EnrichedPlayer | null>(null);
   // The storyline whose evidence view is open. Kept in the session as well, so a refresh lands
@@ -281,11 +288,27 @@ export default function TouchlineApp() {
       setSavesUnavailableReason(
         typeof data.unavailableReason === "string" ? data.unavailableReason : null
       );
-      setSaveSourceMode(data.saveSourceMode === "picker" ? "picker" : "folders");
+      // The third mode has to survive this line. Collapsing anything unrecognised to "folders" is a
+      // silent downgrade, and it is the single easiest way to make pairing look like it did nothing.
+      setSaveSourceMode(
+        data.saveSourceMode === "picker"
+          ? "picker"
+          : data.saveSourceMode === "bridge"
+            ? "bridge"
+            : "folders"
+      );
       setRememberedSave(
         data.rememberedSave === "granted" || data.rememberedSave === "needs-permission"
           ? data.rememberedSave
           : "none"
+      );
+      setBridgeState(
+        data.bridge === "off" ||
+          data.bridge === "paired" ||
+          data.bridge === "needs-code" ||
+          data.bridge === "unreachable"
+          ? data.bridge
+          : "unsupported"
       );
       setSaveCandidates(
         candidates.map((candidate) => ({
@@ -306,6 +329,7 @@ export default function TouchlineApp() {
     setSavesUnavailableReason,
     setSaveSourceMode,
     setRememberedSave,
+    setBridgeState,
     setAppError,
   ]);
 
@@ -361,6 +385,56 @@ export default function TouchlineApp() {
     setRememberedSave("none");
     await loadSaveCandidates();
   }, [rememberedSave, loadSaveCandidates, setRememberedSave]);
+
+  /**
+   * Pairs with the local bridge, from a click.
+   *
+   * A click rather than on load, because pairing is a decision the manager makes: nothing should start
+   * talking to a port on their machine because a page happened to open. On success the scan is re-run,
+   * so the bridge's save becomes the active candidate exactly as if it had just been picked - which is
+   * the entire point of pairing it.
+   */
+  const handlePairBridge = useCallback(
+    async (code: string) => {
+      setPairingBridge(true);
+      setBridgeError(null);
+      try {
+        const res = await apiFetch("/api/saves", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "bridge-pair", code }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`);
+        await loadSaveCandidates();
+      } catch (error) {
+        setBridgeError((error as Error).message);
+      } finally {
+        setPairingBridge(false);
+      }
+    },
+    [loadSaveCandidates, setPairingBridge, setBridgeError]
+  );
+
+  /** Ends the bridge, so no future visit requests anything from it. */
+  const handleDisconnectBridge = useCallback(async () => {
+    setPairingBridge(true);
+    setBridgeError(null);
+    try {
+      await apiFetch("/api/saves", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "bridge-forget" }),
+      });
+    } catch {
+      // Nothing to recover: the scan below falls back to the picker either way.
+    } finally {
+      setPairingBridge(false);
+    }
+    // Stated rather than inferred, so the panel closes immediately instead of waiting on the scan.
+    setBridgeState("off");
+    await loadSaveCandidates();
+  }, [loadSaveCandidates, setPairingBridge, setBridgeError, setBridgeState]);
 
   // Restore persisted session and prevent re-entering onboarding wizard if career exists
   useEffect(() => {
@@ -1295,6 +1369,11 @@ export default function TouchlineApp() {
             rememberedSave={rememberedSave}
             onRegrant={() => void handleRegrantSave()}
             regranting={regranting}
+            bridge={bridgeState}
+            onPairBridge={(code) => void handlePairBridge(code)}
+            onDisconnectBridge={() => void handleDisconnectBridge()}
+            bridgeBusy={pairingBridge}
+            bridgeError={bridgeError}
             onOpenLegal={(doc) => setActiveLegalDoc(doc)}
             onEnterPortal={() => {
               if (isOnboardingComplete) {
@@ -1317,6 +1396,11 @@ export default function TouchlineApp() {
             rememberedSave={rememberedSave}
             onRegrant={() => void handleRegrantSave()}
             regranting={regranting}
+            bridge={bridgeState}
+            onPairBridge={(code) => void handlePairBridge(code)}
+            onDisconnectBridge={() => void handleDisconnectBridge()}
+            bridgeBusy={pairingBridge}
+            bridgeError={bridgeError}
             onCompleteOnboarding={handleCompleteOnboarding}
           />
         )}

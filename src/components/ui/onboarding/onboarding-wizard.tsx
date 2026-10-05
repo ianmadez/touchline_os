@@ -2,8 +2,10 @@
 
 import React, { useState } from "react";
 import { SaveCandidate } from "@/lib/parser/interface";
+import type { BridgeState, SaveSourceMode } from "@/lib/platform/types";
 import { FORMATIONS_REGISTRY, FormationDefinition } from "@/lib/tactics/formations";
 import { labelFor, REALISM_HINTS, REALISM_LEVELS, RealismLevel } from "@/lib/settings-vocabulary";
+import { BridgePanel } from "../bridge/bridge-panel";
 
 const FORMATION_CATEGORY_LABELS: Record<FormationDefinition["category"], string> = {
   "4-at-the-back": "4-Defender Backlines",
@@ -106,11 +108,17 @@ interface OnboardingWizardProps {
   rememberedSave?: "none" | "granted" | "needs-permission";
   onRegrant?: () => void;
   regranting?: boolean;
+  /** The optional local bridge: offer it, show it connected, or say it has stopped. */
+  bridge?: BridgeState;
+  onPairBridge?: (code: string) => void;
+  onDisconnectBridge?: () => void;
+  bridgeBusy?: boolean;
+  bridgeError?: string | null;
   /**
    * How this runtime gets a save. `picker` means the manager chooses the file, and "re-scan folders"
    * would describe something a page cannot do.
    */
-  saveSourceMode?: "folders" | "picker";
+  saveSourceMode?: SaveSourceMode;
   /**
    * Why this runtime cannot offer saves by itself, if it cannot.
    *
@@ -131,6 +139,11 @@ export function OnboardingWizard({
   rememberedSave = "none",
   onRegrant,
   regranting = false,
+  bridge = "unsupported",
+  onPairBridge,
+  onDisconnectBridge,
+  bridgeBusy = false,
+  bridgeError = null,
   savesUnavailableReason = null,
 }: OnboardingWizardProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -350,6 +363,14 @@ export function OnboardingWizard({
               )}
             </div>
           )}
+
+          <BridgePanel
+            state={bridge}
+            onPair={(code) => onPairBridge?.(code)}
+            onDisconnect={() => onDisconnectBridge?.()}
+            busy={bridgeBusy}
+            error={bridgeError}
+          />
 
           {/* Only where a save still has to be found: once one is selected, this is just noise. */}
           {saveCandidates.length === 0 && (

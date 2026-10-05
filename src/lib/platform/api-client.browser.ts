@@ -15,7 +15,13 @@ import { readDiagnostics } from "../operations/diagnostics";
 import { readFinanceReport, saveFinanceInputs } from "../operations/finance";
 import { deleteObjective, readObjectives, saveObjective } from "../operations/objectives";
 import { parseAndSyncSave } from "../operations/parse-save";
-import { forgetRememberedSave, listSaveCandidates, reconnectRememberedSave } from "../operations/saves";
+import {
+  forgetLocalBridge,
+  forgetRememberedSave,
+  listSaveCandidates,
+  pairLocalBridge,
+  reconnectRememberedSave,
+} from "../operations/saves";
 import { archiveScoutTarget, readScoutingMemory, restoreScoutTarget } from "../operations/scouting-memory";
 import { saveFootOverride, searchScoutPool } from "../operations/scouting-search";
 import { deleteScoutTarget, readScoutingBoard, saveScoutTarget } from "../operations/scouting";
@@ -90,9 +96,14 @@ async function dispatch(call: Call): Promise<OperationResult<unknown>> {
       const action = (parsed.value as { action?: unknown } | null)?.action;
       if (action === "reconnect") return reconnectRememberedSave();
       if (action === "forget") return forgetRememberedSave();
+      if (action === "bridge-pair") return pairLocalBridge(parsed.value);
+      if (action === "bridge-forget") return forgetLocalBridge();
       return {
         status: 400,
-        body: { success: false, error: 'action must be "reconnect" or "forget".' },
+        body: {
+          success: false,
+          error: 'action must be one of "reconnect", "forget", "bridge-pair", "bridge-forget".',
+        },
       };
     }
 

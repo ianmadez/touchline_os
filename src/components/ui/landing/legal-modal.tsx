@@ -122,6 +122,20 @@ export function LegalModal({ activeDoc, onClose }: LegalModalProps) {
                   images are then cached on your device so squads load quickly and offline.
                 </p>
               </div>
+
+              <div>
+                <h3 className="font-heading text-sm text-slate-900 uppercase mb-1">
+                  6. The Optional Local Bridge
+                </h3>
+                <p>
+                  The local bridge is a separate, optional program that you download and run yourself.
+                  When it is running and paired, your browser asks it for your save file over an
+                  address on your own computer. Nothing passes through us: we do not operate a server
+                  that the bridge or this page contacts, and the bridge does not send your data
+                  anywhere. Its pairing details are stored in your browser and are removed when you
+                  disconnect it. See the Cookie Policy for the detail.
+                </p>
+              </div>
             </>
           )}
 
@@ -191,7 +205,24 @@ export function LegalModal({ activeDoc, onClose }: LegalModalProps) {
 
               <div>
                 <h3 className="font-heading text-sm text-slate-900 uppercase mb-1">
-                  6. Removing All Of It
+                  6. The Optional Local Bridge
+                </h3>
+                <p>
+                  The bridge is entirely optional, and nothing happens unless you choose to run it. It
+                  is a small program you download and start on your own computer. While it is running
+                  and paired, this page asks it for your save file over your own machine — an address
+                  on your own computer, not ours. We operate no server that the bridge or the page
+                  contacts, and the bridge refuses requests from any website other than TouchlineOS.
+                </p>
+                <p className="mt-2">
+                  Your pairing code is stored in this browser. Disconnecting the bridge deletes it and
+                  stops all such requests immediately.
+                </p>
+              </div>
+
+              <div>
+                <h3 className="font-heading text-sm text-slate-900 uppercase mb-1">
+                  7. Removing All Of It
                 </h3>
                 <p>
                   Because everything lives in this browser, you can erase all of it yourself by

@@ -17,13 +17,21 @@ import { sha1Hex } from "../parser/sha";
 import { classifySlot } from "../parser/save-naming";
 import type { SaveCandidate, SaveSearchLocation } from "../parser/interface";
 import {
+  BRIDGE_LABEL,
+  bridgeState,
+  fetchBridgeBytes,
+  fetchBridgeSaves,
+  readBridgeSettings,
+  writeBridgeSettings,
+} from "./bridge-client.browser";
+import {
   forgetSaveHandle,
   handlePermission,
   loadSaveHandle,
   rememberSaveHandle,
   requestHandlePermission,
 } from "./save-handle-store.browser";
-import type { SaveSource } from "./types";
+import type { SaveSource, SaveSourceMode } from "./types";
 
 interface FilePickerAcceptType {
   description?: string;
@@ -69,6 +77,24 @@ interface PickedSave {
 
 const picked = new Map<string, PickedSave>();
 let scan: SaveSearchLocation[] = [];
+
+/**
+ * Which source actually produced the last scan's candidates.
+ *
+ * The port exposes `mode` as a plain readable property, but which source is in play is only known after
+ * a scan has run, so this holds the last answer and `mode` reports it. It defaults to `picker` because
+ * that is what this build does until something proves otherwise.
+ */
+let lastMode: SaveSourceMode = "picker";
+
+/**
+ * Ids whose bytes come from the bridge rather than from a handle this page holds.
+ *
+ * A separate set rather than a flag on the candidate: `SaveCandidate` is shared with the desktop build,
+ * and turning a display field like `foundIn` into a type discriminator is how a label change quietly
+ * becomes a routing bug.
+ */
+const fromBridge = new Set<string>();
 
 const hasPicker = (): boolean =>
   typeof window !== "undefined" && typeof window.showOpenFilePicker === "function";
@@ -212,9 +238,47 @@ async function resolveRememberedSave(): Promise<
   }
 }
 
+/**
+ * The saves the local bridge is offering, or null when it has nothing to offer.
+ *
+ * Returns null for every failure - switched off, not running, not paired, or running and finding no
+ * saves. They are deliberately not distinguished here, because the caller's answer is the same in all of
+ * them: fall through to the picker. `bridgeStatus` is what tells the UI which of them it was.
+ */
+async function resolveBridgeSave(): Promise<SaveCandidate[] | null> {
+  const settings = readBridgeSettings();
+  // Switched off is the default, and the case that must cost nothing: no request is made at all.
+  if (!settings.enabled) return null;
+
+  const response = await fetchBridgeSaves(settings);
+  if (!response || response.status !== 200 || response.saves.length === 0) return null;
+
+  for (const candidate of response.saves) fromBridge.add(candidate.id);
+  return response.saves;
+}
+
 export const saveSource: SaveSource = {
-  mode: "picker",
+  // A getter rather than a literal, because the answer changes per scan: this build serves whichever of
+  // the bridge and the picker actually produced the candidates.
+  get mode() {
+    return lastMode;
+  },
   detectSaves: async () => {
+    // The bridge first, when the manager has set one up. It is the only path that needs no dialog and no
+    // permission in any browser, so when it has something to offer nothing else is consulted.
+    //
+    // When it has nothing, the picker path below runs exactly as it does today. A bridge that is
+    // switched off, not running, or finding no saves must never be the reason a manager cannot open
+    // their own save - so this is an addition to that path, never a replacement for it.
+    const bridged = await resolveBridgeSave();
+    if (bridged) {
+      lastMode = "bridge";
+      scan = [{ path: "", label: BRIDGE_LABEL, exists: true }];
+      return bridged;
+    }
+
+    lastMode = "picker";
+
     // Tried before anything that could open a dialog. A save we are already allowed to read is
     // resolved with no interaction at all, which is the entire point of remembering it.
     const remembered = await resolveRememberedSave();
@@ -346,6 +410,19 @@ export const saveSource: SaveSource = {
   },
 
   readBytes: async (candidate) => {
+    // A candidate the bridge produced is read back from the bridge, not from a handle this page holds.
+    // The bridge re-reads the file per request, so the bytes are as they are NOW rather than as they
+    // were when the list was fetched - which is the whole reason a manager runs it.
+    if (fromBridge.has(candidate.id)) {
+      const bytes = await fetchBridgeBytes(readBridgeSettings(), candidate.id);
+      if (!bytes) {
+        throw new Error(
+          "The local bridge did not return the save file. Check that it is still running."
+        );
+      }
+      return bytes;
+    }
+
     const entry = picked.get(candidate.id);
     if (!entry) {
       // Same wording as the desktop source, so a caller sees one contract either way.
@@ -355,6 +432,44 @@ export const saveSource: SaveSource = {
     return new Uint8Array(await file.arrayBuffer());
   },
 
+  /**
+   * What the local bridge is doing, so the UI can offer it, show it as connected, or say plainly that a
+   * paired bridge is not running.
+   *
+   * Clearing the bridge's candidates on any state but `paired` is what stops a stale list being read
+   * back through a bridge that has stopped answering: the next scan re-runs the picker path instead.
+   */
+  bridgeStatus: async () => {
+    const state = await bridgeState();
+    if (state !== "paired") fromBridge.clear();
+    return state;
+  },
+
+  /**
+   * Switches the bridge on and checks a code, reporting what that left it in.
+   *
+   * A code that does not work must not leave the feature switched on: that would mean a request on every
+   * future visit which can only fail, and a UI claiming a connection that does not exist. So a failed
+   * pairing forgets itself and the manager can simply try again.
+   */
+  pairBridge: async (port, code) => {
+    const saved = writeBridgeSettings({ enabled: true, port, code: code.trim().toUpperCase() });
+    const state = await bridgeState(saved);
+    if (state !== "paired") {
+      writeBridgeSettings({ enabled: false, code: "" });
+      fromBridge.clear();
+    }
+    return state;
+  },
+
+  forgetBridge: async () => {
+    writeBridgeSettings({ enabled: false, code: "" });
+    fromBridge.clear();
+  },
+
   lastScan: () => scan,
-  unavailableReason: () => (hasPicker() || canUseFileInput() ? null : UNSUPPORTED),
+  unavailableReason: () =>
+    // A paired bridge makes this build usable even where there is no picker and no file input at all, so
+    // "cannot open a save here" is only true when nothing else is available either.
+    hasPicker() || canUseFileInput() || readBridgeSettings().enabled ? null : UNSUPPORTED,
 };

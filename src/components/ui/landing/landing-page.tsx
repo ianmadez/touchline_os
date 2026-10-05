@@ -3,6 +3,8 @@
 import React, { useState } from "react";
 import Image from "next/image";
 import { SaveCandidate } from "@/lib/parser/interface";
+import type { BridgeState, SaveSourceMode } from "@/lib/platform/types";
+import { BridgePanel } from "../bridge/bridge-panel";
 import { LegalDocType } from "./legal-modal";
 import { LocalStorageNotice } from "./local-storage-notice";
 
@@ -16,7 +18,7 @@ interface LandingPageProps {
    * How this runtime gets a save, so the status block describes the right action: a page cannot scan
    * folders, and telling someone to re-scan them would describe a control that does not exist.
    */
-  saveSourceMode?: "folders" | "picker";
+  saveSourceMode?: SaveSourceMode;
   /**
    * Whether this browser can still read the save it was given earlier.
    *
@@ -28,6 +30,12 @@ interface LandingPageProps {
   regranting?: boolean;
   /** Opens one of the legal documents, so the notice can link to the cookie policy. */
   onOpenLegal?: (doc: LegalDocType) => void;
+  /** The optional local bridge: offer it, show it connected, or say it has stopped. */
+  bridge?: BridgeState;
+  onPairBridge?: (code: string) => void;
+  onDisconnectBridge?: () => void;
+  bridgeBusy?: boolean;
+  bridgeError?: string | null;
 }
 
 export function LandingPage({
@@ -40,6 +48,11 @@ export function LandingPage({
   onRegrant,
   regranting = false,
   onOpenLegal,
+  bridge = "unsupported",
+  onPairBridge,
+  onDisconnectBridge,
+  bridgeBusy = false,
+  bridgeError = null,
 }: LandingPageProps) {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
 
@@ -62,6 +75,10 @@ export function LandingPage({
     {
       q: "Where do I find my EA SPORTS FC save file on my computer?",
       a: "TouchlineOS auto-detects your save folder on launch. It checks the places EA Sports EAFC writes careers to — a settings folder inside your Documents (in the title's own folder, including OneDrive Documents) and the AppData location for your installed title — then lists every career save it finds.",
+    },
+    {
+      q: "Do I have to pick my save file every time I visit?",
+      a: "Usually not. In Chrome and Edge the site remembers the file you chose and just re-asks for permission now and then. In any browser - including Firefox and Safari, which cannot remember a file at all - you can run the optional local bridge: a small free helper you download once that reads the save from your PC, so there is nothing to pick. TouchlineOS works fully without it. You would simply pick your save file again, which takes a moment.",
     },
     {
       q: "Do I need any programming or technical knowledge to use this?",
@@ -165,10 +182,18 @@ export function LandingPage({
           </div>
         )}
 
+        <BridgePanel
+          state={bridge}
+          onPair={(code) => onPairBridge?.(code)}
+          onDisconnect={() => onDisconnectBridge?.()}
+          busy={bridgeBusy}
+          error={bridgeError}
+        />
+
         {/* Primary Red CTA Button */}
         <button
           onClick={onEnterPortal}
-          className="px-8 py-3.5 bg-[#E11D48] hover:bg-[#FF8C7A] text-white font-heading text-sm font-bold uppercase rounded-xl shadow-lg shadow-rose-600/20 hover:shadow-xl hover:shadow-[#FF8C7A]/30 transition-[background-color,box-shadow,transform] duration-200 hover:scale-102 active:scale-[0.96] hover:-translate-y-0.5 cursor-pointer"
+          className="px-8 py-6 bg-[#E11D48] hover:bg-[#FF8C7A] text-white font-heading text-sm font-bold uppercase rounded-xl shadow-lg shadow-rose-600/20 hover:shadow-xl hover:shadow-[#FF8C7A]/30 transition-[background-color,box-shadow,transform] duration-200 hover:scale-102 active:scale-[0.96] hover:-translate-y-0.5 cursor-pointer"
         >
           Enter Portal →
         </button>
