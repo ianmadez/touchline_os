@@ -72,6 +72,26 @@ export function LandingFooter({ onOpenLegal }: LandingFooterProps) {
                 </a>
               </li>
               <li>
+                <a
+                  href="https://discord.gg/qVVwMZAAY"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-[#E11D48] transition-colors"
+                >
+                  Discord Community ↗
+                </a>
+              </li>
+              <li>
+                <a
+                  href="https://github.com/ianmadez/touchline_os/blob/main/LICENSE"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-[#E11D48] transition-colors"
+                >
+                  MIT License ↗
+                </a>
+              </li>
+              <li>
                 <span className="text-slate-400 dark:text-slate-500">Local Parser Specs v1.0</span>
               </li>
             </ul>
@@ -98,7 +118,7 @@ export function LandingFooter({ onOpenLegal }: LandingFooterProps) {
 
         {/* Bottom Bar — clean flex row, explicit separation from the watermark */}
         <div className="mt-12 border-t border-slate-200 dark:border-slate-800 pt-6 flex flex-col sm:flex-row items-center justify-between text-slate-500 dark:text-slate-400 font-sub text-xs gap-4">
-          <p>© 2026 TouchlineOS. Built for EA SPORTS FC Career Mode.</p>
+          <p>Copyright © 2026 ianmadez. First-party code is MIT-licensed.</p>
           <div className="flex items-center gap-6">
             <span>Local-First</span>
             <span>•</span>

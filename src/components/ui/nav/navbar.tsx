@@ -2,6 +2,7 @@
 
 import React, { useSyncExternalStore } from "react";
 import { AppTab } from "@/lib/session";
+import { IconDiscord } from "../icons";
 
 /**
  * Whether the page has scrolled past the nav's own height.
@@ -174,6 +175,19 @@ export function Navbar({
             {/* The full label only where there is room for it; a phone keeps the short one. */}
             <span className="hidden lg:inline">Support! (Ko-Fi)</span>
             <span className="lg:hidden">Ko-Fi</span>
+          </a>
+        )}
+
+        {isLanding && (
+          <a
+            href="https://discord.gg/qVVwMZAAY"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Join TouchlineOS on Discord"
+            title="Join TouchlineOS on Discord"
+            className="hidden sm:inline-flex min-h-10 min-w-10 items-center justify-center rounded-xl text-[#5865F2] transition-colors hover:bg-[#5865F2]/10 hover:text-[#4752C4] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#5865F2]"
+          >
+            <IconDiscord className="h-5 w-5" />
           </a>
         )}
 

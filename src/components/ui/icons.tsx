@@ -5,13 +5,31 @@ import React from "react";
  *
  * Hand-drawn inline SVG rather than an icon dependency or emoji: emoji render differently on every
  * platform (and read as decoration rather than interface), while a font/stroke-matched set keeps
- * the weight consistent with the rest of the UI. Every icon is a 24x24 viewBox with `currentColor`
- * strokes so it inherits the parent's text colour and dark-mode variants for free.
+ * the weight consistent with the rest of the UI. Utility icons use a 24x24 viewBox and `currentColor`
+ * strokes; brand marks keep their own silhouette and use `currentColor` fill.
  */
 export interface IconProps {
   className?: string;
   /** Decorative by default. Pass a label only when the icon is the sole carrier of meaning. */
   label?: string;
+}
+
+/** The Discord Clyde mark, traced from the user-provided logo. */
+export function IconDiscord({ className = "h-5 w-5" }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 384 296"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        fillRule="evenodd"
+        d="M139 0 151 22c13-4 27-5 41-4 14-1 28 0 41 4l14-21c27 5 54 13 78 23 25 26 44 66 55 111 8 34 8 72 4 109l-96 52-25-49c-20 11-43 17-71 17s-51-6-71-17l-24 49L0 244c-4-37-4-75 4-109C15 90 34 50 59 24 84 13 112 5 139 0Zm-10 129a34 34 0 1 0 0 68 34 34 0 0 0 0-68Zm128 0a34 34 0 1 0 0 68 34 34 0 0 0 0-68Zm-165 111 8-5c15 8 30 14 46 18 14 4 29 6 46 6s32-2 46-6c16-4 31-10 46-18l8 5c-16 11-32 18-49 23-16 5-33 7-51 7s-35-2-51-7c-17-5-33-12-49-23Z"
+      />
+    </svg>
+  );
 }
 
 function Svg({ className = "h-4 w-4", label, children }: IconProps & { children: React.ReactNode }) {
