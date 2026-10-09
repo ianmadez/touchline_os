@@ -133,7 +133,7 @@ export function BoardObjectivesPanel({
       )}
 
       {/* ---- The summary: what the board actually asked for, in order of pressure ---- */}
-      <section className="rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
+      <section data-tour="objectives-summary" className="rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-800">
           <h2 className="flex items-center gap-2 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
             <IconTarget className="h-4 w-4 text-[#E11D48] dark:text-[#FF8C7A]" />
@@ -171,7 +171,7 @@ export function BoardObjectivesPanel({
         )}
 
         {/* ---- Add: pick what you were given ---- */}
-        <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div data-tour="objectives-add" className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="block">
             <span className="mb-1 block font-sub text-label font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
               Category
@@ -254,12 +254,12 @@ export function BoardObjectivesPanel({
           Reading your objectives&hellip;
         </p>
       ) : objectives.length === 0 ? (
-        <p className="rounded-2xl border border-slate-200 bg-white p-6 font-sans text-dense leading-relaxed text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+        <p data-tour="objectives-empty" className="rounded-2xl border border-slate-200 bg-white p-6 font-sans text-dense leading-relaxed text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
           Nothing recorded yet. Pick the objectives your board handed you above and they will be
           tracked here, ordered by how much the board cares about each one.
         </p>
       ) : (
-        <ul className="space-y-2">
+        <ul data-tour="objectives-list" className="space-y-2">
           {objectives.map((objective) => (
             <li
               key={objective.id}

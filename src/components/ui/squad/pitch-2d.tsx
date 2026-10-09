@@ -324,7 +324,7 @@ export function Pitch2D({
         </div>
 
         {/* Pitch Graphic Wrapper using pitch2d.jpeg */}
-        <div className="relative w-full aspect-[3/4] max-h-[680px] rounded-lg overflow-hidden border border-slate-700/60 shadow-2xl">
+        <div data-tour="tactics-pitch" className="relative w-full aspect-[3/4] max-h-[680px] rounded-lg overflow-hidden border border-slate-700/60 shadow-2xl">
           <Image
             src="/2dpitch.jpg"
             alt="Tactical Pitch"

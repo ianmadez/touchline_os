@@ -142,11 +142,15 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
           </h1>
         </div>
 
-        <div data-tour="season-subtabs" className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 dark:border-slate-800 dark:bg-slate-950">
+        <div data-tour="season-subtabs" role="tablist" className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 dark:border-slate-800 dark:bg-slate-950">
           {SUB_TABS.map((tab) => (
             <button
               key={tab}
               type="button"
+              role="tab"
+              aria-selected={activeSubTab === tab}
+              data-subtab={tab}
+              data-tour={`season-subtab-${tab}`}
               onClick={() => setActiveSubTab(tab)}
               className={`cursor-pointer rounded-lg px-4 py-2 text-xs font-sub font-bold uppercase tracking-wider transition-all ${
                 activeSubTab === tab
@@ -366,6 +370,7 @@ function MatchdayTrajectoryChart({
 
   return (
     <ChartCard
+      tour="season-chart-trajectory"
       title="Matchday Trajectory & Form"
       subtitle="Within-season cumulative points against the target you set for each block, plus position tracking across synced matchdays."
     >
@@ -528,6 +533,7 @@ function PointsBySeasonChart({
 
   return (
     <ChartCard
+      tour="season-chart-points"
       title="Points by Season"
       subtitle="Final points for completed seasons, and points so far this season. Hover any bar to highlight totals."
     >
@@ -590,7 +596,7 @@ function FinishBySeasonChart({ seasons }: { seasons: SeasonRecord[] }) {
   const worst = Math.max(...positions, 1);
 
   return (
-    <ChartCard title="Finishing Position by Season" subtitle="Lower is better — bars are scaled to your worst finish on record. Hover to inspect.">
+    <ChartCard tour="season-chart-finish" title="Finishing Position by Season" subtitle="Lower is better — bars are scaled to your worst finish on record. Hover to inspect.">
       <div className="flex h-48 items-end gap-4 px-2">
         {seasons.map((s) => {
           const pos = s.tablePosition ?? 0;
@@ -634,9 +640,23 @@ function FinishBySeasonChart({ seasons }: { seasons: SeasonRecord[] }) {
 // Small shared pieces
 // ---------------------------------------------------------------------------
 
-function ChartCard({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
+function ChartCard({
+  title,
+  subtitle,
+  tour,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  /** Optional `data-tour` anchor, so the onboarding tour can point at this chart. */
+  tour?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="space-y-4 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90 dark:shadow-md dark:shadow-slate-950/50">
+    <div
+      data-tour={tour}
+      className="space-y-4 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90 dark:shadow-md dark:shadow-slate-950/50"
+    >
       <div className="border-b border-slate-200 pb-3 dark:border-slate-800">
         <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">{title}</h2>
         <p className="text-xs font-sub text-slate-500 dark:text-slate-400">{subtitle}</p>

@@ -138,7 +138,7 @@ export function ScoutingMemoryPanel({ careerId }: { careerId: string }) {
   const changed = (rows ?? []).filter((row) => row.shouldResurface).length;
 
   return (
-    <section className="space-y-4 rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
+    <section data-tour="scouting-memory" className="space-y-4 rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
           Scouting memory

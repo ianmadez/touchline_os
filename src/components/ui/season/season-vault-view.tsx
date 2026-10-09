@@ -101,7 +101,7 @@ export function SeasonVaultView({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-white/90 p-4 shadow-xs backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
+      <div data-tour="vault-seasons" className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-white/90 p-4 shadow-xs backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
         <span className="mr-2 text-xs font-sub font-bold uppercase text-slate-400">Season</span>
         {browsable.map((s) => {
           const isSelected = active?.season === s.season;
@@ -156,7 +156,7 @@ export function SeasonVaultView({
 function DossierHeader({ dossier }: { dossier: SeasonDossier }) {
   const finish = dossier.fromSave.tablePosition;
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
+    <div data-tour="vault-header" className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
       <div>
         <div className="text-xs font-sub font-bold uppercase text-[#E11D48] dark:text-[#FF8C7A]">
           {dossier.current ? "Current season · still being written" : "Archived season · read-only"}
@@ -252,7 +252,7 @@ function SaveHalf({ dossier }: { dossier: SeasonDossier }) {
       : "—";
 
   return (
-    <section className="space-y-4 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
+    <section data-tour="vault-save-half" className="space-y-4 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
       <SectionTitle
         kicker="From the save"
         title="The season as the save recorded it"

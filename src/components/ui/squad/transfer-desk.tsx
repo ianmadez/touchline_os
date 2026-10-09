@@ -72,7 +72,7 @@ export function TransferDesk({ careerId, currencySymbol = "£" }: { careerId: st
 
   return (
     <div className="space-y-5">
-      <div>
+      <div data-tour="transfers-heading">
         <h2 className="flex items-center gap-2 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
           <IconWallet className="h-4 w-4 text-[#E11D48] dark:text-[#FF8C7A]" />
           Transfers
@@ -88,7 +88,7 @@ export function TransferDesk({ careerId, currencySymbol = "£" }: { careerId: st
         </p>
       )}
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <section data-tour="transfers-figures" className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Figure
           label="Transfer budget"
           value={budget === null ? "Not set" : money(budget)}
@@ -128,7 +128,7 @@ export function TransferDesk({ careerId, currencySymbol = "£" }: { careerId: st
         </p>
       )}
 
-      <section className="rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
+      <section data-tour="transfers-shortlist" className="rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
         <h3 className="mb-4 flex items-center justify-between gap-3 border-b border-slate-200 pb-3 font-heading text-sm uppercase tracking-wider text-slate-900 dark:border-slate-800 dark:text-slate-100">
           <span>Who you are acting on</span>
           <span className="font-sub text-[10px] tracking-wider text-slate-400 tabular-nums">

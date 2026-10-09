@@ -154,7 +154,7 @@ export function YouthAcademyPanel({ careerId, query }: { careerId: string; query
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+      <div data-tour="youth-summary" className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
           Academy
         </h2>
@@ -167,7 +167,7 @@ export function YouthAcademyPanel({ careerId, query }: { careerId: string; query
         )}
       </div>
 
-      <ul className="space-y-2">
+      <ul data-tour="youth-list" className="space-y-2">
         {visible.map((row) => (
           <li
             key={row.playerId}

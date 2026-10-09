@@ -33,7 +33,7 @@ export function CareerTimeline({ events }: { events: ParsedCareerEvent[] }) {
   );
 
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xl transition-colors">
+    <div data-tour="timeline-card" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xl transition-colors">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-800">
         <h3 className="flex items-center gap-2 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
           <IconClock className="h-4 w-4 text-[#E11D48] dark:text-[#FF8C7A]" />
@@ -52,7 +52,7 @@ export function CareerTimeline({ events }: { events: ParsedCareerEvent[] }) {
       ) : (
         <>
           {types.length > 1 && (
-            <div className="mb-4 flex flex-wrap items-center gap-1.5">
+            <div data-tour="timeline-filters" className="mb-4 flex flex-wrap items-center gap-1.5">
               <FilterChip
                 active={activeType === "ALL"}
                 label="All"
@@ -78,7 +78,7 @@ export function CareerTimeline({ events }: { events: ParsedCareerEvent[] }) {
           ) : (
             /* Internal scroll, matching the dashboard's storylines card: the card keeps its height
                and the feed scrolls inside it, however long a career runs. */
-            <ol className="max-h-[560px] space-y-3 overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+            <ol data-tour="timeline-feed" className="max-h-[560px] space-y-3 overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
               {visible.map((event) => (
                 <li key={event.id} className="space-y-0.5 border-l-2 border-[#E11D48] py-1 pl-4">
                   <div className="flex flex-wrap items-center gap-2">

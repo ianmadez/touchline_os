@@ -326,7 +326,7 @@ export function GroupDebriefPanel({
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div data-tour="group-heading" className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
             <IconWhistle className="h-4 w-4 text-[#E11D48] dark:text-[#FF8C7A]" />
@@ -338,6 +338,7 @@ export function GroupDebriefPanel({
         </div>
         <button
           type="button"
+          data-tour="group-new"
           onClick={() => setDraft(newDraft(seasonNumber, nextBlockIndex))}
           className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#E11D48] px-4 py-2.5 font-heading text-xs font-bold uppercase tracking-wider text-white shadow-sm shadow-rose-600/20 transition-colors hover:bg-[#c4173d] dark:bg-[#FF8C7A] dark:text-slate-950 dark:hover:bg-[#ff7a63]"
         >
@@ -371,7 +372,7 @@ export function GroupDebriefPanel({
       ) : rows.length === 0 && !draft ? (
         <EmptyState onStart={() => setDraft(newDraft(seasonNumber, nextBlockIndex))} />
       ) : (
-        <div className="space-y-5">
+        <div data-tour="group-blocks" className="space-y-5">
           {rows.map((row) => (
             <BlockDocument
               key={row.block.id}
@@ -388,7 +389,7 @@ export function GroupDebriefPanel({
 
 function EmptyState({ onStart }: { onStart: () => void }) {
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white/90 p-8 text-center shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
+    <div data-tour="group-empty" className="rounded-2xl border border-slate-200/80 bg-white/90 p-8 text-center shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
       <IconWhistle className="mx-auto h-8 w-8 text-[#E11D48] dark:text-[#FF8C7A]" />
       <h3 className="mt-3 font-heading text-sm uppercase tracking-wide text-slate-900 dark:text-slate-100">
         No group debriefs yet

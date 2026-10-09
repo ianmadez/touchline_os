@@ -70,12 +70,14 @@ export function BridgePanel({
           </span>
         </div>
         <p className={body}>
-          TouchlineOS is reading your save from the bridge, so there is no file to pick and nothing to
-          confirm. Your career syncs itself whenever you open the app.
+          The bridge is watching your save folder on this PC and handing the file straight to
+          TouchlineOS. No picker, no permission prompt, and it keeps its own list of your saves up to
+          date as it goes, so a save the game has just written turns up on its own.
         </p>
         <p className={body}>
-          This works while the bridge window is open. If you close it, the site goes back to asking for
-          your save file — nothing breaks, and your career is untouched either way.
+          It only ever listens on this machine, only answers this site, and never writes to your save.
+          All of that lasts as long as the bridge window is open: close it and the site quietly goes
+          back to asking for your file, with nothing broken and your career untouched.
         </p>
         <button onClick={onDisconnect} disabled={busy} className={secondary}>
           {busy ? "Disconnecting…" : "Disconnect the bridge"}
@@ -90,11 +92,16 @@ export function BridgePanel({
       <div className={card}>
         <span className={label}>Your local bridge isn&rsquo;t running</span>
         <p className={body}>
-          It was paired, but nothing is answering on its port now. Start{" "}
+          It was paired, but nothing is answering on its port now, which usually means the bridge window
+          was closed. Start{" "}
           <code className="font-mono text-[10px] text-slate-900 dark:text-slate-100">
             TouchlineBridge.cmd
           </code>{" "}
-          again and this will reconnect on its own, or just pick your save file above instead.
+          again and this reconnects on its own. This browser remembers the pairing code, so you will not
+          need it a second time.
+        </p>
+        <p className={body}>
+          Until then you can simply pick your save file above. Nothing is lost either way.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <a href={DOWNLOAD_HREF} className={secondary} download>
@@ -120,22 +127,32 @@ export function BridgePanel({
       <p className={body}>
         {needsCode ? (
           <>
-            The bridge is up, but it has not been paired with this browser yet. Paste the pairing code
-            from the bridge window below.
+            The bridge is running on this machine and waiting to be introduced. Paste the pairing code
+            from the bridge window and this browser will be allowed to read your save through it.
           </>
         ) : (
           <>
-            TouchlineOS normally has to ask for your save file, and browsers make it ask again. A small
-            optional helper removes that: run it once, pair it once, and every visit syncs on its own.
-            It works in every browser, including Firefox and Safari. Entirely optional — everything works
-            without it.
+            TouchlineOS normally has to ask for your save file, and browsers insist on asking more than
+            once. The bridge is a small optional helper you run on your own PC: it watches your save
+            folder and serves the file to this page, so there is nothing to pick. Run it once, pair it
+            once, and every visit syncs itself.
           </>
         )}
       </p>
 
       {!needsCode && (
         <p className={body}>
-          You will need Node.js, which is the only requirement — nothing else to install.
+          It keeps its own list of your saves fresh as it goes, so a save the game has just written is
+          noticed without a nudge. It only listens on your machine, only answers this site, and never
+          writes to your save file.
+        </p>
+      )}
+
+      {!needsCode && (
+        <p className={body}>
+          That works in every browser, including Firefox and Safari, which cannot remember a file at
+          all. You will need Node.js, which is the only requirement — nothing else to install. Entirely
+          optional: everything works without it.
         </p>
       )}
 

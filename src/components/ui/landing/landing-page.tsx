@@ -84,7 +84,7 @@ export function LandingPage({
     },
     {
       q: "Do I have to pick my save file every time I visit?",
-      a: "Usually not. In Chrome and Edge the site remembers the file you chose and just re-asks for permission now and then. In any browser - including Firefox and Safari, which cannot remember a file at all - you can run the optional local bridge: a small free helper you download once that reads the save from your PC, so there is nothing to pick. TouchlineOS works fully without it. You would simply pick your save file again, which takes a moment.",
+      a: "Usually not. In Chrome and Edge the site remembers the file you chose and only re-asks for permission now and then. In any browser - including Firefox and Safari, which cannot remember a file at all - you can run the optional local bridge: a small free helper you download once that watches your save folder and serves the file to the page, so there is nothing to pick and a new save is noticed on its own. It runs only on your PC, only answers TouchlineOS, and never writes to your save. TouchlineOS works fully without it; you would simply pick your save file again, which takes a moment.",
     },
     {
       q: "Do I need any programming or technical knowledge to use this?",
@@ -233,7 +233,8 @@ export function LandingPage({
               Connect Save
             </h3>
             <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              Point TouchlineOS at your EA SPORTS FC save folder. Our bridge reads squad rosters, contracts, and finances cleanly.
+              Point TouchlineOS at your EA SPORTS FC save. It reads the file directly and turns it into
+              squad rosters, contracts and finances, read-only, with nothing written back.
             </p>
           </div>
 

@@ -176,7 +176,7 @@ export function FinanceView({ careerId }: { careerId: string | null }) {
         />
       </section>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section data-tour="finance-figures" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <FigureCard
           icon={<IconTrend className="h-4 w-4" />}
           label="Est. tier revenue"
@@ -211,7 +211,7 @@ export function FinanceView({ careerId }: { careerId: string | null }) {
         />
       </section>
 
-      <section className="rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
+      <section data-tour="finance-contract" className="rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-800">
           <h3 className="flex items-center gap-2 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
             <IconWallet className="h-4 w-4 text-[#E11D48] dark:text-[#FF8C7A]" />

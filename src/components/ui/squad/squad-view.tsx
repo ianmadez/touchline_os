@@ -21,9 +21,9 @@ type SquadSubTab = "SQUAD" | "SCOUTING" | "TRANSFERS" | "YOUTH";
 
 const SUB_TABS: ReadonlyArray<SubTabOption<SquadSubTab>> = [
   { id: "SQUAD", label: "Squad" },
-  { id: "SCOUTING", label: "Scouting" },
-  { id: "TRANSFERS", label: "Transfers" },
-  { id: "YOUTH", label: "Youth" },
+  { id: "SCOUTING", label: "Scouting", tour: "squad-subtab-SCOUTING" },
+  { id: "TRANSFERS", label: "Transfers", tour: "squad-subtab-TRANSFERS" },
+  { id: "YOUTH", label: "Youth", tour: "squad-subtab-YOUTH" },
 ];
 
 /** The box narrows the squad list, the scouting board and the academy. */

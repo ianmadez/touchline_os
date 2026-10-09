@@ -94,6 +94,7 @@ function settingsSubTabs(unseenTimeline: number): ReadonlyArray<SubTabOption<Set
       id: "TIMELINE",
       label: "Career Timeline",
       badge: unseenTimeline > 0 ? `${unseenTimeline} new` : undefined,
+      tour: "settings-subtab-TIMELINE",
     },
   ];
 }
@@ -391,7 +392,10 @@ export function SettingsView({
             </Field>
           </Section>
 
-          <Section title="Career & Display">
+          <Section
+            tour="settings-career"
+            title="Career & Display"
+          >
             <Field label="Realism level" saving={savingField === "realismLevel"}>
               <Segmented
                 name="Realism level"

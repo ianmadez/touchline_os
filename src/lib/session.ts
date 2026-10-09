@@ -546,6 +546,42 @@ export function markTourDone(careerId: string | null, tab: string): void {
   writeAllTours(all);
 }
 
+const TOUR_REVISION_KEY = "touchline.tour.revision";
+
+/**
+ * Starts every career's tours over when the tour CONTENT has moved on.
+ *
+ * Being remembered per career and per tab is what makes a tour a one-off, which is the point. This is
+ * the one thing allowed to undo that: the caller passes the revision its own copy belongs to, and if
+ * that is not the revision on disk then the recorded tab lists are dropped and everyone sees the tours
+ * again on their next visit - existing careers included.
+ *
+ * It lives here rather than being derived because "the tours changed enough to be worth reshowing" is
+ * an editorial call, not something that can be computed. The revision is supplied by the component
+ * that owns the copy, so the two cannot drift.
+ *
+ * Writes through `writeAllTours` so the diff, the clearing, and the notification to subscribers are
+ * one operation: the tour's own `useSyncExternalStore` subscription re-reads and opens.
+ */
+export function reconcileTourRevision(revision: string): void {
+  if (typeof window === "undefined") return;
+  let stored: string | null = null;
+  try {
+    stored = window.localStorage.getItem(TOUR_REVISION_KEY);
+  } catch {
+    // Storage is unavailable, so the tour cannot be remembered and will show again anyway. Treating
+    // that as "already current" would be the wrong direction: doing nothing is already the safe answer.
+    return;
+  }
+  if (stored === revision) return;
+  writeAllTours({});
+  try {
+    window.localStorage.setItem(TOUR_REVISION_KEY, revision);
+  } catch {
+    /* Storage went away mid-call. The tours are cleared, which is the outcome we wanted. */
+  }
+}
+
 /** Resolves a stored preference into the concrete theme currently in effect. */
 export function resolveTheme(mode: ThemeMode): "light" | "dark" {
   if (mode !== "system") return mode;

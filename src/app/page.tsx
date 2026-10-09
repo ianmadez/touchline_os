@@ -1219,11 +1219,17 @@ export default function TouchlineApp() {
         One micro tour per primary tab, once per career. Held here rather than inside each screen so
         the nav tabs can be part of their own tour, and so a tour never has to know which screen
         rendered it.
+
+        Held back while the entry splash is up. The splash is not a tab - it covers the whole app and
+        sits at z-60, while the tour's overlay is at z-100 - so without this the tour would dim the
+        START TRACKING YOUR SAVE menu and introduce the dashboard before the manager had chosen to step
+        inside. `!splashVisible` rather than `hasEntered` so the one condition that matters is the one
+        being read.
       */}
       <SpotlightTour
         careerId={careerId}
         tab={displayedTab}
-        enabled={isOnboardingComplete && !isRestoring}
+        enabled={isOnboardingComplete && !isRestoring && !splashVisible}
       />
 
       {/*

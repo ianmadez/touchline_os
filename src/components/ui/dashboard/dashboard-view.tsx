@@ -184,7 +184,7 @@ export function DashboardView({
   return (
     <div className="space-y-6">
       {/* Hero Operational Banner */}
-      <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl flex flex-wrap items-center justify-between gap-4">
+      <div data-tour="dashboard-welcome" className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-sub uppercase tracking-wider text-[#E11D48] dark:text-[#FF8C7A] font-bold mb-1">
             <span>Season {season}</span>

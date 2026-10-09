@@ -293,7 +293,7 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
       <div className="space-y-5">
         {/* ---- Recommendation strategy -------------------------------------------------- */}
-        <section>
+        <section data-tour="scout-strategies">
           <h3 className="mb-2 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Recommendation strategy
           </h3>
@@ -465,7 +465,7 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
         </section>
 
         {/* ---- Results ------------------------------------------------------------------ */}
-        <section className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
+        <section data-tour="scout-results" className="rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
           <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
             <h2 className="flex items-center gap-2 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
               <IconSearch className="h-4 w-4 text-[#E11D48] dark:text-[#FF8C7A]" />
@@ -640,7 +640,7 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
       </div>
 
       {/* ---- Dossier ------------------------------------------------------------------ */}
-      <aside className="lg:sticky lg:top-24 lg:h-fit">
+      <aside data-tour="scout-dossier" className="lg:sticky lg:top-24 lg:h-fit">
         <DossierPanel dossier={dossier} savingFoot={savingFoot} onSetFoot={(foot) => void setFoot(foot)} />
       </aside>
     </div>

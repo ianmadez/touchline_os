@@ -14,6 +14,8 @@ export interface SubTabOption<T extends string> {
   label: string;
   /** Small right-hand count, e.g. how many entries the tab holds. Omitted when it adds nothing. */
   badge?: string;
+  /** Optional `data-tour` anchor on this button, so the onboarding tour can point at one tab. */
+  tour?: string;
 }
 
 interface SubTabsProps<T extends string> {
@@ -49,6 +51,8 @@ export function SubTabs<T extends string>({
               type="button"
               role="tab"
               aria-selected={isActive}
+              data-tour={tab.tour}
+              data-subtab={tab.id}
               onClick={() => onChange(tab.id)}
               className={`flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 font-sub text-xs font-bold uppercase tracking-wider transition-all ${
                 isActive
