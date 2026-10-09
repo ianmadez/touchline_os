@@ -23,6 +23,8 @@ interface SubTabsProps<T extends string> {
   /** Right-aligned slot for the tab's primary action, keeping it on the strip's baseline. */
   action?: React.ReactNode;
   className?: string;
+  /** Optional `data-tour` anchor, so the onboarding tour can point at this strip. */
+  tour?: string;
 }
 
 export function SubTabs<T extends string>({
@@ -31,9 +33,10 @@ export function SubTabs<T extends string>({
   onChange,
   action,
   className = "",
+  tour,
 }: SubTabsProps<T>) {
   return (
-    <div className={`flex flex-wrap items-center justify-between gap-3 ${className}`}>
+    <div data-tour={tour} className={`flex flex-wrap items-center justify-between gap-3 ${className}`}>
       <div
         role="tablist"
         className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 dark:border-slate-800 dark:bg-slate-950"

@@ -108,14 +108,20 @@ function formatBytes(bytes: number | null): string {
 function Section({
   title,
   description,
+  tour,
   children,
 }: {
   title: string;
   description?: string;
+  /** Optional `data-tour` anchor, so the onboarding tour can point at this card. */
+  tour?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xl">
+    <section
+      data-tour={tour}
+      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xl"
+    >
       <h3 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-800 pb-3">
         {title}
       </h3>
@@ -309,7 +315,7 @@ export function SettingsView({
         </p>
       </div>
 
-      <SubTabs tabs={subTabs} active={subTab} onChange={setSubTab} />
+      <SubTabs tabs={subTabs} tour="settings-subtabs" active={subTab} onChange={setSubTab} />
 
       {settingsError && (
         <p className="rounded-xl border border-rose-300 dark:border-rose-500/50 bg-rose-50 dark:bg-rose-500/10 px-4 py-3 font-sub text-xs text-rose-700 dark:text-rose-300">
@@ -324,6 +330,7 @@ export function SettingsView({
       ) : (
         <>
           <Section
+            tour="settings-appearance"
             title="Appearance"
             description="System follows your operating system until you pick a theme yourself."
           >
@@ -462,6 +469,7 @@ export function SettingsView({
           </Section>
 
           <Section
+            tour="settings-data"
             title="Data Management"
             description="What is actually stored on disk, and the tools to take a copy or clear it."
           >

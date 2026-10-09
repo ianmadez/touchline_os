@@ -794,7 +794,7 @@ export function DebriefView({
           </div>
 
           {/* Opponent & Competition Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div data-tour="debrief-meta" className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div className="sm:col-span-2">
               <label
                 htmlFor="debrief-opponent"
@@ -1275,7 +1275,7 @@ export function DebriefView({
               </p>
             </div>
 
-                <div>
+                <div data-tour="debrief-notes">
                   <label
                     className="block font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5"
                     title="(Optional) Something you noticed that went wrong, so you can check it against the next match."
@@ -1318,7 +1318,7 @@ export function DebriefView({
         </form>
 
         {/* Right Column: Historical Match Debriefs */}
-        <div className="h-fit bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
+        <div data-tour="debrief-history" className="h-fit bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
           <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-800 pb-3">
             Your debriefs ({pastDebriefs.length})
           </h2>

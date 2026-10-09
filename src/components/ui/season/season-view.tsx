@@ -142,7 +142,7 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
           </h1>
         </div>
 
-        <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 dark:border-slate-800 dark:bg-slate-950">
+        <div data-tour="season-subtabs" className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 dark:border-slate-800 dark:bg-slate-950">
           {SUB_TABS.map((tab) => (
             <button
               key={tab}
@@ -234,7 +234,7 @@ function SeasonHistoryTable({
   }
 
   return (
-    <div className="space-y-4 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90 dark:shadow-md dark:shadow-slate-950/50">
+    <div data-tour="season-history" className="space-y-4 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90 dark:shadow-md dark:shadow-slate-950/50">
       <div className="flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
         <div>
           <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">

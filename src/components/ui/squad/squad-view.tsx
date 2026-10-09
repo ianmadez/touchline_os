@@ -64,13 +64,14 @@ export function SquadView({
     <div className="space-y-6">
       <SubTabs
         tabs={SUB_TABS}
+        tour="squad-subtabs"
         active={subTab}
         onChange={setSubTab}
         action={
           // No box on the transfers desk: nothing there is a list of players to filter, so the
           // field could be typed into and would never change a thing on screen.
           subTab === "TRANSFERS" ? undefined : (
-            <label className="relative w-full sm:w-72">
+            <label data-tour="squad-search" className="relative w-full sm:w-72">
               <span className="sr-only">Search</span>
               <input
                 type="text"

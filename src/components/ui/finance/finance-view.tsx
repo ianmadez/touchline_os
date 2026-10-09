@@ -132,13 +132,15 @@ export function FinanceView({ careerId }: { careerId: string | null }) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <Header report={report} />
+      <div data-tour="finance-summary">
+        <Header report={report} />
+      </div>
 
       {error && <ErrorBanner message={error} />}
 
       {report.wageTurnoverAdvisory && <AdvisoryCallout advisory={report.wageTurnoverAdvisory} />}
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section data-tour="finance-budgets" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <BudgetCard
           label="Transfer budget"
           value={report.transferBudget}

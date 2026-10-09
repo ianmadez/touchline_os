@@ -218,7 +218,7 @@ export function DashboardView({
 
       {/* Season Summary & Quick Navigation Banner */}
       {seasonState && careerId && (
-        <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 backdrop-blur-xl shadow-xl flex flex-wrap items-center justify-between gap-4">
+        <div data-tour="dashboard-season" className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 backdrop-blur-xl shadow-xl flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-1 min-w-0">
             <div className="flex items-center gap-2 text-[10px] font-sub uppercase font-bold text-[#E11D48] dark:text-[#FF8C7A] tracking-wider">
               <span>Season {seasonState.outlook?.seasonNumber ?? season} Objective</span>
@@ -419,7 +419,7 @@ export function DashboardView({
           )}
 
           {/* Operational Squad Intelligence */}
-          <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
+          <div data-tour="dashboard-squad-report" className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
             <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center justify-between">
               <span>Squad Report</span>
               <span className="text-xs font-sub font-normal text-slate-500 dark:text-slate-400">Live from your save</span>
@@ -509,7 +509,7 @@ export function DashboardView({
         </div>
 
         {/* Right Column: Activity Spine */}
-        <div className="h-fit bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
+        <div data-tour="dashboard-activity" className="h-fit bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
               Recent Activity

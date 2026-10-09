@@ -178,7 +178,7 @@ export function Pitch2D({
       {/* 2D Pitch Container */}
       <div className="lg:col-span-8 bg-white/85 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-xl p-4 backdrop-blur-md relative overflow-hidden transition-colors">
         {/* Formation Library - the manager may keep any number of saved formations. */}
-        <div className="flex flex-wrap items-center gap-2 mb-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+        <div data-tour="tactics-formations" className="flex flex-wrap items-center gap-2 mb-3 pb-3 border-b border-slate-200 dark:border-slate-800">
           {formations.map((formation) => {
             const isActive = formation.label === activeLabel;
             return (
@@ -276,7 +276,7 @@ export function Pitch2D({
         </div>
 
         {/* Shape picker, scoped to the formation being viewed. */}
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-200 dark:border-slate-800">
+        <div data-tour="tactics-shape" className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-200 dark:border-slate-800">
           <div>
             <span className="font-sub text-xs uppercase text-slate-500 dark:text-slate-400 block tracking-wider">
               Active Tactical Shape
