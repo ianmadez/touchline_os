@@ -6,6 +6,7 @@ import type {
   MatchPoints,
   TargetBlock,
 } from "@/lib/services/target-block-service";
+import type { LeagueTeamSummary } from "@/lib/services/career-service";
 import {
   IconAlert,
   IconCalendar,
@@ -65,6 +66,11 @@ const MATCHES_PER_BLOCK = 5;
 
 interface MatchDraft {
   opponent: string;
+  /**
+   * True once the manager picks "Another club" and is typing a name. Without it an empty box would
+   * be indistinguishable from "has not chosen yet", and the picker could not stay open.
+   */
+  opponentOther?: boolean;
   opponentPosition: string;
   /** Which preset ask the manager set for this match. */
   target: string;
@@ -91,7 +97,15 @@ interface BlockDraft {
 }
 
 function emptyMatch(): MatchDraft {
-  return { opponent: "", opponentPosition: "", target: "3-3", ourGoals: "", theirGoals: "", note: "" };
+  return {
+    opponent: "",
+    opponentOther: false,
+    opponentPosition: "",
+    target: "3-3",
+    ourGoals: "",
+    theirGoals: "",
+    note: "",
+  };
 }
 
 function newDraft(seasonNumber: number | null, blockIndex: number): BlockDraft {
@@ -122,6 +136,9 @@ function draftFromBlock(block: TargetBlock): BlockDraft {
       const match = block.matches[index] ?? emptyMatch();
       return {
         opponent: match.opponent ?? "",
+        // A loaded block cannot know the league list, so "other" is decided at render time from
+        // whether the stored name is one of the clubs on offer.
+        opponentOther: false,
         opponentPosition: match.opponentPosition === null ? "" : String(match.opponentPosition),
         target: `${match.targetPoints}-${match.targetMaxPoints}`,
         ourGoals: match.goalsFor === null ? "" : String(match.goalsFor),
@@ -183,9 +200,12 @@ function optionalNumber(value: string): number | null {
 export function GroupDebriefPanel({
   careerId,
   seasonNumber,
+  leagueTeams,
 }: {
   careerId: string;
   seasonNumber: number | null;
+  /** The clubs in the manager's own division, so an opponent is picked rather than typed. */
+  leagueTeams?: LeagueTeamSummary[];
 }) {
   const [rows, setRows] = useState<BlockRow[]>([]);
   const [draft, setDraft] = useState<BlockDraft | null>(null);
@@ -336,6 +356,7 @@ export function GroupDebriefPanel({
         <BlockEditor
           draft={draft}
           saving={saving}
+          leagueTeams={leagueTeams}
           onChange={setDraft}
           onPatchMatch={patchMatch}
           onCancel={() => setDraft(null)}
@@ -595,6 +616,7 @@ function BlockDocument({
 function BlockEditor({
   draft,
   saving,
+  leagueTeams,
   onChange,
   onPatchMatch,
   onCancel,
@@ -602,11 +624,16 @@ function BlockEditor({
 }: {
   draft: BlockDraft;
   saving: boolean;
+  leagueTeams?: LeagueTeamSummary[];
   onChange: React.Dispatch<React.SetStateAction<BlockDraft | null>>;
   onPatchMatch: (index: number, patch: Partial<MatchDraft>) => void;
   onCancel: () => void;
   onSave: () => void;
 }) {
+  // Only our own club is filtered out, exactly as the single debrief does, so both pickers offer
+  // the same list in the same order.
+  const selectableTeams = (leagueTeams ?? []).filter((team) => !team.isOwnClub);
+
   const set = <K extends keyof BlockDraft>(key: K, value: BlockDraft[K]) =>
     onChange((current) => (current ? { ...current, [key]: value } : current));
 
@@ -670,13 +697,55 @@ function BlockEditor({
                     <span className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                       Opponent
                     </span>
-                    <input
-                      type="text"
-                      value={match.opponent}
-                      onChange={(event) => onPatchMatch(index, { opponent: event.target.value })}
-                      placeholder="Who you played"
-                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-[#E11D48] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                    />
+                    {(() => {
+                      // A stored name that is not one of the clubs on offer (a cup or friendly
+                      // typed earlier) reads as "other", so the free text box reappears with it.
+                      const listed = selectableTeams.some((team) => team.name === match.opponent);
+                      const value =
+                        match.opponentOther === true || (match.opponent !== "" && !listed)
+                          ? "other"
+                          : match.opponent;
+                      return (
+                        <>
+                          <select
+                            value={value}
+                            onChange={(event) =>
+                              onPatchMatch(
+                                index,
+                                event.target.value === "other"
+                                  ? { opponentOther: true, opponent: "" }
+                                  : { opponentOther: false, opponent: event.target.value }
+                              )
+                            }
+                            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-[#E11D48] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 cursor-pointer"
+                          >
+                            <option value="">
+                              {selectableTeams.length > 0
+                                ? "Choose a club from your league"
+                                : "Sync a save to load your league"}
+                            </option>
+                            {selectableTeams.map((team) => (
+                              <option key={team.teamId} value={team.name}>
+                                {team.name}
+                              </option>
+                            ))}
+                            <option value="other">Another club (cup or friendly)</option>
+                          </select>
+                          {value === "other" && (
+                            <input
+                              type="text"
+                              autoFocus
+                              placeholder="Club name"
+                              value={match.opponent}
+                              onChange={(event) =>
+                                onPatchMatch(index, { opponent: event.target.value })
+                              }
+                              className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:border-[#E11D48] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                            />
+                          )}
+                        </>
+                      );
+                    })()}
                   </label>
 
                   <label className="w-24">

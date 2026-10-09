@@ -392,7 +392,7 @@ export function Pitch2D({
       </div>
 
       {/* Squad Reserves / Quick Slot Assigner */}
-      <div className="lg:col-span-4 bg-white/85 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-xl p-4 backdrop-blur-md transition-colors">
+      <div data-tour="tactics-bench" className="lg:col-span-4 bg-white/85 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 rounded-xl p-4 backdrop-blur-md transition-colors">
         <div className="mb-3">
           <h4 className="font-heading text-sm text-slate-900 dark:text-slate-200 uppercase tracking-wider">
             {selectedSlotIndex !== null

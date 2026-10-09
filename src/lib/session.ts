@@ -31,9 +31,9 @@ export const APP_TABS: readonly AppTab[] = [
   "PORTAL",
   "DASHBOARD",
   "SEASON",
+  "DEBRIEF",
   "SQUAD",
   "TACTICS",
-  "DEBRIEF",
   "FINANCE",
   "SETTINGS",
   "TIMELINE",
@@ -389,6 +389,161 @@ export function countUnseen(
     if (Number.isFinite(parsed) && parsed > since) count += 1;
   }
   return count;
+}
+
+// ---------------------------------------------------------------------------
+// Draft debriefs.
+//
+// A half finished debrief lives here and nowhere else. It is a working note, not a record, so it must
+// never reach `career_events` until the manager submits it. Keyed per career and per surface ("MATCH"
+// for the single debrief, the block id for a group debrief) so two drafts cannot overwrite each
+// other. Drafts are transient, so the store is capped rather than allowed to grow forever.
+// ---------------------------------------------------------------------------
+
+const DRAFT_STORAGE_KEY = "touchline.debrief.draft.v1";
+/** Newest drafts kept per career. Anything older is dropped on the next write. */
+const MAX_DRAFTS_PER_CAREER = 12;
+
+interface StoredDraft {
+  /** When this draft was last touched, so the oldest can be trimmed. */
+  at: string;
+  data: unknown;
+}
+
+type DraftState = Record<string, Record<string, StoredDraft>>;
+
+function readAllDrafts(): DraftState {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as DraftState) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeAllDrafts(all: DraftState): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(all));
+  } catch {
+    /* storage unavailable - the draft simply will not persist */
+  }
+}
+
+/** One surface's saved draft, or null when there is nothing worth restoring. */
+export function readDebriefDraft<T>(careerId: string | null, surface: string): T | null {
+  if (!careerId) return null;
+  const entry = readAllDrafts()[careerId]?.[surface];
+  return entry === undefined ? null : (entry.data as T);
+}
+
+/** Saves a draft. Never writes to the database. */
+export function writeDebriefDraft(careerId: string | null, surface: string, data: unknown): void {
+  if (!careerId) return;
+  const all = readAllDrafts();
+  const forCareer: Record<string, StoredDraft> = { ...(all[careerId] ?? {}) };
+  forCareer[surface] = { at: new Date().toISOString(), data };
+  const newest = Object.entries(forCareer)
+    .sort((a, b) => Date.parse(b[1].at) - Date.parse(a[1].at))
+    .slice(0, MAX_DRAFTS_PER_CAREER);
+  all[careerId] = Object.fromEntries(newest);
+  writeAllDrafts(all);
+}
+
+/** Drops a surface's draft. Called on submit, so a finished debrief leaves nothing behind. */
+export function clearDebriefDraft(careerId: string | null, surface: string): void {
+  if (!careerId) return;
+  const all = readAllDrafts();
+  const forCareer = all[careerId];
+  if (forCareer === undefined || forCareer[surface] === undefined) return;
+  delete forCareer[surface];
+  all[careerId] = forCareer;
+  writeAllDrafts(all);
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding micro tours.
+//
+// A tour is shown once per tab per career, so completion is stored per tab id rather than as a
+// single flag. localStorage is right for this and the setup wizard is deliberately not involved: the
+// wizard gate lives in the database and answers a different question, whether a career has been set
+// up at all.
+// ---------------------------------------------------------------------------
+
+const TOUR_STORAGE_KEY = "touchline.tour.v1";
+
+type TourState = Record<string, string[]>;
+
+function readAllTours(): TourState {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(TOUR_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as TourState) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeAllTours(all: TourState): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TOUR_STORAGE_KEY, JSON.stringify(all));
+    for (const listener of [...tourListeners]) listener();
+  } catch {
+    /* storage unavailable - the tour simply shows again next time */
+  }
+}
+
+let tourListeners: Array<() => void> = [];
+
+/** Lets the tour component react the moment a tour is finished. */
+export function subscribeTour(listener: () => void): () => void {
+  tourListeners.push(listener);
+  return () => {
+    tourListeners = tourListeners.filter((entry) => entry !== listener);
+  };
+}
+
+/** The raw stored string: a primitive, so `useSyncExternalStore` can compare snapshots safely. */
+export function getTourSnapshot(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(TOUR_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** A stable server snapshot, so the overlay never renders during prerender. */
+export function getTourServerSnapshot(): null {
+  return null;
+}
+
+/** The tab ids this career has already toured. */
+export function toursDoneFor(raw: string | null, careerId: string | null): string[] {
+  if (!raw || !careerId) return [];
+  try {
+    const parsed = JSON.parse(raw) as TourState | null;
+    const entry = parsed?.[careerId];
+    return Array.isArray(entry) ? entry.filter((value): value is string => typeof value === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Records that a tab's tour has been seen. Skip counts, so it is never offered twice. */
+export function markTourDone(careerId: string | null, tab: string): void {
+  if (!careerId) return;
+  const all = readAllTours();
+  const done = new Set(all[careerId] ?? []);
+  done.add(tab);
+  all[careerId] = [...done];
+  writeAllTours(all);
 }
 
 /** Resolves a stored preference into the concrete theme currently in effect. */

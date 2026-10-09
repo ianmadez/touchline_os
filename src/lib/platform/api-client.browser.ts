@@ -10,7 +10,7 @@
  */
 import { exportCareerToFile, importCareerFromFile } from "../operations/career-transfer";
 import { deleteCareer, patchCareer, readCareer } from "../operations/career";
-import { deleteDebrief, logMatchDebrief } from "../operations/debrief";
+import { deleteDebrief, logMatchDebrief, updateDebrief } from "../operations/debrief";
 import { readDiagnostics } from "../operations/diagnostics";
 import { readFinanceReport, saveFinanceInputs } from "../operations/finance";
 import { deleteObjective, readObjectives, saveObjective } from "../operations/objectives";
@@ -130,6 +130,8 @@ async function dispatch(call: Call): Promise<OperationResult<unknown>> {
 
     case "POST /api/debrief":
       return logMatchDebrief(raw ?? "");
+    case "PATCH /api/debrief":
+      return updateDebrief(params.get("id"), raw ?? "");
     case "DELETE /api/debrief":
       return deleteDebrief(params.get("id"), params.get("careerId"));
 

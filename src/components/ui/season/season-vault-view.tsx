@@ -635,6 +635,15 @@ function NotObservedPanel() {
 }
 
 /** The manager's own record of a season - the part the save never holds. */
+/**
+ * A list only earns a scroll container once there is enough in it to scroll: one entry should not be
+ * boxed behind its own scrollbar. Matches the trait used by the dashboard and finance lists.
+ */
+const scrollWhenMultiple = (count: number): string =>
+  count >= 2
+    ? "max-h-[280px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700"
+    : "";
+
 function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
   const contributors = digest.scorers.filter((s) => s.goals > 0 || s.assists > 0);
   const groupedWeaknesses = groupNotes(digest.weaknesses);
@@ -753,7 +762,7 @@ function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
           <div className="text-[11px] font-sub font-bold uppercase text-slate-400">
             In your words
           </div>
-          <ul className="space-y-2">
+          <ul className={`space-y-2 ${scrollWhenMultiple(digest.reflections.length)}`}>
             {digest.reflections.map((reflection, index) => (
               <li
                 key={`${reflection.matchDate ?? "undated"}-${index}`}
@@ -776,7 +785,7 @@ function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
           <div className="text-[11px] font-sub font-bold uppercase text-slate-400">
             Questions you answered
           </div>
-          <ul className="space-y-2">
+          <ul className={`space-y-2 ${scrollWhenMultiple(digest.prompts.length)}`}>
             {digest.prompts.map((prompt, index) => (
               <li
                 key={`${prompt.question}-${index}`}

@@ -272,11 +272,11 @@ export function DashboardView({
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" data-tour="dashboard-summary">
         {/* Left Column: Alerts & Operational Focus */}
         <div className="lg:col-span-2 space-y-6">
           {/* Dynamic Storylines Feed: What Matters Right Now */}
-          <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
+          <div data-tour="dashboard-storylines" className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <span>What Matters Right Now</span>

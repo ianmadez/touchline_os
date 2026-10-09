@@ -110,6 +110,31 @@ export class EventService {
   }
 
   /**
+   * Rewrites one manager-logged debrief in place.
+   *
+   * Same narrow guard as the delete: only a `MATCH_DEBRIEF` that is USER-sourced can be rewritten, so
+   * a stale or crafted id cannot edit a career transition. The id is left alone because every reader
+   * keys on it, and the timestamp is left alone because it records when the debrief was WRITTEN while
+   * `matchDate` inside the payload records when the match was played.
+   */
+  async updateUserDebrief(
+    id: string,
+    payloadJson: string
+  ): Promise<{ id: string; careerId: string }[]> {
+    return db
+      .update(careerEvents)
+      .set({ payloadJson })
+      .where(
+        and(
+          eq(careerEvents.id, id),
+          eq(careerEvents.eventType, "MATCH_DEBRIEF"),
+          eq(careerEvents.source, "USER")
+        )
+      )
+      .returning({ id: careerEvents.id, careerId: careerEvents.careerId });
+  }
+
+  /**
    * Removes one manager-logged debrief.
    *
    * Deliberately narrow: only a row that is BOTH a `MATCH_DEBRIEF` and USER-sourced can be removed,

@@ -64,6 +64,93 @@ function asMatchDate(value: unknown): string | null {
   return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null;
 }
 
+/** The manager-logged squad detail, normalised once so an edit cannot drift from a first save. */
+interface NormalisedDebrief {
+  standoutPlayerIds: string[];
+  standoutPlayerNames: string[];
+  contributions: MatchContribution[];
+  dynamicPrompts: Array<{ id: string; question: string; answer: string }>;
+}
+
+/**
+ * Normalises the manager-logged squad detail.
+ *
+ * Rows with neither a goal nor an assist are dropped rather than stored as empty noise, negative and
+ * hostile numbers are clamped, and an unanswered prompt is dropped rather than stored blank, which is
+ * how the season digest reads them.
+ */
+function normaliseDebrief(body: MatchDebriefPayload): NormalisedDebrief {
+  const standoutPlayerIds = (Array.isArray(body.standoutPlayerIds) ? body.standoutPlayerIds : [])
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  const standoutPlayerNames = (Array.isArray(body.standoutPlayerNames) ? body.standoutPlayerNames : [])
+    .filter((name): name is string => typeof name === "string" && name.length > 0);
+  const contributions: MatchContribution[] = (
+    Array.isArray(body.contributions) ? body.contributions : []
+  )
+    .filter((entry) => entry && typeof entry.playerId === "string" && entry.playerId.length > 0)
+    .map((entry) => ({
+      playerId: entry.playerId,
+      playerName: entry.playerName || "Unknown player",
+      goals: Math.max(0, Math.floor(Number(entry.goals) || 0)),
+      assists: Math.max(0, Math.floor(Number(entry.assists) || 0)),
+    }))
+    .filter((entry) => entry.goals > 0 || entry.assists > 0);
+  const dynamicPrompts = (Array.isArray(body.dynamicPrompts) ? body.dynamicPrompts : [])
+    .filter(
+      (prompt): prompt is { id?: string; question: string; answer: string } =>
+        Boolean(prompt) &&
+        typeof prompt.question === "string" &&
+        typeof prompt.answer === "string"
+    )
+    .map((prompt) => ({
+      id: typeof prompt.id === "string" ? prompt.id : "",
+      question: prompt.question.trim(),
+      answer: prompt.answer.trim(),
+    }))
+    .filter((prompt) => prompt.question.length > 0 && prompt.answer.length > 0);
+  return { standoutPlayerIds, standoutPlayerNames, contributions, dynamicPrompts };
+}
+
+/**
+ * The stored payload.
+ *
+ * Shared between logging and editing on purpose: an edit that assembled its own payload could
+ * quietly write a different shape from a first save, which every reader would then have to tolerate.
+ */
+function composeDebriefPayload(body: MatchDebriefPayload, normalised: NormalisedDebrief): string {
+  const goalsLogged = normalised.contributions.reduce((sum, entry) => sum + entry.goals, 0);
+  return JSON.stringify({
+    opponent: body.opponent,
+    scoreline: `${body.homeScore} - ${body.awayScore}`,
+    homeScore: body.homeScore,
+    awayScore: body.awayScore,
+    venue: body.venue,
+    competition: body.competition || "League",
+    tacticalAdherence: body.tacticalAdherence || 3,
+    standoutPlayerIds: normalised.standoutPlayerIds,
+    standoutPlayerNames: normalised.standoutPlayerNames,
+    contributions: normalised.contributions,
+    // Surfaced so the debrief UI (and later analytics) can show whether the manager accounted for
+    // every goal, without pretending the two figures came from the same source.
+    goalsLogged,
+    unloggedGoals: Math.max(0, body.homeScore - goalsLogged),
+    weaknessIdentified: body.weaknessIdentified || "",
+    managerReflection: body.managerReflection || "",
+    dynamicPrompts: normalised.dynamicPrompts,
+    result: body.homeScore > body.awayScore ? "WIN" : body.homeScore < body.awayScore ? "LOSS" : "DRAW",
+    matchDate: asMatchDate(body.matchDate),
+    opponentTeamId: asInt(body.opponentTeamId),
+    // Grouped rather than flattened so a reader can see at a glance that these four came in
+    // together, from one observation of the league table, and are not save data.
+    leagueSnapshot: {
+      opponentPosition: asInt(body.leagueSnapshot?.opponentPosition),
+      opponentPoints: asInt(body.leagueSnapshot?.opponentPoints),
+      ownPosition: asInt(body.leagueSnapshot?.ownPosition),
+      ownPoints: asInt(body.leagueSnapshot?.ownPoints),
+    },
+  });
+}
+
 /**
  * Writes a structured MATCH_DEBRIEF event into career_events.
  *
@@ -91,73 +178,7 @@ export async function logMatchDebrief(rawBody: string): Promise<OperationResult<
     }
 
     const eventId = `evt_debrief_${crypto.randomUUID()}`;
-
-    // Normalise the manager-logged squad detail. Rows with neither a goal nor an assist are
-    // dropped rather than stored as empty noise, and negative/hostile numbers are clamped.
-    const standoutPlayerIds = (Array.isArray(body.standoutPlayerIds) ? body.standoutPlayerIds : [])
-      .filter((id): id is string => typeof id === "string" && id.length > 0);
-    const standoutPlayerNames = (Array.isArray(body.standoutPlayerNames) ? body.standoutPlayerNames : [])
-      .filter((name): name is string => typeof name === "string" && name.length > 0);
-    const contributions: MatchContribution[] = (
-      Array.isArray(body.contributions) ? body.contributions : []
-    )
-      .filter((entry) => entry && typeof entry.playerId === "string" && entry.playerId.length > 0)
-      .map((entry) => ({
-        playerId: entry.playerId,
-        playerName: entry.playerName || "Unknown player",
-        goals: Math.max(0, Math.floor(Number(entry.goals) || 0)),
-        assists: Math.max(0, Math.floor(Number(entry.assists) || 0)),
-      }))
-      .filter((entry) => entry.goals > 0 || entry.assists > 0);
-
-    // Answers to the anomaly prompts. An unanswered prompt is dropped rather than stored blank,
-    // matching how the season digest reads them (it only shows entries with a real answer).
-    const dynamicPrompts = (Array.isArray(body.dynamicPrompts) ? body.dynamicPrompts : [])
-      .filter(
-        (prompt): prompt is { id?: string; question: string; answer: string } =>
-          Boolean(prompt) &&
-          typeof prompt.question === "string" &&
-          typeof prompt.answer === "string"
-      )
-      .map((prompt) => ({
-        id: typeof prompt.id === "string" ? prompt.id : "",
-        question: prompt.question.trim(),
-        answer: prompt.answer.trim(),
-      }))
-      .filter((prompt) => prompt.question.length > 0 && prompt.answer.length > 0);
-
-    // Surfaced so the debrief UI (and later analytics) can show whether the manager accounted for
-    // every goal, without pretending the two figures came from the same source.
-    const goalsLogged = contributions.reduce((sum, entry) => sum + entry.goals, 0);
-
-    const payloadJson = JSON.stringify({
-      opponent: body.opponent,
-      scoreline: `${body.homeScore} - ${body.awayScore}`,
-      homeScore: body.homeScore,
-      awayScore: body.awayScore,
-      venue: body.venue,
-      competition: body.competition || "League",
-      tacticalAdherence: body.tacticalAdherence || 3,
-      standoutPlayerIds,
-      standoutPlayerNames,
-      contributions,
-      goalsLogged,
-      unloggedGoals: Math.max(0, body.homeScore - goalsLogged),
-      weaknessIdentified: body.weaknessIdentified || "",
-      managerReflection: body.managerReflection || "",
-      dynamicPrompts,
-      result: body.homeScore > body.awayScore ? "WIN" : body.homeScore < body.awayScore ? "LOSS" : "DRAW",
-      matchDate: asMatchDate(body.matchDate),
-      opponentTeamId: asInt(body.opponentTeamId),
-      // Grouped rather than flattened so a reader can see at a glance that these four came in
-      // together, from one observation of the league table, and are not save data.
-      leagueSnapshot: {
-        opponentPosition: asInt(body.leagueSnapshot?.opponentPosition),
-        opponentPoints: asInt(body.leagueSnapshot?.opponentPoints),
-        ownPosition: asInt(body.leagueSnapshot?.ownPosition),
-        ownPoints: asInt(body.leagueSnapshot?.ownPoints),
-      },
-    });
+    const payloadJson = composeDebriefPayload(body, normaliseDebrief(body));
 
     await new EventService().appendEvent({
       id: eventId,
@@ -184,6 +205,60 @@ export async function logMatchDebrief(rawBody: string): Promise<OperationResult<
   } catch (error) {
     console.error("[api/debrief] Failed to log match debrief:", error);
     return failed(500, (error as Error).message ?? "Failed to save debrief.");
+  }
+}
+
+/**
+ * Edits one match debrief in place.
+ *
+ * In place rather than delete and re-create: the event id is what the debrief list, the delete
+ * button and the season digest all key on, so a replacement row would make an edit read as a new
+ * match and would move the debrief in the timeline. Only the payload is rewritten, so the record's
+ * own timestamp still says when it was first written.
+ */
+export async function updateDebrief(
+  id: string | null,
+  rawBody: string
+): Promise<OperationResult<unknown>> {
+  if (!id) return at(400, { success: false, error: "Missing debrief id." });
+
+  let body: MatchDebriefPayload;
+  try {
+    body = JSON.parse(rawBody) as MatchDebriefPayload;
+  } catch {
+    return at(400, { success: false, error: "Request body must be valid JSON." });
+  }
+
+  try {
+    if (!body.careerId || !body.opponent || typeof body.homeScore !== "number" || typeof body.awayScore !== "number") {
+      return at(400, { success: false, error: "Missing required debrief fields (careerId, opponent, scores)." });
+    }
+
+    const updated = await new EventService().updateUserDebrief(
+      id,
+      composeDebriefPayload(body, normaliseDebrief(body))
+    );
+
+    if (updated.length === 0) {
+      return at(404, { success: false, error: "That debrief no longer exists." });
+    }
+
+    // Re-hydrate so the caller gets the same shape it gets from every other write, rather than
+    // having to guess what the timeline looks like now.
+    const seasonService = new SeasonService();
+    await seasonService.recordMatchdayProgress(body.careerId);
+
+    const careerService = new CareerService();
+    const updatedPayload = await careerService.hydrate(body.careerId);
+
+    return ok({
+      success: true,
+      message: "Match debrief updated.",
+      ...updatedPayload,
+    });
+  } catch (error) {
+    console.error("[api/debrief] Failed to update match debrief:", error);
+    return failed(500, (error as Error).message ?? "Failed to update debrief.");
   }
 }
 

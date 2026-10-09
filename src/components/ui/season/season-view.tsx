@@ -163,7 +163,7 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
       {/* Body — the only scroll region on this screen */}
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         {activeSubTab === "OUTLOOK" && (
-          <div className="space-y-6">
+          <div className="space-y-6" data-tour="season-outlook">
             {seasonState && careerId ? (
               <SeasonPanel careerId={careerId} seasonState={seasonState} onSeasonChange={onSeasonChange} />
             ) : (
@@ -199,12 +199,14 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
         )}
 
         {activeSubTab === "VAULT" && (
-          <SeasonVaultView
-            careerId={careerId}
-            seasons={seasons}
-            selectedSeason={selectedVaultSeason}
-            onSelectSeason={setSelectedVaultSeason}
-          />
+          <div data-tour="season-vault">
+            <SeasonVaultView
+              careerId={careerId}
+              seasons={seasons}
+              selectedSeason={selectedVaultSeason}
+              onSelectSeason={setSelectedVaultSeason}
+            />
+          </div>
         )}
       </div>
     </div>
@@ -226,7 +228,7 @@ function SeasonHistoryTable({
     return (
       <EmptyCard
         title="No completed seasons yet"
-        body="Once a season finishes in-game and you sync, it appears here permanently — nothing in this table is ever rewritten."
+        body="A season appears here once it finishes in-game and you sync. Entries are never rewritten."
       />
     );
   }
@@ -239,9 +241,8 @@ function SeasonHistoryTable({
             Managerial Record
           </h2>
           <p className="text-xs font-sub text-slate-500 dark:text-slate-400">
-            Every season the save has recorded, in the order it happened. Played, W-D-L and goals are
-            its totals across every competition; points are the save&apos;s own season total, and only
-            the finish is a league placing.
+            Every season the save has recorded, oldest first. Starred columns are save totals across
+            all competitions.
           </p>
         </div>
         <span className="rounded border border-[#E11D48]/30 bg-[#E11D48]/15 px-2.5 py-1 text-xs font-sub font-bold text-[#E11D48] dark:text-[#FF8C7A]">
@@ -308,11 +309,8 @@ function SeasonHistoryTable({
           No competition is ever named here - the app runs against saves from any country, so naming
           "the FA Cup" or "the EFL Trophy" would be wrong for most of them. */}
       <p className="text-[11px] font-sub text-slate-500 dark:text-slate-400">
-        <span className="font-bold">*</span> One combined record per season: every match played, in
-        whichever competitions the club entered. Not every competition awards points, so the points
-        column is the save&apos;s own season total. Only{" "}
-        <span className="font-bold">League finish</span> is a league placing, and it is not derived
-        from the columns beside it.
+        <span className="font-bold">*</span> All-competition save totals. Only{" "}
+        <span className="font-bold">League finish</span> is a league placing.
       </p>
 
       {unreadableDebriefs > 0 && (

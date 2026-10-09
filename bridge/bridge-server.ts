@@ -193,6 +193,62 @@ function toWire(candidate: SaveCandidate): Record<string, unknown> {
   };
 }
 
+/**
+ * The scan the bridge last performed, and when.
+ *
+ * The bridge runs for as long as the game does, so a save written mid-session has to be noticed
+ * without the page asking for it. Two triggers, on purpose:
+ *
+ * - an immediate one: before serving a cached list, the cached candidates are re-stat'd. Statting a
+ *   handful of known files is far cheaper than walking the save tree, and a changed mtime is exactly
+ *   the "the game just wrote a save" signal.
+ * - a fallback one: a full rescan on an interval, so the list still refreshes when nothing asks and
+ *   when a file appears in a folder that was not in the cache at all.
+ */
+let scanCache: { at: number; saves: SaveCandidate[] } | null = null;
+
+/** Fallback rescan interval. Long on purpose: this is a safety net, not a poll loop. */
+export const RESCAN_INTERVAL_MS = 10 * 60 * 1000;
+
+/** True when the cache cannot be trusted: too old, a candidate changed, or one has gone. */
+function cacheIsStale(): boolean {
+  if (scanCache === null) return true;
+  if (Date.now() - scanCache.at >= RESCAN_INTERVAL_MS) return true;
+  for (const candidate of scanCache.saves) {
+    try {
+      const stat = fs.statSync(candidate.filePath);
+      if (stat.mtimeMs !== candidate.lastModified.getTime()) return true;
+      if (stat.size !== candidate.fileSizeBytes) return true;
+    } catch {
+      // A save that vanished is a change too, so the list stops offering it.
+      return true;
+    }
+  }
+  return false;
+}
+
+/** The candidate list, refreshed only when it needs to be. */
+async function currentSaves(force = false): Promise<SaveCandidate[]> {
+  if (!force && !cacheIsStale() && scanCache !== null) return scanCache.saves;
+  const saves = await saveSource.detectSaves();
+  scanCache = { at: Date.now(), saves };
+  return saves;
+}
+
+/**
+ * Starts the fallback rescan. Unref'd so it can never be the reason the process stays alive, which
+ * would leave a bridge running after the launcher's shutdown signal.
+ */
+export function startPeriodicRescan(intervalMs: number = RESCAN_INTERVAL_MS): NodeJS.Timeout {
+  const timer = setInterval(() => {
+    void currentSaves(true).catch(() => {
+      /* A transient read failure must not kill the timer. The next tick tries again. */
+    });
+  }, intervalMs);
+  timer.unref();
+  return timer;
+}
+
 /** Everything behind the pairing code. */
 async function handleAuthorised(
   req: http.IncomingMessage,
@@ -222,13 +278,13 @@ async function handleAuthorised(
 
   try {
     if (pathname === "/saves") {
-      const candidates = await saveSource.detectSaves();
+      const candidates = await currentSaves();
       sendJson(res, 200, { saves: candidates.map(toWire) });
       return;
     }
 
     const id = decodeURIComponent(pathname.slice("/saves/".length));
-    const candidates = await saveSource.detectSaves();
+    const candidates = await currentSaves();
     const candidate = candidates.find((entry) => entry.id === id);
     if (!candidate) {
       sendJson(res, 404, { error: "No save with that id. Ask for the list again." });
@@ -270,7 +326,10 @@ export function createBridgeServer(
     // find out whether a bridge is running BEFORE it has a code to send. It reveals the service's
     // existence and nothing about the save.
     if (url.pathname.replace(/\/+$/, "") === "/status") {
-      sendJson(res, 200, { service: SERVICE, version: VERSION });
+      // The scan time is added, and nothing about the save itself: a page has to be able to tell
+      // whether the bridge is awake and looking, without this route becoming a way to read a career
+      // it has not paired with.
+      sendJson(res, 200, { service: SERVICE, version: VERSION, lastScanAt: scanCache?.at ?? null });
       return;
     }
 
@@ -289,7 +348,7 @@ export async function scanSummary(): Promise<{
   locations: { path: string; exists: boolean }[];
   candidates: number;
 }> {
-  const candidates = await saveSource.detectSaves();
+  const candidates = await currentSaves(true);
   const locations = saveSource.lastScan().map((entry) => ({
     path: entry.path,
     exists: entry.exists,

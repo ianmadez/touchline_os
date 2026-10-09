@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteDebrief, logMatchDebrief } from "@/lib/operations/debrief";
+import { deleteDebrief, logMatchDebrief, updateDebrief } from "@/lib/operations/debrief";
 
 export const runtime = "nodejs";
 
@@ -15,6 +15,16 @@ export type { MatchDebriefPayload } from "@/lib/operations/debrief";
  */
 export async function POST(request: Request) {
   const outcome = await logMatchDebrief(await request.text());
+  return NextResponse.json(outcome.body, { status: outcome.status });
+}
+
+/**
+ * Edits one debrief. The id travels in the query string, the new values in the body, matching the
+ * delete's shape so the two cannot drift.
+ */
+export async function PATCH(request: Request) {
+  const params = new URL(request.url).searchParams;
+  const outcome = await updateDebrief(params.get("id"), await request.text());
   return NextResponse.json(outcome.body, { status: outcome.status });
 }
 

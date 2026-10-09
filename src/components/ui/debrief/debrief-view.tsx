@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { SubTabs } from "@/components/ui/sub-tabs";
 import { GroupDebriefPanel } from "@/components/ui/debrief/group-debrief-panel";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
@@ -8,12 +8,18 @@ import type { ParsedCareerEvent } from "@/lib/services/event-service";
 import type { LeagueTeamSummary } from "@/lib/services/career-service";
 import { resultLabel, venueLabel } from "@/lib/ui/labels";
 import { MatchContribution } from "@/lib/events/types";
+import { POSITION_GROUP_ORDER, positionGroupOf } from "@/lib/tactics/roles";
 import {
   evaluateMatchAnomalies,
   DebriefHistoryPayload,
 } from "@/lib/events/debrief-anomalies";
 
 import { apiFetch } from "@/lib/platform/api-client";
+import {
+  clearDebriefDraft,
+  readDebriefDraft,
+  writeDebriefDraft,
+} from "@/lib/session";
 interface DebriefViewProps {
   careerId: string | null;
   players: EnrichedPlayer[];
@@ -41,6 +47,11 @@ interface DebriefHistory {
   result?: string;
   venue?: string;
   competition?: string;
+  homeScore?: number;
+  awayScore?: number;
+  opponentTeamId?: number | null;
+  tacticalAdherence?: number;
+  standoutPlayerIds?: string[];
   standoutPlayerNames?: string[];
   standoutPlayerName?: string;
   contributions?: MatchContribution[];
@@ -54,6 +65,52 @@ interface DebriefHistory {
     ownPoints?: number | null;
   };
   dynamicPrompts?: Array<{ id: string; question: string; answer: string }>;
+}
+
+/**
+ * Everything the single debrief form holds, so a half finished one survives navigating away.
+ *
+ * The manager's own table position is deliberately saved but NOT counted as draft content: it is
+ * kept between debriefs on purpose, so on its own it must not look like unsaved work.
+ */
+interface DebriefDraft {
+  opponent: string;
+  opponentTeamId: string;
+  ourScoreInput: string;
+  theirScoreInput: string;
+  matchDate: string;
+  venue: "HOME" | "AWAY" | "NEUTRAL";
+  competition: string;
+  tacticalAdherence: number;
+  standoutPlayerIds: string[];
+  standoutSort: "POSITION" | "PICKED";
+  contributions: MatchContribution[];
+  weaknessIdentified: string;
+  managerReflection: string;
+  dynamicAnswers: Record<string, string>;
+  opponentPosition: string;
+  opponentPoints: string;
+  ownPosition: string;
+  ownPoints: string;
+}
+
+/** The single debrief's draft surface. A group debrief keys by block id instead. */
+const MATCH_DRAFT_SURFACE = "MATCH";
+
+/** True when a draft holds something the manager actually entered. */
+function hasDraftContent(draft: DebriefDraft): boolean {
+  return (
+    draft.opponent.trim() !== "" ||
+    draft.ourScoreInput !== "" ||
+    draft.theirScoreInput !== "" ||
+    draft.opponentPosition !== "" ||
+    draft.opponentPoints !== "" ||
+    draft.weaknessIdentified.trim() !== "" ||
+    draft.managerReflection.trim() !== "" ||
+    draft.standoutPlayerIds.length > 0 ||
+    draft.contributions.length > 0 ||
+    Object.values(draft.dynamicAnswers).some((answer) => answer.trim() !== "")
+  );
 }
 
 /** 1 -> "1st". Used only for the opponent list, where a bare number reads as a count. */
@@ -206,6 +263,12 @@ export function DebriefView({
   const [competition, setCompetition] = useState("League Match");
   const [tacticalAdherence, setTacticalAdherence] = useState<number>(4);
   const [standoutPlayerIds, setStandoutPlayerIds] = useState<string[]>([]);
+  /**
+   * Chip order for the standout picker, and the order the names are stored in. Position order is
+   * the default so the list reads back to front like the pitch does; "picked" lets the manager
+   * impose their own order instead.
+   */
+  const [standoutSort, setStandoutSort] = useState<"POSITION" | "PICKED">("POSITION");
   const [contributions, setContributions] = useState<MatchContribution[]>([]);
   const [contributionPlayerId, setContributionPlayerId] = useState<string>("");
   const [contributionGoals, setContributionGoals] = useState<number>(1);
@@ -232,6 +295,121 @@ export function DebriefView({
   // irreversible, so it is always two deliberate clicks rather than one.
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  /**
+   * The debrief being corrected, if any. Held here rather than in a separate form so logging and
+   * editing share every field, every optional marker and the draft behaviour.
+   */
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  /**
+   * The picker's chips and the stored standout names, in one order.
+   *
+   * Position order groups back to front (GK, DEF, MID, FWD/ST) and falls back to the squad order
+   * inside a band, so the list is stable. "Picked" keeps the manager's own selection order, which
+   * is what they get if they want to record who mattered most rather than where they played.
+   * Unplaced players sort last rather than scattering, matching the squad table's rule.
+   */
+  const orderedStandoutPlayers = useMemo(() => {
+    if (standoutSort === "PICKED") {
+      const picked = standoutPlayerIds
+        .map((id) => players.find((player) => player.id === id))
+        .filter((player): player is EnrichedPlayer => player !== undefined);
+      const rest = players.filter((player) => !standoutPlayerIds.includes(player.id));
+      return [...picked, ...rest];
+    }
+    const band = (player: EnrichedPlayer): number => {
+      const group = positionGroupOf(player.primaryPosition);
+      return group === null ? POSITION_GROUP_ORDER.length : POSITION_GROUP_ORDER.indexOf(group);
+    };
+    return [...players].sort((a, b) => band(a) - band(b));
+  }, [players, standoutPlayerIds, standoutSort]);
+
+  /** The single debrief's draft surface. A group debrief keys by block id instead. */
+  // Restoring happens once, and must not fight the seeded defaults, so the guard is a ref: the
+  // setters below must not re-trigger the effect that reads it.
+  const draftRestored = useRef(false);
+
+  useEffect(() => {
+    if (draftRestored.current || !careerId) return;
+    draftRestored.current = true;
+    // Deferred by a task rather than set in the effect body: a synchronous `setState` here trips
+    // `react-hooks/set-state-in-effect`, and reading localStorage during render would prerender the
+    // wrong answer and mismatch on hydration.
+    const timer = window.setTimeout(() => {
+      const saved = readDebriefDraft<DebriefDraft>(careerId, MATCH_DRAFT_SURFACE);
+      if (saved === null) return;
+      setOpponent(saved.opponent);
+      setOpponentTeamId(saved.opponentTeamId);
+      setOurScoreInput(saved.ourScoreInput);
+      setTheirScoreInput(saved.theirScoreInput);
+      setMatchDate(saved.matchDate);
+      setVenue(saved.venue);
+      setCompetition(saved.competition);
+      setTacticalAdherence(saved.tacticalAdherence);
+      setStandoutPlayerIds(saved.standoutPlayerIds);
+      setStandoutSort(saved.standoutSort);
+      setContributions(saved.contributions);
+      setWeaknessIdentified(saved.weaknessIdentified);
+      setManagerReflection(saved.managerReflection);
+      setDynamicAnswers(saved.dynamicAnswers);
+      setOpponentPosition(saved.opponentPosition);
+      setOpponentPoints(saved.opponentPoints);
+      setOwnPosition(saved.ownPosition);
+      setOwnPoints(saved.ownPoints);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [careerId]);
+
+  // Saved on every change rather than on blur, so clicking away, switching tab or closing the window
+  // all keep it. Written only once something has been entered, so an untouched form leaves no trace.
+  useEffect(() => {
+    if (!careerId || !draftRestored.current) return;
+    // While a stored debrief is open for editing the form is not a draft, so nothing is saved here.
+    if (editingId !== null) return;
+    const draft: DebriefDraft = {
+      opponent,
+      opponentTeamId,
+      ourScoreInput,
+      theirScoreInput,
+      matchDate,
+      venue,
+      competition,
+      tacticalAdherence,
+      standoutPlayerIds,
+      standoutSort,
+      contributions,
+      weaknessIdentified,
+      managerReflection,
+      dynamicAnswers,
+      opponentPosition,
+      opponentPoints,
+      ownPosition,
+      ownPoints,
+    };
+    if (!hasDraftContent(draft)) return;
+    writeDebriefDraft(careerId, MATCH_DRAFT_SURFACE, draft);
+  }, [
+    careerId,
+    editingId,
+    opponent,
+    opponentTeamId,
+    ourScoreInput,
+    theirScoreInput,
+    matchDate,
+    venue,
+    competition,
+    tacticalAdherence,
+    standoutPlayerIds,
+    standoutSort,
+    contributions,
+    weaknessIdentified,
+    managerReflection,
+    dynamicAnswers,
+    opponentPosition,
+    opponentPoints,
+    ownPosition,
+    ownPoints,
+  ]);
 
   // The two figures the rest of the form reasons about. Empty counts as nil.
   const ourScore = ourScoreInput === "" ? 0 : Number(ourScoreInput);
@@ -274,8 +452,13 @@ export function DebriefView({
   const assistsLogged = contributions.reduce((sum, entry) => sum + entry.assists, 0);
   const goalsUnlogged = Math.max(0, ourScore - goalsLogged);
 
-  // Filter existing match debriefs from activity spine
-  const pastDebriefs = recentEvents.filter((evt) => evt.eventType === "MATCH_DEBRIEF");
+  // Filter existing match debriefs from activity spine. Restricted to records this screen owns: a
+  // group debrief is MIRRORED into career_events as a MATCH_DEBRIEF row so every aggregate sees it,
+  // but it belongs to its block, so counting or deleting it here would edit one entry in two places
+  // and leave the two disagreeing.
+  const pastDebriefs = recentEvents.filter(
+    (evt) => evt.eventType === "MATCH_DEBRIEF" && evt.entityType === "MATCH"
+  );
 
   const pastDebriefsPayloads = useMemo(() => {
     return pastDebriefs.map((evt) => {
@@ -357,6 +540,76 @@ export function DebriefView({
     setContributions((prev) => prev.filter((entry) => entry.playerId !== playerId));
   };
 
+  /**
+   * Puts every field back to how a brand new debrief starts. Own table position is deliberately kept:
+   * it stays put between matches, so clearing it would make the manager retype it every week.
+   */
+  const clearForm = () => {
+    setOpponent("");
+    setOpponentTeamId("");
+    setOurScoreInput("");
+    setTheirScoreInput("");
+    setOpponentPosition("");
+    setOpponentPoints("");
+    setWeaknessIdentified("");
+    setManagerReflection("");
+    setDynamicAnswers({});
+    setStandoutPlayerIds([]);
+    setContributions([]);
+    setContributionPlayerId("");
+    setContributionGoals(1);
+    setContributionAssists(0);
+  };
+
+  /**
+   * Loads an existing debrief back into the form.
+   *
+   * The id is kept so submit can rewrite that record rather than append a second one for the same
+   * match, which is what a delete-then-recreate would do.
+   */
+  const startEditDebrief = (evt: ParsedCareerEvent) => {
+    let stored: DebriefHistory;
+    try {
+      stored = (typeof evt.payload === "string"
+        ? JSON.parse(evt.payload)
+        : evt.payload) as DebriefHistory;
+    } catch {
+      setMessage("That debrief could not be read, so it cannot be edited.");
+      return;
+    }
+    const text = (value: number | null | undefined): string =>
+      value === null || value === undefined ? "" : String(value);
+
+    setEditingId(evt.id);
+    setSubTab("MATCH");
+    setOpponent(stored.opponent ?? "");
+    setOpponentTeamId(text(stored.opponentTeamId));
+    setOurScoreInput(text(stored.homeScore));
+    setTheirScoreInput(text(stored.awayScore));
+    setMatchDate(stored.matchDate ?? "");
+    setVenue(stored.venue === "AWAY" || stored.venue === "NEUTRAL" ? stored.venue : "HOME");
+    setCompetition(stored.competition ?? "League Match");
+    setTacticalAdherence(typeof stored.tacticalAdherence === "number" ? stored.tacticalAdherence : 4);
+    setStandoutPlayerIds(Array.isArray(stored.standoutPlayerIds) ? stored.standoutPlayerIds : []);
+    setContributions(Array.isArray(stored.contributions) ? stored.contributions : []);
+    setWeaknessIdentified(stored.weaknessIdentified ?? "");
+    setManagerReflection(stored.managerReflection ?? "");
+    setDynamicAnswers(
+      Object.fromEntries((stored.dynamicPrompts ?? []).map((prompt) => [prompt.id, prompt.answer]))
+    );
+    setOpponentPosition(text(stored.leagueSnapshot?.opponentPosition));
+    setOpponentPoints(text(stored.leagueSnapshot?.opponentPoints));
+    setOwnPosition(text(stored.leagueSnapshot?.ownPosition));
+    setOwnPoints(text(stored.leagueSnapshot?.ownPoints));
+    setMessage("Editing that debrief. Save to apply the changes.");
+  };
+
+  const cancelEditDebrief = () => {
+    setEditingId(null);
+    clearForm();
+    setMessage(null);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!careerId) {
@@ -371,7 +624,7 @@ export function DebriefView({
     setIsSubmitting(true);
     setMessage(null);
 
-    const standoutPlayerNames = players
+    const standoutPlayerNames = orderedStandoutPlayers
       .filter((p) => standoutPlayerIds.includes(p.id))
       .map((p) => p.name);
 
@@ -384,10 +637,12 @@ export function DebriefView({
       .filter((p) => p.answer.length > 0);
 
     try {
-      const res = await apiFetch("/api/debrief", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const res = await apiFetch(
+        editingId === null ? "/api/debrief" : `/api/debrief?id=${encodeURIComponent(editingId)}`,
+        {
+          method: editingId === null ? "POST" : "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
           careerId,
           opponent: opponentLabel,
           // `homeScore` is our score and `awayScore` is theirs, whichever ground the game was at.
@@ -419,21 +674,11 @@ export function DebriefView({
         throw new Error(data.error || "Failed to submit debrief.");
       }
 
-      setMessage("Match debrief saved.");
-      setOpponent("");
-      setOpponentTeamId("");
-      setOurScoreInput("");
-      setTheirScoreInput("");
-      setOpponentPosition("");
-      setOpponentPoints("");
-      setWeaknessIdentified("");
-      setManagerReflection("");
-      setDynamicAnswers({});
-      setStandoutPlayerIds([]);
-      setContributions([]);
-      setContributionPlayerId("");
-      setContributionGoals(1);
-      setContributionAssists(0);
+      setMessage(editingId === null ? "Match debrief saved." : "Debrief updated.");
+      // The debrief is a record now, so the working note goes.
+      clearDebriefDraft(careerId, MATCH_DRAFT_SURFACE);
+      clearForm();
+      setEditingId(null);
       onDebriefSubmitted();
     } catch (err) {
       setMessage((err as Error).message);
@@ -503,7 +748,11 @@ export function DebriefView({
 
       {subTab === "GROUP" ? (
         careerId ? (
-          <GroupDebriefPanel careerId={careerId} seasonNumber={seasonNumber} />
+          <GroupDebriefPanel
+            careerId={careerId}
+            seasonNumber={seasonNumber}
+            leagueTeams={leagueTeams}
+          />
         ) : (
           <p className="font-sans text-xs text-slate-600 dark:text-slate-400">
             Sync a career from the Portal to keep group debriefs.
@@ -528,10 +777,21 @@ export function DebriefView({
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column (2 Cols): Debrief Entry Form */}
-        <form onSubmit={handleSubmit} className="lg:col-span-2 bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
-          <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-800 pb-3">
-            Log a match
-          </h2>
+        <form onSubmit={handleSubmit} data-tour="debrief-form" className="lg:col-span-2 bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-3">
+            <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
+              {editingId === null ? "Log a match" : "Edit debrief"}
+            </h2>
+            {editingId !== null && (
+              <button
+                type="button"
+                onClick={cancelEditDebrief}
+                className="inline-flex min-h-10 items-center rounded-lg px-3 font-sub text-[10px] uppercase tracking-wider text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 cursor-pointer"
+              >
+                Cancel edit
+              </button>
+            )}
+          </div>
 
           {/* Opponent & Competition Row */}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
@@ -830,24 +1090,54 @@ export function DebriefView({
               />
             </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+            <div data-tour="debrief-standouts">
+              <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
+                <label
+                  className="font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider"
+                  title="(can select more than one)"
+                >
                   Standout Performers
                 </label>
-                <span className="font-sub text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">
-                  {standoutPlayerIds.length === 0
-                    ? "select any number"
-                    : `${standoutPlayerIds.length} selected`}
-                </span>
+                <div className="flex items-center gap-2">
+                  {standoutPlayerIds.length > 0 && (
+                    <span className="font-sub text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">
+                      {standoutPlayerIds.length} selected
+                    </span>
+                  )}
+                  <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 dark:border-slate-800 p-0.5">
+                    {([["POSITION", "Position"], ["PICKED", "My picks"]] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setStandoutSort(value)}
+                        aria-pressed={standoutSort === value}
+                        title={
+                          value === "POSITION"
+                            ? "Order chips goalkeeper to striker"
+                            : "Order chips by the order you picked them"
+                        }
+                        className={`px-2 py-0.5 rounded font-sub text-[10px] font-bold uppercase cursor-pointer transition-colors ${
+                          standoutSort === value
+                            ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900"
+                            : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
+              <p className="mb-1.5 text-[10px] font-sub text-slate-500 dark:text-slate-400">
+                (can select more than one)
+              </p>
               <div className="max-h-44 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-2 flex flex-wrap gap-1.5">
                 {players.length === 0 ? (
                   <p className="text-xs text-slate-500 dark:text-slate-400 italic p-2">
                     No squad synced yet - sync a save to pick performers.
                   </p>
                 ) : (
-                  players.map((p) => {
+                  orderedStandoutPlayers.map((p) => {
                     const selected = standoutPlayerIds.includes(p.id);
                     return (
                       <button
@@ -870,7 +1160,7 @@ export function DebriefView({
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-3">
+            <div data-tour="debrief-contributions" className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="font-sub text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
                   Goals &amp; Assists
@@ -914,8 +1204,11 @@ export function DebriefView({
                 </div>
 
                 <div className="w-16">
-                  <label className="block text-[10px] font-sub font-bold uppercase text-slate-500 dark:text-slate-400 mb-1">
-                    Assists
+                  <label
+                    className="block text-[10px] font-sub font-bold uppercase text-slate-500 dark:text-slate-400 mb-1"
+                    title="(Optional) A goal can be unassisted, or scored off a defender error."
+                  >
+                    Assists <span className="font-normal normal-case">(Optional)</span>
                   </label>
                   <input
                     type="number"
@@ -985,9 +1278,9 @@ export function DebriefView({
                 <div>
                   <label
                     className="block font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5"
-                    title="Something you noticed that went wrong, so you can check it against the next match."
+                    title="(Optional) Something you noticed that went wrong, so you can check it against the next match."
                   >
-                    Weakness you spotted
+                    Weakness you spotted <span className="font-normal normal-case">(Optional)</span>
                   </label>
                   <input
                     type="text"
@@ -1081,6 +1374,14 @@ export function DebriefView({
                         }`}>
                           {payload.scoreline || "0-0"} · {resultLabel(payload.result || "DRAW")}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => startEditDebrief(evt)}
+                          aria-label={`Edit the debrief against ${payload.opponent || "an unnamed opponent"}`}
+                          className="inline-flex min-h-10 items-center rounded-lg px-2.5 text-[10px] uppercase tracking-wider text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-800 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-100 cursor-pointer"
+                        >
+                          {editingId === evt.id ? "Editing" : "Edit"}
+                        </button>
                         {confirmDeleteId === evt.id ? (
                           <>
                             <button

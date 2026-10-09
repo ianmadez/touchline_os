@@ -92,7 +92,9 @@ export function SquadView({
               {visiblePlayers.length} of {players.length} players match
             </p>
           )}
-          <SquadTable players={visiblePlayers} onSelectPlayer={onSelectPlayer} />
+          <div data-tour="squad-table">
+            <SquadTable players={visiblePlayers} onSelectPlayer={onSelectPlayer} />
+          </div>
         </>
       )}
 
@@ -118,7 +120,9 @@ export function SquadView({
           the squad at all, so the squad list could never have shown him. */}
       {subTab === "YOUTH" &&
         (careerId ? (
-          <YouthAcademyPanel careerId={careerId} query={query} />
+          <div data-tour="squad-youth">
+            <YouthAcademyPanel careerId={careerId} query={query} />
+          </div>
         ) : (
           <NeedsCareer body="Sync a career from the Portal to see your academy." />
         ))}

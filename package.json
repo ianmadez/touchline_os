@@ -1,6 +1,6 @@
 {
   "name": "touchline-os",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -21,7 +21,8 @@
     "bridge:test": "tsx scripts/test-bridge.ts",
     "bridge:client:test": "tsx scripts/test-bridge-client.ts",
     "import:faces": "tsx scripts/import-faces.ts",
-    "db:tables": "tsx scripts/db-tables.ts"
+    "db:tables": "tsx scripts/db-tables.ts",
+    "save:extract": "tsx scripts/extract-fc27-container.ts"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

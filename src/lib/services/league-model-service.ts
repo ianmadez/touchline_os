@@ -96,7 +96,7 @@ const MIN_OBSERVATIONS_FOR_MODEL = 3;
  * not as a league calculation - and it stays honest only while that is said out loud.
  */
 export const ALL_COMPETITION_FORM_CAVEAT =
-  "Calibrated on scoring rates across every competition, not league-only form: cup games add matches without adding league points, so the rate reads lower than league form would. Treat it as a rough guide, not a league reading.";
+  "Calibrated on all-competition scoring rates, not league-only form. Cup games add matches without league points, so the rate reads low. Rough guide only.";
 
 /**
  * Adds up logged match debriefs.
@@ -199,7 +199,7 @@ export class LeagueModelService {
     let note: string;
 
     if (fromDebriefs.logged === 0) {
-      note = "No match debriefs logged yet, so there is nothing to check the save against.";
+      note = "Nothing logged yet to check the save against.";
     } else if (
       fromDebriefs.wins === fromSave.wins &&
       fromDebriefs.draws === fromSave.draws &&
@@ -208,10 +208,10 @@ export class LeagueModelService {
       // Only meaningful when the debriefs actually cover the whole season.
       agrees = fromDebriefs.logged >= fromSave.played;
       note = agrees
-        ? "Your logged debriefs add up to exactly the save's own record, across every competition."
-        : `Your debriefs match the save's results so far, but cover ${fromDebriefs.logged} of ${fromSave.played} matches.`;
+        ? "Debriefs match the save's own record exactly."
+        : `Debriefs match the save so far, but cover ${fromDebriefs.logged} of ${fromSave.played} matches.`;
     } else {
-      note = `Your debriefs add up to ${fromDebriefs.wins}W ${fromDebriefs.draws}D ${fromDebriefs.losses}L; the save records ${fromSave.wins}W ${fromSave.draws}D ${fromSave.losses}L. The save's record covers every match played, in any competition, so the gap is most likely debriefs not yet logged.`;
+      note = `Your debriefs total ${fromDebriefs.wins}W ${fromDebriefs.draws}D ${fromDebriefs.losses}L, the save records ${fromSave.wins}W ${fromSave.draws}D ${fromSave.losses}L. The save covers every competition, so the gap is likely unlogged debriefs.`;
     }
 
     return { fromDebriefs, fromSave, agrees, note };
@@ -363,7 +363,7 @@ export class LeagueModelService {
           evidenceCount: n,
           saveHint,
           saveProjectedBest,
-          explanation: `Inferred from ${n} readings in this division - your own past seasons and the positions you have confirmed - against your current rate of ${rate.toFixed(2)} points per match. The rates it was fitted on, and your current rate, are the save's totals across every competition it entered.`,
+          explanation: `Inferred from ${n} readings in this division against your current rate of ${rate.toFixed(2)} points per match. Both are all-competition save totals.`,
           caveat: ALL_COMPETITION_FORM_CAVEAT,
         };
       }
@@ -380,7 +380,7 @@ export class LeagueModelService {
         evidenceCount: observations.length,
         saveHint,
         saveProjectedBest,
-        explanation: `The save's own table position is ${saveHint}, but a save measured as unreliable on this field and ${observations.length} calibration reading${observations.length === 1 ? "" : "s"} is not enough to correct it. Confirm your real position${shortfall > 0 ? ` ${shortfall} more time${shortfall === 1 ? "" : "s"}` : ""} and it will infer on its own.`,
+        explanation: `Save field: ${saveHint}. That field measured unreliable and ${observations.length} reading${observations.length === 1 ? "" : "s"} cannot correct it. Confirm your position${shortfall > 0 ? ` ${shortfall} more time${shortfall === 1 ? "" : "s"}` : ""} and it infers on its own.`,
         caveat: null,
       };
     }

@@ -28,6 +28,7 @@ import {
   HOST,
   loadOrCreateConfig,
   scanSummary,
+  startPeriodicRescan,
   type BridgeConfig,
 } from "./bridge-server";
 
@@ -96,6 +97,10 @@ async function main(): Promise<void> {
   server.listen(port, HOST, () => {
     void printBanner(config);
   });
+
+  // The fallback scan, so the save list stays fresh while the game is open even if nothing asks for
+  // it. The immediate trigger is the re-stat every request already does; this covers the rest.
+  startPeriodicRescan();
 
   const shutdown = () => {
     server.close(() => process.exit(0));

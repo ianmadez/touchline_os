@@ -62,9 +62,9 @@ export function Navbar({
     ...(isOnboardingComplete ? [] : [{ id: "PORTAL" as AppTab, label: "Portal" }]),
     { id: "DASHBOARD", label: "Dashboard" },
     { id: "SEASON", label: "Season" },
+    { id: "DEBRIEF", label: "Debrief" },
     { id: "SQUAD", label: "Squad" },
     { id: "TACTICS", label: "Tactics" },
-    { id: "DEBRIEF", label: "Debrief" },
     { id: "FINANCE", label: "Finances" },
     { id: "SETTINGS", label: "Settings" },
   ];
@@ -142,6 +142,7 @@ export function Navbar({
               return (
                 <button
                   key={tab.id}
+                  data-tour={`tab-${tab.id}`}
                   onClick={() => onSelectTab(tab.id)}
                   className={`py-1.5 px-2.5 lg:px-4 rounded-lg font-sub text-label lg:text-xs uppercase tracking-normal lg:tracking-wider transition-[background-color,color,box-shadow] duration-200 whitespace-nowrap cursor-pointer ${
                     isActive

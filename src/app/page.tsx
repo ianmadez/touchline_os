@@ -5,6 +5,7 @@ import { Navbar } from "@/components/ui/nav/navbar";
 import { LandingPage } from "@/components/ui/landing/landing-page";
 import { Footer } from "@/components/ui/landing/footer";
 import { OnboardingWizard, OnboardingSubmission } from "@/components/ui/onboarding/onboarding-wizard";
+import { SpotlightTour } from "@/components/ui/onboarding/spotlight-tour";
 import { SquadView } from "@/components/ui/squad/squad-view";
 import { PlayerDrawer } from "@/components/ui/squad/player-drawer";
 import { LandingFooter } from "@/components/ui/landing/landing-footer";
@@ -198,6 +199,17 @@ export default function TouchlineApp() {
   // Guards the ON_LAUNCH auto-sync so it can only ever fire once per page load.
   const autoSyncAttempted = useRef(false);
   const [isOnboardingComplete, setIsOnboardingComplete] = useState(false);
+  /**
+   * True while a save written DURING this session has produced a new snapshot and the manager has not
+   * acted on it. Dismissed by hand or by opening the debrief screen, never on a timer: a reminder
+   * that disappears before it is read is not a reminder.
+   */
+  const [saveChangeNotice, setSaveChangeNotice] = useState(false);
+  /**
+   * The last save identity this session acted on. A ref, not state: it exists to compare, and making
+   * it state would re-run the effect that reads it.
+   */
+  const lastSaveSignature = useRef<string | null>(null);
   const [careerId, setCareerId] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<ParsedCareerEvent[]>([]);
   const [storylines, setStorylines] = useState<StorylineItem[]>([]);
@@ -604,8 +616,8 @@ export default function TouchlineApp() {
    * Syncs the newest save from the entry gate. Deliberately sends no `onboarding` payload, so a
    * routine re-sync can never overwrite the manager profile captured during setup.
    */
-  const handleEntrySync = useCallback(async () => {
-    if (!latestSaveCandidate) return;
+  const handleEntrySync = useCallback(async (): Promise<string | null> => {
+    if (!latestSaveCandidate) return null;
     setIsLoading(true);
     setEntrySyncError(null);
 
@@ -646,8 +658,10 @@ export default function TouchlineApp() {
 
       // Re-scan so the gate shows the freshly touched file's mtime/size.
       void loadSaveCandidates();
+      return payload.syncStatus ?? "SYNCED";
     } catch (error) {
       setEntrySyncError((error as Error).message);
+      return null;
     } finally {
       setIsLoading(false);
     }
@@ -683,6 +697,52 @@ export default function TouchlineApp() {
     latestSaveCandidate,
     handleEntrySync,
   ]);
+
+  /**
+   * Watches for a save that changed while the app was open.
+   *
+   * Two triggers on purpose. A window focus event covers the common case of alt-tabbing back from
+   * the game; a ten minute interval is the fallback so the app still catches up when it is left in a
+   * background tab, where a focus event never arrives at all. The scan goes through the same saves
+   * endpoint as everywhere else, so this behaves the same on the Node build and the browser build.
+   */
+  useEffect(() => {
+    if (!isOnboardingComplete || isRestoring) return;
+    const POLL_MS = 10 * 60 * 1000;
+    const rescan = () => void loadSaveCandidates();
+    const timer = window.setInterval(rescan, POLL_MS);
+    window.addEventListener("focus", rescan);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", rescan);
+    };
+  }, [isOnboardingComplete, isRestoring, loadSaveCandidates]);
+
+  /**
+   * Acts on a change the watcher above noticed.
+   *
+   * The first observation is a baseline, not a change: without that rule, simply opening the app
+   * would announce a new save. The banner is raised only when the sync produced a genuinely new
+   * snapshot, because a touched file with nothing new in it is not new match data.
+   */
+  useEffect(() => {
+    if (!isOnboardingComplete || isRestoring || latestSaveCandidate === null) return;
+    const signature = `${latestSaveCandidate.filePath}|${latestSaveCandidate.fileSizeBytes}|${latestSaveCandidate.lastModified.getTime()}`;
+    if (lastSaveSignature.current === null) {
+      lastSaveSignature.current = signature;
+      return;
+    }
+    if (lastSaveSignature.current === signature) return;
+    lastSaveSignature.current = signature;
+    // Deferred by a task: the sync sets loading state, and a synchronous setState inside an effect is
+    // exactly what the lint rule is there to stop.
+    const timer = window.setTimeout(() => {
+      void handleEntrySync().then((status) => {
+        if (status === "SYNCED") setSaveChangeNotice(true);
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [isOnboardingComplete, isRestoring, latestSaveCandidate, handleEntrySync]);
 
   /** Loads the persisted settings once on mount. */
   useEffect(() => {
@@ -1154,6 +1214,52 @@ export default function TouchlineApp() {
         onToggleTheme={toggleTheme}
         isOnboardingComplete={isOnboardingComplete}
       />
+
+      {/*
+        One micro tour per primary tab, once per career. Held here rather than inside each screen so
+        the nav tabs can be part of their own tour, and so a tour never has to know which screen
+        rendered it.
+      */}
+      <SpotlightTour
+        careerId={careerId}
+        tab={displayedTab}
+        enabled={isOnboardingComplete && !isRestoring}
+      />
+
+      {/*
+        Persistent, not a toast: it stays until it is acted on or dismissed, because its whole point
+        is to be still there when the manager comes back from the game.
+      */}
+      {saveChangeNotice && (
+        <div className="border-b border-amber-300 bg-amber-50 px-4 py-2.5 dark:border-amber-500/40 dark:bg-amber-500/10">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
+            <p className="font-sans text-xs text-amber-900 dark:text-amber-200">
+              New match data detected in save. Log your match debrief now.
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  switchTab("DEBRIEF");
+                  setSaveChangeNotice(false);
+                }}
+                className="rounded-lg bg-amber-400 px-3 py-1.5 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-950 transition-[background-color,transform] duration-200 hover:bg-amber-300 active:scale-[0.96] cursor-pointer"
+              >
+                Log debrief
+              </button>
+              <button
+                type="button"
+                onClick={() => setSaveChangeNotice(false)}
+                aria-label="Dismiss the new match data notice"
+                title="Dismiss"
+                className="-mr-1 inline-flex min-h-8 min-w-8 items-center justify-center rounded-lg text-amber-700 transition-colors hover:bg-amber-200 dark:text-amber-300 dark:hover:bg-amber-500/20 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Full-Screen Splash Screen Overlay */}
       {splashVisible && (

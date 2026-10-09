@@ -415,6 +415,36 @@ function toWire(candidate) {
     foundIn: candidate.foundIn
   };
 }
+var scanCache = null;
+var RESCAN_INTERVAL_MS = 10 * 60 * 1e3;
+function cacheIsStale() {
+  if (scanCache === null) return true;
+  if (Date.now() - scanCache.at >= RESCAN_INTERVAL_MS) return true;
+  for (const candidate of scanCache.saves) {
+    try {
+      const stat = fs2.statSync(candidate.filePath);
+      if (stat.mtimeMs !== candidate.lastModified.getTime()) return true;
+      if (stat.size !== candidate.fileSizeBytes) return true;
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+async function currentSaves(force = false) {
+  if (!force && !cacheIsStale() && scanCache !== null) return scanCache.saves;
+  const saves = await saveSource.detectSaves();
+  scanCache = { at: Date.now(), saves };
+  return saves;
+}
+function startPeriodicRescan(intervalMs = RESCAN_INTERVAL_MS) {
+  const timer = setInterval(() => {
+    void currentSaves(true).catch(() => {
+    });
+  }, intervalMs);
+  timer.unref();
+  return timer;
+}
 async function handleAuthorised(req, res, url, config) {
   const pathname = url.pathname.replace(/\/+$/, "") || "/";
   if (pathname !== "/saves" && !pathname.startsWith("/saves/")) {
@@ -434,12 +464,12 @@ async function handleAuthorised(req, res, url, config) {
   }
   try {
     if (pathname === "/saves") {
-      const candidates2 = await saveSource.detectSaves();
+      const candidates2 = await currentSaves();
       sendJson(res, 200, { saves: candidates2.map(toWire) });
       return;
     }
     const id = decodeURIComponent(pathname.slice("/saves/".length));
-    const candidates = await saveSource.detectSaves();
+    const candidates = await currentSaves();
     const candidate = candidates.find((entry) => entry.id === id);
     if (!candidate) {
       sendJson(res, 404, { error: "No save with that id. Ask for the list again." });
@@ -466,14 +496,14 @@ function createBridgeServer(config, env = process.env) {
       return;
     }
     if (url.pathname.replace(/\/+$/, "") === "/status") {
-      sendJson(res, 200, { service: SERVICE, version: VERSION });
+      sendJson(res, 200, { service: SERVICE, version: VERSION, lastScanAt: scanCache?.at ?? null });
       return;
     }
     void handleAuthorised(req, res, url, config);
   });
 }
 async function scanSummary() {
-  const candidates = await saveSource.detectSaves();
+  const candidates = await currentSaves(true);
   const locations = saveSource.lastScan().map((entry) => ({
     path: entry.path,
     exists: entry.exists
@@ -535,6 +565,7 @@ async function main() {
   server.listen(port, HOST, () => {
     void printBanner(config);
   });
+  startPeriodicRescan();
   const shutdown = () => {
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 500).unref();

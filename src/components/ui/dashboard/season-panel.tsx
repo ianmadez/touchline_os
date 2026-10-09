@@ -122,11 +122,8 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
           rather than left as a gap to guess at, and deliberately competition-agnostic: the app runs
           against saves from any country, so no league or cup is ever named in this copy. */}
       <p className="text-xs text-slate-600 dark:text-slate-400">
-        The save keeps one combined record per season. It counts every match the club played, in
-        every competition it entered — not league matches alone — and not every competition awards
-        points, so the points figure is the save&apos;s own running total for the season. Nothing is
-        projected from these numbers: a rate built over mixed competitions cannot be applied to the
-        league games still to play.
+        One combined record per season, across every competition. Not every competition awards
+        points, so the points figure is the save&apos;s season total. Nothing is projected from it.
       </p>
 
       {/* Two objective tracks, side by side and never merged. */}
@@ -159,8 +156,8 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
           </span>
           {saveObjective ? (
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              The save lists a board objective, but its code is not readable yet - so it is left
-              blank rather than guessed at.
+              The save lists a board objective, but its code is unreadable. Left blank rather than
+              guessed.
             </p>
           ) : (
             <p className="text-sm text-slate-500 dark:text-slate-400 italic">
@@ -206,11 +203,10 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
             )}
             {inference.saveHint !== null && inference.basis === "ppm-model" && (
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                The save&apos;s own field says {inference.saveHint}
+                Save&apos;s field: {inference.saveHint}
                 {inference.saveProjectedBest !== null
-                  ? `, and its best-plausible finish for you is ${inference.saveProjectedBest}`
+                  ? ` · Best plausible finish: ${inference.saveProjectedBest}`
                   : ""}
-                .
               </p>
             )}
           </div>
@@ -237,7 +233,7 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
           <label className="flex flex-col gap-1">
             <span
               className="text-[10px] font-sub uppercase font-bold text-slate-500 dark:text-slate-400"
-              title="The save does not keep a live league table for your division, so this is what calibrates the estimate above."
+              title="No live league table in the save. Your entry calibrates the estimate above."
             >
               {inference.low !== null ? "Correct it if that's wrong" : "Tell it where you are"}
             </span>
@@ -334,8 +330,7 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
         </div>
 
         <p className="text-[11px] text-slate-500 dark:text-slate-400">
-          With a target finish, this objective is marked met or missed for you when the season ends.
-          Without one it is only recorded.
+          A target finish is marked met or missed at season end. Without one it is only recorded.
         </p>
 
         {message && <p className="text-xs text-slate-500 dark:text-slate-400">{message}</p>}
