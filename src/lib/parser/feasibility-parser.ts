@@ -21,6 +21,7 @@ import {
   type DbMeta,
   type FactCategory,
   type FieldValue,
+  type GameVersion,
   type IncompleteName,
   type LeagueEntry,
   type MatchResult,
@@ -38,7 +39,6 @@ import {
   type WorldPlayerEntry,
   type TableStat,
 } from "./interface";
-
 const DB_HEADER = new Uint8Array([0x44, 0x42, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00]);
 const FBCHUNKS_TAG = asciiBytes("FBCHUNKS");
 const SQLITE_TAG = asciiBytes("SQLite format 3\u0000");
@@ -275,6 +275,9 @@ export function parseDbMeta(xmlText: string): DbMeta {
     fieldNamesByTable: new Map(),
     fieldRange: new Map(),
     primaryKeys: new Map(),
+    fieldDepth: new Map(),
+    fieldType: new Map(),
+    fieldCountByTable: new Map(),
   };
 
   const tableRe = /<table\b([^>]*)>([\s\S]*?)<\/table>/g;
@@ -290,6 +293,7 @@ export function parseDbMeta(xmlText: string): DbMeta {
     meta.tableNames.set(tableShort, tableName);
     const perTable = new Map<string, string>();
     meta.fieldNamesByTable.set(tableName, perTable);
+    meta.fieldCountByTable.set(tableName, 0);
 
     const fieldRe = /<field\b([^>]*)\/>/g;
     let field: RegExpExecArray | null;
@@ -302,11 +306,25 @@ export function parseDbMeta(xmlText: string): DbMeta {
       meta.fieldNames.set(fieldShort, fieldName);
       perTable.set(fieldShort, fieldName);
 
-      const isInteger = (attrOf(attrs, "type") ?? "").includes("INTEGER");
+      const declaredType = attrOf(attrs, "type") ?? "";
+      const isInteger = declaredType.includes("INTEGER");
       const rangeLow = isInteger ? Number(attrOf(attrs, "rangelow") ?? 0) : 0;
       meta.fieldRange.set(tableName + fieldName, Number.isFinite(rangeLow) ? rangeLow : 0);
 
+      const metaKey = `${tableName}\u0000${fieldShort}`;
+      const declaredDepth = Number(attrOf(attrs, "depth") ?? NaN);
+      if (Number.isFinite(declaredDepth)) meta.fieldDepth.set(metaKey, declaredDepth);
+      const declaredFieldType = declaredType.includes("STRING")
+        ? FIELD_STRING
+        : declaredType.includes("FLOAT")
+        ? FIELD_FLOAT
+        : declaredType.includes("INTEGER")
+        ? FIELD_INT
+        : -1;
+      if (declaredFieldType >= 0) meta.fieldType.set(metaKey, declaredFieldType);
+
       if (attrOf(attrs, "key") === "True") meta.primaryKeys.set(tableName, fieldName);
+      meta.fieldCountByTable.set(tableName, (meta.fieldCountByTable.get(tableName) ?? 0) + 1);
     }
   }
 
@@ -382,17 +400,28 @@ export function parseNameTable(csv: string): Map<number, string> {
   return byPlayerId;
 }
 
+/**
+ * Every fifa_ng_db block in the save, in file order.
+ *
+ * The scan steps past the SIGNATURE, not past the declared size: FC27's career block and squads
+ * block overlap (the career block's declared size covers the squads block's start), so advancing by
+ * size silently stepped over the second database. A candidate is only kept when its header and
+ * directory are structurally sound, so stepping by signature cannot admit payload false positives.
+ */
 export function unpackDatabases(save: Uint8Array): Uint8Array[] {
   const blocks: Uint8Array[] = [];
   let offset = indexOfBytes(save, DB_HEADER);
   while (offset >= 0) {
-    if (offset + DB_HEADER.length + 4 > save.length) break;
     const size = readUInt32LE(save, offset + DB_HEADER.length);
-    if (size <= 0 || offset + size > save.length) {
-      throw new Error(`database at offset ${offset} declares invalid size ${size}`);
+    if (size > 0 && size <= save.length - offset) {
+      const block = save.subarray(offset, offset + size);
+      const plausible = DB_HEADER_VARIANTS.some((variant) => scoreDbHeaderVariant(block, variant) > 0);
+      if (plausible) blocks.push(block);
     }
-    blocks.push(save.subarray(offset, offset + size));
-    offset = indexOfBytes(save, DB_HEADER, offset + size);
+    offset = indexOfBytes(save, DB_HEADER, offset + DB_HEADER.length);
+  }
+  if (blocks.length === 0) {
+    throw new Error("no fifa_ng_db block with a valid header was found");
   }
   return blocks;
 }
@@ -422,89 +451,1117 @@ interface HeaderRead {
   headers: TableHeader[];
   unknownTables: string[];
   stats: TableStat[];
+  /** Layout/drift problems, forwarded to `parse()` so they reach the UI warning channel. */
+  warnings: string[];
+  /** How many tables were read with each descriptor layout. */
+  layoutUsage: { classic16: number; compact9: number; fc27Long16: number };
+}
+
+/**
+ * fifa_ng_db header arrangements found in real saves.
+ *
+ * FC25/FC26 - and the FC27 squads-side block - put the table count at +16 with the directory at
+ * +24. The FC27 career-side block omits the 4-byte field at +12, so its count sits at +12 and its
+ * directory at +20. Both are tried and the one whose directory actually parses wins; nothing is
+ * assumed from the offset alone.
+ */
+const DB_HEADER_VARIANTS = [
+  { id: "count@+16 dir@+24", countAt: 16, dirAt: 24 },
+  { id: "count@+12 dir@+20", countAt: 12, dirAt: 20 },
+] as const;
+
+const DB_HEADER_TRAILER_BYTES = 4;
+
+/**
+ * Field-descriptor layouts.
+ *
+ * FC25/FC26: 16 bytes - type u32 / bit offset u32 / 4-char shortname / bit depth u32.
+ * FC27: 9 bytes - 4-char shortname / 1-byte depth / bit offset u32. The type is not stored, so it
+ * comes from the datasheet, and the descriptor array starts 8 bytes later in the table header.
+ */
+interface DescriptorLayout {
+  id: "classic16" | "compact9" | "fc27Long16";
+  /** Byte offset from the table header where the descriptor array starts. */
+  base: number;
+  stride: number;
+  shortAt: number;
+  bitOffsetAt: number;
+  /** classic16 only. */
+  typeAt?: number;
+  /** classic16 only. */
+  bitDepthAt?: number;
+  /** compact9 / fc27Long16: where the encoded depth lives. */
+  depthAt?: number;
+  /** compact9 = 1 (u8), fc27Long16 = 4 (u32). */
+  depthSize?: number;
+}
+
+const DESCRIPTOR_LAYOUTS: DescriptorLayout[] = [
+  { id: "classic16", base: 36, stride: 16, shortAt: 8, typeAt: 0, bitOffsetAt: 4, bitDepthAt: 12 },
+  { id: "compact9", base: 44, stride: 9, shortAt: 0, depthAt: 4, depthSize: 1, bitOffsetAt: 5 },
+  // FC27 career-side tables: 16 bytes, shortname FIRST, depth as a u32 (string depths reach 640
+  // bits, which cannot fit the compact u8) and the array starting 24 bytes into the header.
+  { id: "fc27Long16", base: 24, stride: 16, shortAt: 0, depthAt: 4, depthSize: 4, bitOffsetAt: 12 },
+];
+
+/**
+ * Share of a table's fields that must resolve in the datasheet before the compact layout is trusted.
+ * Below this, the descriptor array is not where the layout expects it and the table is left to the
+ * classic read rather than decoded from a misaligned field list.
+ */
+const COMPACT_MIN_RESOLVED_RATIO = 0.5;
+
+interface DescriptorRead {
+  fields: FieldDescriptor[];
+  /** Fields whose shortname the datasheet declares for this table. */
+  resolved: number;
+  /** compact9 only: fields whose encoded depth contradicts the datasheet. */
+  depthMismatches: string[];
+  /** compact9 only: entries read with an 8-byte step. Never silent - each is reported. */
+  recoveries: string[];
+  /** Byte offset just past the descriptor array, so records start where the array actually ends. */
+  endOffset: number;
+  /**
+   * Fields whose encoded depth COULD be compared with the datasheet, and how many agreed.
+   *
+   * Counted for every layout. This is the signal that identifies the correct layout: a wrong layout
+   * reads garbage where the encoded depth lives, so its depths cannot agree. Counting is separate
+   * from decoding and never changes a decoded type.
+   */
+  depthChecked: number;
+  depthAgreed: number;
+}
+
+function isPrintableId(bytes: Uint8Array): boolean {
+  if (bytes.length < 4) return false;
+  for (let index = 0; index < 4; index++) {
+    const byte = bytes[index];
+    if (byte < 0x21 || byte > 0x7e) return false;
+  }
+  return true;
+}
+
+/**
+ * Reads one table's descriptors under a candidate layout.
+ *
+ * Nothing is coerced. Two things are handled explicitly rather than silently:
+ *
+ * - A compact descriptor whose encoded depth contradicts the datasheet decodes as an unknown type,
+ *   so a disagreement yields a null value and a warning instead of a plausible-looking wrong number.
+ * - The reference FC27 save contains a minority of compact entries that are 8 bytes rather than 9.
+ *   An 8-byte step is taken ONLY when the 9-byte step would not put a printable id on the next
+ *   boundary and the 8-byte step puts a datasheet-known id there. Every recovery is reported.
+ */
+function readDescriptors(
+  block: Uint8Array,
+  headerOffset: number,
+  fieldCount: number,
+  layout: DescriptorLayout,
+  meta: DbMeta | null,
+  tableName: string | null,
+  /** Descriptor positions from a scanned grid. When given, the layout's stride is not used. */
+  positions?: readonly number[]
+): DescriptorRead {
+  const fields: FieldDescriptor[] = [];
+  const depthMismatches: string[] = [];
+  const recoveries: string[] = [];
+  let resolved = 0;
+  let depthChecked = 0;
+  let depthAgreed = 0;
+  let cursor = headerOffset + layout.base;
+
+  for (let index = 0; index < fieldCount; index++) {
+    const at = positions ? positions[index] : cursor;
+    if (at === undefined) break;
+    if (at < 0 || at + 4 > block.length) break;
+
+    const shortField = latin1Text(block.subarray(at + layout.shortAt, at + layout.shortAt + 4));
+    const bitOffset = readUInt32LE(block, at + layout.bitOffsetAt);
+    const metaKey = meta === null || tableName === null ? null : `${tableName}\u0000${shortField}`;
+    const declaredDepth = metaKey === null ? undefined : meta!.fieldDepth.get(metaKey);
+    const declaredType = metaKey === null ? undefined : meta!.fieldType.get(metaKey);
+    let type: number;
+    let bitDepth: number;
+
+    if (layout.id === "classic16") {
+      type = readUInt32LE(block, at + (layout.typeAt ?? 0));
+      bitDepth = readUInt32LE(block, at + (layout.bitDepthAt ?? 12));
+    } else {
+      bitDepth =
+        layout.depthSize === 4
+          ? readUInt32LE(block, at + (layout.depthAt ?? 4))
+          : block[at + (layout.depthAt ?? 4)];
+      // The compact layout can only hold depths up to 255, so a longer declared depth (a string's
+      // byte length in bits) is not comparable there. The long layout stores a full u32 and IS
+      // comparable for every type.
+      const comparable =
+        declaredDepth !== undefined &&
+        (layout.depthSize === 4 || (declaredType !== FIELD_STRING && declaredDepth <= 255));
+      if (comparable && declaredDepth !== bitDepth) {
+        depthMismatches.push(`${shortField} encoded depth ${bitDepth} vs datasheet ${declaredDepth}`);
+        type = -1;
+      } else {
+        type = declaredType ?? -1;
+      }
+    }
+
+    if (declaredDepth !== undefined) {
+      depthChecked++;
+      if (declaredDepth === bitDepth) depthAgreed++;
+    }
+
+    const known = tableName === null || meta === null ? undefined : fieldNameFor(meta, tableName, shortField);
+    if (known !== undefined) resolved++;
+    fields.push({
+      type,
+      bitOffset,
+      bitDepth,
+      shortName: shortField,
+      key: known ?? `unk_${shortField}`,
+      known: known !== undefined,
+    });
+
+    if (layout.id === "classic16" || positions) {
+      cursor = at + layout.stride;
+      continue;
+    }
+
+    const next8 = latin1Text(block.subarray(at + 8, at + 12));
+    const next8Known =
+      tableName !== null && meta !== null && fieldNameFor(meta, tableName, next8) !== undefined;
+    if (!isPrintableId(block.subarray(at + 9, at + 13)) && next8Known) {
+      recoveries.push(`${shortField} -> ${next8}`);
+      cursor = at + 8;
+    } else {
+      cursor = at + 9;
+    }
+  }
+
+  return { fields, resolved, depthMismatches, recoveries, endOffset: cursor, depthChecked, depthAgreed };
+}
+
+/**
+ * Scores one DB header arrangement.
+ *
+ * Counts directory entries that name a printable table id AND point at a header whose record size
+ * and field count are plausible. A wrong count offset cannot score here.
+ */
+function scoreDbHeaderVariant(block: Uint8Array, variant: (typeof DB_HEADER_VARIANTS)[number]): number {
+  if (variant.countAt + 4 > block.length) return 0;
+  const tableCount = readUInt32LE(block, variant.countAt);
+  if (tableCount <= 0 || tableCount > MAX_TABLE_COUNT) return 0;
+  const tablesStart = variant.dirAt + tableCount * 8 + DB_HEADER_TRAILER_BYTES;
+  if (tablesStart > block.length) return 0;
+
+  let score = 0;
+  for (let index = 0; index < tableCount; index++) {
+    const at = variant.dirAt + index * 8;
+    if (!isPrintableId(block.subarray(at, at + 4))) continue;
+    const headerOffset = tablesStart + readUInt32LE(block, at + 4);
+    if (headerOffset + 36 > block.length) continue;
+    const recordSize = readUInt32LE(block, headerOffset + 4);
+    const fieldCount = block[headerOffset + 24];
+    if (recordSize > 0 && recordSize <= 65_535 && fieldCount > 0 && fieldCount <= 255) score++;
+  }
+  return score;
+}
+
+/** Picks the DB header arrangement whose directory scores highest. */
+function chooseDbHeaderVariant(block: Uint8Array): (typeof DB_HEADER_VARIANTS)[number] {
+  let best: (typeof DB_HEADER_VARIANTS)[number] = DB_HEADER_VARIANTS[0];
+  let bestScore = 0;
+  for (const variant of DB_HEADER_VARIANTS) {
+    const score = scoreDbHeaderVariant(block, variant);
+    if (score > bestScore) {
+      bestScore = score;
+      best = variant;
+    }
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------------------------
+// FC27 table localisation
+// ---------------------------------------------------------------------------------------------
+//
+// In FC25/FC26 the directory offset lands on a table header, so `recordSize`, the row count and the
+// field count are all READ AT A COMPUTED ADDRESS. FC27 does not work that way: the directory offset
+// lands inside the record data, so nothing about a table can be computed from it.
+//
+// What IS stable is the descriptor array itself - a run of printable 4-char field ids. So a table is
+// FOUND rather than computed:
+//
+//   1. scan the payload for candidate descriptor runs;
+//   2. attribute a run to a table by how many of its ids the datasheet declares for that table;
+//   3. take the header from the bytes immediately BEFORE the run. The header is only accepted when
+//      its field-count byte equals the number of ids the same header's descriptor start produces AND
+//      its record size / row count are physically possible. A candidate that fails is rejected, not
+//      decoded, so a wrong header cannot silently produce rows.
+//
+// Step 2 deliberately does NOT require the datasheet's field count to equal the run length: the
+// bundled datasheet is older than the FC27 save (it declares 137 player fields where the save stores
+// 110), so exact-count matching rejects every array. The run length is authoritative for the field
+// count, and the datasheet is only used to decide WHICH table a run belongs to.
+
+/** Descriptor entry lengths observed inside a single array: compact 9, short 8, long 16 and 12. */
+const DESCRIPTOR_STEPS = [9, 8, 16, 12] as const;
+
+/** A header sits at most this far before the first descriptor. */
+const HEADER_SEARCH_BACK = 64;
+/** Descriptors start this many bytes into a header. */
+const DESCRIPTOR_START_IN_HEADER = 36;
+
+const MAX_RECORD_SIZE_BYTES = 50_000_000;
+const MAX_ROW_COUNT = 200_000;
+
+const GRID_MIN_IDS = 6;
+const GRID_MAX_IDS = 512;
+/** Share of a run's ids that must be datasheet fields of the table before the run is attributed. */
+const GRID_MIN_COVERAGE = 0.5;
+const GRID_MIN_MATCHED = 4;
+
+interface GridRun {
+  start: number;
+  ids: string[];
+  positions: number[];
+}
+
+/**
+ * Length of the descriptor at `cursor`. Entry length varies WITHIN one array: `teams` (lyxL) mixes
+ * 9-byte compact int entries with the longer form used by string fields (teamname's 480-bit depth
+ * only fits a u32). The next id is whichever candidate step lands on a printable id.
+ */
+function nextDescriptorStep(block: Uint8Array, cursor: number): number {
+  for (const step of DESCRIPTOR_STEPS) {
+    const at = cursor + step;
+    if (at + 4 <= block.length && isPrintableId(block.subarray(at, at + 4))) return at;
+  }
+  return -1;
+}
+
+function walkGrid(block: Uint8Array, start: number): GridRun {
+  const ids: string[] = [];
+  const positions: number[] = [];
+  let cursor = start;
+  while (
+    ids.length < GRID_MAX_IDS &&
+    cursor + 4 <= block.length &&
+    isPrintableId(block.subarray(cursor, cursor + 4))
+  ) {
+    ids.push(latin1Text(block.subarray(cursor, cursor + 4)));
+    positions.push(cursor);
+    const next = nextDescriptorStep(block, cursor);
+    if (next < 0) break;
+    cursor = next;
+  }
+  return { start, ids, positions };
+}
+
+/** An id begins a run when no descriptor step from an earlier id lands exactly on it. */
+function isGridStart(block: Uint8Array, at: number): boolean {
+  for (const back of DESCRIPTOR_STEPS) {
+    const before = at - back;
+    if (before >= 0 && isPrintableId(block.subarray(before, before + 4))) return false;
+  }
+  return true;
+}
+
+function scanGrids(block: Uint8Array): GridRun[] {
+  const runs: GridRun[] = [];
+  for (let at = 0; at + 4 <= block.length; at++) {
+    if (!isPrintableId(block.subarray(at, at + 4))) continue;
+    if (!isGridStart(block, at)) continue;
+    const run = walkGrid(block, at);
+    if (run.ids.length >= GRID_MIN_IDS) runs.push(run);
+  }
+  return runs;
+}
+
+/** The datasheet's field shortnames per table, keyed by table NAME. */
+function datasheetFieldSets(meta: DbMeta): Map<string, Set<string>> {
+  const sets = new Map<string, Set<string>>();
+  const add = (key: string): void => {
+    const separator = key.indexOf("\u0000");
+    if (separator < 0) return;
+    const table = key.slice(0, separator);
+    let set = sets.get(table);
+    if (set === undefined) {
+      set = new Set<string>();
+      sets.set(table, set);
+    }
+    set.add(key.slice(separator + 1));
+  };
+  for (const key of meta.fieldDepth.keys()) add(key);
+  for (const key of meta.fieldType.keys()) add(key);
+  return sets;
+}
+
+interface LocatedTable {
+  headerOffset: number;
+  fieldsRead: DescriptorRead;
+  matched: number;
+}
+
+/** Modal descriptor length of a run, used to close the array where its last entry ends. */
+function modalStep(positions: readonly number[]): number {
+  const counts = new Map<number, number>();
+  for (let index = 1; index < positions.length; index++) {
+    const step = positions[index] - positions[index - 1];
+    counts.set(step, (counts.get(step) ?? 0) + 1);
+  }
+  let best = 9;
+  let bestCount = 0;
+  for (const [step, count] of counts) {
+    if (count > bestCount) {
+      best = step;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
+/**
+ * Finds a table's header and descriptors by scanning its located run.
+ *
+ * The accepting test is exact, not heuristic: walking the variable-length descriptors from
+ * `headerOffset + 36` must yield precisely the number of ids the header's own field-count byte
+ * claims. `teams` validates as `recordSize=188 rows=870 fieldCount=110` in the reference FC27 save,
+ * which is the same header the FC25/FC26 layout would have read at that address.
+ */
+function headerForRun(
+  block: Uint8Array,
+  run: GridRun,
+  layout: DescriptorLayout,
+  meta: DbMeta | null,
+  tableName: string | null
+): LocatedTable | null {
+  const highest = run.start - DESCRIPTOR_START_IN_HEADER;
+  for (let headerOffset = highest; headerOffset >= run.start - HEADER_SEARCH_BACK; headerOffset--) {
+    if (headerOffset < 0 || headerOffset + DESCRIPTOR_START_IN_HEADER + 4 > block.length) continue;
+    const recordSize = readUInt32LE(block, headerOffset + 4);
+    if (recordSize === 0 || recordSize > MAX_RECORD_SIZE_BYTES) continue;
+    const recordCount = block[headerOffset + 18] | (block[headerOffset + 19] << 8);
+    if (recordCount >= MAX_ROW_COUNT) continue;
+
+    const fieldCount = block[headerOffset + 24];
+    if (fieldCount < GRID_MIN_IDS) continue;
+
+    const declared = walkGrid(block, headerOffset + DESCRIPTOR_START_IN_HEADER);
+    // The located run is the tail of this descriptor array, never a different array.
+    const from = declared.positions.indexOf(run.start);
+    if (from < 0) continue;
+    if (declared.ids.length - from < run.ids.length) continue;
+    let same = true;
+    for (let index = 0; index < run.ids.length && same; index++) {
+      same = declared.ids[from + index] === run.ids[index];
+    }
+    if (!same) continue;
+    // The header's own field count has to describe the array it precedes. The count is a u8 and the
+    // array can begin a few bytes after the descriptor start, so allow a small slack.
+    if (Math.abs(declared.ids.length - fieldCount) > 3) continue;
+
+    const recordBytes = recordCount * recordSize;
+    if (!Number.isSafeInteger(recordBytes) || recordBytes > block.length) continue;
+
+    const fieldsRead: DescriptorRead = {
+      ...readDescriptors(block, headerOffset, fieldCount, layout, meta, tableName, declared.positions),
+      endOffset: declared.positions[declared.positions.length - 1] + modalStep(declared.positions),
+    };
+    return { headerOffset, fieldsRead, matched: run.ids.length };
+  }
+  return null;
+}
+
+/**
+ * Attributes a descriptor run to a table.
+ *
+ * A run belongs to the table whose datasheet declares the most of its ids, and only if those ids are
+ * also a majority of the run: a merged run that happens to contain a table's whole field list still
+ * has to be mostly that table. The bundling is why the datasheet's declared field count is NOT used
+ * as the test - it is stale for FC27 and would reject every array.
+ */
+function bestRunFor(
+  runs: readonly GridRun[],
+  fields: Set<string> | undefined
+): { run: GridRun; matched: number } | null {
+  if (fields === undefined || fields.size === 0) return null;
+  let best: { run: GridRun; matched: number } | null = null;
+  for (const run of runs) {
+    if (run.ids.length > fields.size * 2 + 16) continue;
+    let matched = 0;
+    for (const id of run.ids) if (fields.has(id)) matched++;
+    if (matched < GRID_MIN_MATCHED) continue;
+    if (matched < run.ids.length * GRID_MIN_COVERAGE) continue;
+    if (best === null || matched > best.matched) best = { run, matched };
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------------------------
+// FC27 backwards anchoring, sample-row foreign keys and soft hypothesis ranking
+// ---------------------------------------------------------------------------------------------
+//
+// A merged run breaks plain localisation: `players` and `manager` share one printable run, so the run
+// start is NOT the array start and the header immediately before it belongs to neither table. That is
+// exactly what the parenthesised warning "could not localise players" reports.
+//
+// The array start is therefore FOUND, not assumed. Walking backwards from the located run yields
+// every position a variable-length array could begin at, and each one becomes a HYPOTHESIS. No single
+// signal has to be right, because hypotheses are scored softly and the best one wins:
+//
+//   lead-field proximity  a known lead field in the first 5 descriptors
+//   capacity sanity       rowCount * recordSize fits the block
+//   descriptor continuity the header's own field count describes the walk from that anchor
+//   foreign-key oracle    sampled `teamid` values resolve against the decoded `teams` table
+//
+// Soft scoring is what survives EA reordering fields between releases: `players` in FC27 stores 110
+// fields where the bundled datasheet declares 137, so an exact signature would reject every array.
+
+/**
+ * Lead-field signatures per target table, in the order EA writes them. Matched on the NORMALISED
+ * datasheet name (lowercase, alphanumerics only) so case and punctuation cannot hide a lead field.
+ */
+const LEAD_FIELD_SIGNATURES: Record<string, readonly string[]> = {
+  players: ["playerid", "firstname", "surname", "commonname", "birthdate"],
+  manager: ["managerid", "firstname", "surname", "teamid", "nationality"],
+  // Same manager row under its FC27 career-side table name.
+  career_managerinfo: ["managerid", "firstname", "surname", "teamid", "nationality"],
+  career_youthplayers: ["youthplayerid", "firstname", "surname", "rating"],
+  cm_teamsheets: ["teamsheetid", "teamid", "formationid"],
+};
+
+/** Field names that carry a club id, used for the foreign-key oracle. */
+const FOREIGN_KEY_FIELDS: readonly string[] = [
+  "teamid",
+  "clubid",
+  "currentteamid",
+  "contractteamid",
+];
+
+/** How far back a descriptor array may start from a located run, in descriptors. */
+const ANCHOR_MAX_STEPS = 150;
+/** Hard cap on the breadth-first backwards walk, so dense record data cannot make it unbounded. */
+const ANCHOR_MAX_CANDIDATES = 4_000;
+/** A lead field must appear within this many descriptors of the array start to earn proximity credit. */
+const LEAD_FIELD_WINDOW = 5;
+/** Rows decoded to evaluate a hypothesis' club ids. */
+const SAMPLE_ROWS = 10;
+/** A candidate record size above this cannot come from a table header. */
+const HYPOTHESIS_MAX_RECORD_SIZE = 10_000;
+/** A header's field count and the walk from its descriptor start may disagree by at most this. */
+const HYPOTHESIS_FIELD_SLACK = 3;
+
+const SCORE_LEAD_FIRST = 40;
+const SCORE_LEAD_NEAR = 30;
+const SCORE_CAPACITY = 25;
+const SCORE_CONTINUITY = 20;
+const SCORE_FK_STRONG = 30;
+const SCORE_FK_GOOD = 20;
+const SCORE_FK_WEAK = 10;
+const FK_STRONG_RATE = 0.8;
+const FK_GOOD_RATE = 0.6;
+const FK_WEAK_RATE = 0.4;
+/** A hypothesis must clear this, AND show descriptor continuity, to displace the ordinary read. */
+const HYPOTHESIS_MIN_SCORE = 55;
+/** Cap on how many hypotheses get the (expensive) sample-row foreign-key check. */
+const FK_SAMPLE_LIMIT = 24;
+
+function normaliseFieldName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** The shortnames of a table's lead fields, resolved through the datasheet. */
+function leadingFieldShorts(meta: DbMeta, tableName: string): Set<string> {
+  const shorts = new Set<string>();
+  const signature = LEAD_FIELD_SIGNATURES[tableName];
+  if (signature === undefined) return shorts;
+  const perTable = meta.fieldNamesByTable.get(tableName);
+  if (perTable === undefined) return shorts;
+  const wanted = new Set(signature.map(normaliseFieldName));
+  for (const [short, human] of perTable) {
+    if (wanted.has(normaliseFieldName(human))) shorts.add(short);
+  }
+  return shorts;
+}
+
+/**
+ * Positions an array could start at, found by walking BACKWARDS from a located run.
+ *
+ * Descriptor length varies, so walking backwards branches: every position reachable by stepping 8, 9,
+ * 12 or 16 bytes back from an already-reachable position is itself reachable. Breadth-first, so the
+ * nearest - and most likely - anchors are produced first.
+ */
+function backwardAnchors(block: Uint8Array, from: number): number[] {
+  const anchors: number[] = [from];
+  const seen = new Set<number>([from]);
+  let frontier: number[] = [from];
+  for (let step = 0; step < ANCHOR_MAX_STEPS && frontier.length > 0; step++) {
+    const next: number[] = [];
+    for (const at of frontier) {
+      for (const back of DESCRIPTOR_STEPS) {
+        const candidate = at - back;
+        if (candidate < 0 || seen.has(candidate)) continue;
+        seen.add(candidate);
+        if (!isPrintableId(block.subarray(candidate, candidate + 4))) continue;
+        anchors.push(candidate);
+        next.push(candidate);
+        if (anchors.length >= ANCHOR_MAX_CANDIDATES) return anchors;
+      }
+    }
+    frontier = next;
+  }
+  return anchors;
+}
+
+/** The row key of the club-id field, when the table has one. */
+function foreignKeyOf(fields: readonly FieldDescriptor[]): string | null {
+  for (const field of fields) {
+    if (!field.known) continue;
+    if (FOREIGN_KEY_FIELDS.includes(normaliseFieldName(field.key))) return field.key;
+  }
+  return null;
+}
+
+/** Rows a header can actually hold before the block runs out. */
+function blockCapacity(block: Uint8Array, recordsStart: number, recordSize: number): number {
+  if (recordSize <= 0) return 0;
+  return Math.max(0, Math.floor((block.length - recordsStart) / recordSize));
+}
+
+interface Hypothesis {
+  arrayStart: number;
+  headerOffset: number;
+  recordSize: number;
+  rowCount: number;
+  fieldCount: number;
+  layout: DescriptorLayout;
+  read: DescriptorRead;
+  leadFieldPosition: number;
+  capacitySanity: boolean;
+  descriptorContinuity: boolean;
+  teamIdRate: number | null;
+  score: number;
+}
+
+/**
+ * Every array start reachable backwards from `run`, paired with every plausible header in the window
+ * `[arrayStart - 64, arrayStart - 36]`.
+ *
+ * Candidates are hard-filtered only on physical impossibility (record size above 10 KB, or rows that
+ * cannot fit the block). Everything else is left to the score, which is the point of soft evaluation.
+ */
+function buildHypotheses(
+  block: Uint8Array,
+  run: GridRun,
+  meta: DbMeta,
+  tableName: string,
+  leadShorts: ReadonlySet<string>
+): Hypothesis[] {
+  const hypotheses: Hypothesis[] = [];
+  for (const arrayStart of backwardAnchors(block, run.start)) {
+    const walk = walkGrid(block, arrayStart);
+    if (walk.ids.length < GRID_MIN_IDS) continue;
+    // The located run has to be part of this array, or the anchor is not its start.
+    if (!walk.positions.includes(run.start)) continue;
+
+    const leadFieldPosition = walk.ids.findIndex((id) => leadShorts.has(id));
+
+    for (
+      let headerOffset = arrayStart - DESCRIPTOR_START_IN_HEADER;
+      headerOffset >= arrayStart - HEADER_SEARCH_BACK;
+      headerOffset--
+    ) {
+      if (headerOffset < 0 || headerOffset + DESCRIPTOR_START_IN_HEADER + 4 > block.length) continue;
+      const recordSize = readUInt32LE(block, headerOffset + 4);
+      if (recordSize === 0 || recordSize > HYPOTHESIS_MAX_RECORD_SIZE) continue;
+      const rowCount = block[headerOffset + 18] | (block[headerOffset + 19] << 8);
+      if (rowCount === 0) continue;
+      const declaredFields = block[headerOffset + 24];
+      if (declaredFields < GRID_MIN_IDS) continue;
+
+      const descriptorContinuity =
+        Math.abs(walk.ids.length - declaredFields) <= HYPOTHESIS_FIELD_SLACK;
+      const fieldCount = descriptorContinuity ? declaredFields : walk.ids.length;
+
+      // FC27 career tables put the shortname first and encode the depth as a u8 (compact) or a u32
+      // (needed where a string depth exceeds 255). Both are read and the better-resolving one wins,
+      // exactly as the ordinary path does.
+      let best: { layout: DescriptorLayout; read: DescriptorRead } | null = null;
+      for (const layout of [DESCRIPTOR_LAYOUTS[1], DESCRIPTOR_LAYOUTS[2]]) {
+        const read = readDescriptors(
+          block,
+          headerOffset,
+          fieldCount,
+          layout,
+          meta,
+          tableName,
+          walk.positions
+        );
+        if (best === null || read.resolved > best.read.resolved) best = { layout, read };
+      }
+      if (best === null) continue;
+
+      const last = walk.positions[walk.positions.length - 1];
+      const read: DescriptorRead = {
+        ...best.read,
+        endOffset: last + modalStep(walk.positions),
+      };
+      if (blockCapacity(block, read.endOffset, recordSize) === 0) continue;
+
+      hypotheses.push({
+        arrayStart,
+        headerOffset,
+        recordSize,
+        rowCount,
+        fieldCount: read.fields.length,
+        layout: best.layout,
+        read,
+        leadFieldPosition,
+        capacitySanity: rowCount * recordSize <= block.length,
+        descriptorContinuity,
+        teamIdRate: null,
+        score: 0,
+      });
+    }
+  }
+  return hypotheses;
+}
+
+/**
+ * Share of a hypothesis' sampled rows whose club id resolves to a real team.
+ *
+ * Rows with no club id at all are not counted either way: free agents and unassigned ids are
+ * legitimate, so they must not be allowed to sink a correct hypothesis.
+ */
+function sampleTeamIdRate(
+  block: Uint8Array,
+  hypothesis: Hypothesis,
+  meta: DbMeta,
+  shortName: string,
+  tableName: string,
+  teamsIds: ReadonlySet<number>
+): number | null {
+  const fields = hypothesis.read.fields.slice().sort((a, b) => a.bitOffset - b.bitOffset);
+  const key = foreignKeyOf(fields);
+  if (key === null) return null;
+
+  const capacity = blockCapacity(block, hypothesis.read.endOffset, hypothesis.recordSize);
+  const rows = Math.min(hypothesis.rowCount, SAMPLE_ROWS, capacity);
+  if (rows <= 0) return 0;
+
+  const header: TableHeader = {
+    shortName,
+    tableName,
+    headerOffset: hypothesis.headerOffset,
+    recordsStart: hypothesis.read.endOffset,
+    recordSize: hypothesis.recordSize,
+    recordCount: rows,
+    fieldCount: hypothesis.fieldCount,
+    fields,
+    unknownFields: [],
+  };
+
+  let sample: RowRead;
+  try {
+    sample = decodeRows(block, header, meta, { limit: rows });
+  } catch {
+    return 0;
+  }
+  if (sample.rows.length === 0) return 0;
+
+  let seen = 0;
+  let hits = 0;
+  for (const row of sample.rows) {
+    const value = row[key];
+    if (typeof value !== "number") continue;
+    seen++;
+    if (value > 0 && teamsIds.has(value)) hits++;
+  }
+  return seen === 0 ? 0 : hits / seen;
+}
+
+/**
+ * Scores every hypothesis and returns them best-first.
+ *
+ * The foreign-key check is the expensive part, so it is only applied to structurally sound
+ * hypotheses (descriptor continuity) and is capped; a hypothesis that never gets sampled simply
+ * scores on structure alone rather than being penalised for the cap.
+ */
+function scoreHypotheses(
+  block: Uint8Array,
+  hypotheses: Hypothesis[],
+  meta: DbMeta,
+  shortName: string,
+  tableName: string,
+  teamsIds: ReadonlySet<number> | null
+): Hypothesis[] {
+  let sampled = 0;
+  for (const hypothesis of hypotheses) {
+    let score = 0;
+    if (hypothesis.leadFieldPosition === 0) score += SCORE_LEAD_FIRST;
+    else if (hypothesis.leadFieldPosition > 0 && hypothesis.leadFieldPosition < LEAD_FIELD_WINDOW) {
+      score += SCORE_LEAD_NEAR;
+    }
+    if (hypothesis.capacitySanity) score += SCORE_CAPACITY;
+    if (hypothesis.descriptorContinuity) score += SCORE_CONTINUITY;
+
+    if (teamsIds !== null && hypothesis.descriptorContinuity && sampled < FK_SAMPLE_LIMIT) {
+      sampled++;
+      hypothesis.teamIdRate = sampleTeamIdRate(block, hypothesis, meta, shortName, tableName, teamsIds);
+      const rate = hypothesis.teamIdRate;
+      if (rate !== null) {
+        if (rate >= FK_STRONG_RATE) score += SCORE_FK_STRONG;
+        else if (rate >= FK_GOOD_RATE) score += SCORE_FK_GOOD;
+        else if (rate >= FK_WEAK_RATE) score += SCORE_FK_WEAK;
+      }
+    }
+
+    hypothesis.score = score;
+  }
+  return hypotheses.sort(
+    (a, b) =>
+      b.score - a.score ||
+      Number(b.descriptorContinuity) - Number(a.descriptorContinuity) ||
+      b.fieldCount - a.fieldCount
+  );
+}
+
+/** What the directory address produced for one table, before any hypothesis ranking. */
+interface ResolvedEntry {
+  headerOffset: number;
+  recordSize: number;
+  recordCount: number;
+  fieldCount: number;
+  layout: DescriptorLayout;
+  read: DescriptorRead;
+  /** True when the values came from a validated located header rather than the directory address. */
+  located: boolean;
+}
+
+/**
+ * Reads one table the ordinary way: the directory address first, then validated localisation when the
+ * address does not resolve.
+ *
+ * Returns null when no field count could be established at all, which is how a table ends up in
+ * `unknownTables` rather than in the decoded set.
+ */
+function resolveEntry(
+  block: Uint8Array,
+  meta: DbMeta | null,
+  tableName: string | null,
+  entry: { shortName: string; offset: number },
+  tablesStart: number,
+  runs: () => GridRun[],
+  fieldsFor: (name: string) => Set<string> | undefined,
+  warnings: string[]
+): ResolvedEntry | null {
+  let headerOffset = tablesStart + entry.offset;
+  if (headerOffset + 36 > block.length) headerOffset = Math.max(0, block.length - 36);
+  let recordSize = readUInt32LE(block, headerOffset + 4);
+  let recordCount = block[headerOffset + 18] | (block[headerOffset + 19] << 8);
+  let fieldCount = block[headerOffset + 24];
+  const addressed = fieldCount > 0 && fieldCount <= 4096 ? fieldCount : 0;
+
+  // Every layout is read and scored by how many field shortnames the datasheet declares for THIS
+  // table. A tie keeps the classic layout, so FC25/FC26 decoding cannot change. The FC27 layouts are
+  // additionally gated on resolving at least half the fields: a table whose descriptor array does
+  // not sit where a layout expects it must NOT be read with that layout, because a plausible-looking
+  // wrong field list is exactly the silent corruption to avoid.
+  // Every layout is read and scored. DEPTH AGREEMENT decides, because a layout that is wrong about
+  // where the descriptors start still reads the 4-char shortnames - they sit at the same offset in
+  // both FC27 layouts - so counting resolvable names alone cannot tell the correct layout from one
+  // that reads garbage where the encoded depth lives. Depths, unlike names, cannot agree by accident.
+  //
+  // A tie keeps the classic layout and the resolved-count rule still applies, so FC25/FC26 decoding
+  // is unchanged: those saves have no depth evidence to prefer anything else, and a save whose
+  // datasheet is stale ties at zero.
+  const compactFloor = Math.ceil(addressed * COMPACT_MIN_RESOLVED_RATIO);
+  let chosen = {
+    layout: DESCRIPTOR_LAYOUTS[0],
+    read: readDescriptors(block, headerOffset, addressed, DESCRIPTOR_LAYOUTS[0], meta, tableName),
+  };
+  if (addressed > 0) {
+    for (const layout of DESCRIPTOR_LAYOUTS.slice(1)) {
+      const read = readDescriptors(block, headerOffset, addressed, layout, meta, tableName);
+      const better =
+        read.depthAgreed > chosen.read.depthAgreed ||
+        (read.depthAgreed === chosen.read.depthAgreed &&
+          read.resolved >= compactFloor &&
+          read.resolved > chosen.read.resolved);
+      if (better) {
+        chosen = { layout, read };
+      }
+    }
+  }
+
+  let located = false;
+  if (meta !== null && tableName !== null && chosen.read.resolved < Math.max(addressed, GRID_MIN_IDS)) {
+    const best = bestRunFor(runs(), fieldsFor(tableName));
+    if (best === null) {
+      warnings.push(`FC27 found no descriptor run for ${tableName}.`);
+    } else {
+      let foundBest: LocatedTable | null = null;
+      let foundLayout = chosen.layout;
+      for (const candidate of [DESCRIPTOR_LAYOUTS[1], DESCRIPTOR_LAYOUTS[2]]) {
+        const found = headerForRun(block, best.run, candidate, meta, tableName);
+        if (found === null) continue;
+        if (foundBest === null || found.fieldsRead.resolved > foundBest.fieldsRead.resolved) {
+          foundBest = found;
+          foundLayout = candidate;
+        }
+      }
+      if (foundBest !== null && foundBest.fieldsRead.resolved > chosen.read.resolved - 1) {
+        headerOffset = foundBest.headerOffset;
+        recordSize = readUInt32LE(block, headerOffset + 4);
+        recordCount = block[headerOffset + 18] | (block[headerOffset + 19] << 8);
+        fieldCount = block[headerOffset + 24];
+        chosen = { layout: foundLayout, read: foundBest.fieldsRead };
+        located = true;
+        warnings.push(
+          `FC27 localised ${tableName}: ${fieldCount} descriptors at ${headerOffset}, ` +
+            `recordSize ${recordSize}, ${recordCount} rows.`
+        );
+      } else {
+        warnings.push(
+          `FC27 could not localise ${tableName} (run of ${best.run.ids.length} ids at ${best.run.start}); ` +
+            `ranking hypotheses instead.`
+        );
+      }
+    }
+  }
+
+  if (fieldCount <= 0) return null;
+  return { headerOffset, recordSize, recordCount, fieldCount, layout: chosen.layout, read: chosen.read, located };
+}
+
+/**
+ * Decodes `teams` and returns its id set, so a candidate table's club ids can be checked against real
+ * clubs. Returns null when `teams` itself could not be decoded, in which case the foreign-key signal
+ * is not scored at all rather than guessed at.
+ */
+function buildTeamsOracle(
+  block: Uint8Array,
+  meta: DbMeta,
+  shortName: string,
+  resolved: ResolvedEntry
+): Set<number> | null {
+  const fields = resolved.read.fields.slice().sort((a, b) => a.bitOffset - b.bitOffset);
+  const key = foreignKeyOf(fields) ?? "teamid";
+  const capacity = blockCapacity(block, resolved.read.endOffset, resolved.recordSize);
+  const rows = Math.min(resolved.recordCount, capacity);
+  if (rows <= 0) return null;
+
+  const header: TableHeader = {
+    shortName,
+    tableName: "teams",
+    headerOffset: resolved.headerOffset,
+    recordsStart: resolved.read.endOffset,
+    recordSize: resolved.recordSize,
+    recordCount: rows,
+    fieldCount: resolved.fieldCount,
+    fields,
+    unknownFields: [],
+  };
+
+  try {
+    const read = decodeRows(block, header, meta, { limit: rows, fields: [key] });
+    const ids = new Set<number>();
+    for (const row of read.rows) {
+      const value = row[key];
+      if (typeof value === "number" && value > 0) ids.add(value);
+    }
+    return ids.size > 0 ? ids : null;
+  } catch {
+    return null;
+  }
 }
 
 export function readTableHeaders(block: Uint8Array, meta: DbMeta | null, database: number): HeaderRead {
-  const reader = new ByteReader(block, DB_HEADER.length);
-
-  const declaredSize = reader.readUInt32LE();
+  const declaredSize = readUInt32LE(block, DB_HEADER.length);
   if (declaredSize !== block.length) {
     throw new Error(`database size mismatch: header says ${declaredSize}, block is ${block.length}`);
   }
-  reader.skip(4);
-  const tableCount = reader.readUInt32LE();
-  reader.skip(4);
+
+  const variant = chooseDbHeaderVariant(block);
+  const tableCount = readUInt32LE(block, variant.countAt);
   if (tableCount <= 0 || tableCount > MAX_TABLE_COUNT) {
     throw new Error(`database declares ${tableCount} tables`);
   }
 
   const entries: { shortName: string; offset: number }[] = [];
-  for (let i = 0; i < tableCount; i++) {
+  for (let index = 0; index < tableCount; index++) {
+    const at = variant.dirAt + index * 8;
     entries.push({
-      shortName: latin1Text(reader.readBytes(4)),
-      offset: reader.readUInt32LE(),
+      shortName: latin1Text(block.subarray(at, at + 4)),
+      offset: readUInt32LE(block, at + 4),
     });
   }
-  reader.skip(4);
-  const tablesStart = reader.position;
+  const tablesStart = variant.dirAt + tableCount * 8 + DB_HEADER_TRAILER_BYTES;
 
   const headers: TableHeader[] = [];
   const unknownTables: string[] = [];
   const stats: TableStat[] = [];
+  const warnings: string[] = [];
+  const layoutUsage = { classic16: 0, compact9: 0, fc27Long16: 0 };
 
-  for (const entry of entries) {
-    const headerOffset = tablesStart + entry.offset;
-    if (headerOffset < tablesStart || headerOffset + 36 > block.length) {
-      unknownTables.push(entry.shortName);
-      continue;
+  // Scanning the payload is only done when a table's address-read descriptors fail to resolve, so
+  // FC25/FC26 saves never pay for it.
+  let gridRuns: GridRun[] | null = null;
+  const runs = (): GridRun[] => (gridRuns ??= scanGrids(block));
+  let fieldSets: Map<string, Set<string>> | null = null;
+  const fieldsFor = (name: string): Set<string> | undefined =>
+    (fieldSets ??= meta === null ? new Map() : datasheetFieldSets(meta)).get(name);
+
+  const resolved: (ResolvedEntry | null)[] = entries.map((entry) =>
+    resolveEntry(
+      block,
+      meta,
+      meta?.tableNames.get(entry.shortName) ?? null,
+      entry,
+      tablesStart,
+      runs,
+      fieldsFor,
+      warnings
+    )
+  );
+
+  // The foreign-key oracle needs `teams`, so it is built once, up front, from whichever entry
+  // resolves to it. When `teams` itself cannot be decoded the club-id signal is not scored at all.
+  let teamsIds: Set<number> | null = null;
+  if (meta !== null) {
+    for (let index = 0; index < entries.length && teamsIds === null; index++) {
+      if (meta.tableNames.get(entries[index].shortName) !== "teams") continue;
+      const teams = resolved[index];
+      if (teams !== null) teamsIds = buildTeamsOracle(block, meta, entries[index].shortName, teams);
     }
+  }
 
-    reader.position = headerOffset;
-    reader.skip(4);
-    const recordSize = reader.readUInt32LE();
-    reader.skip(10);
-    const recordCount = reader.readUInt16LE();
-    reader.skip(4);
-    const fieldCount = reader.readUInt8();
-    reader.skip(11);
-
-    if (fieldCount <= 0 || fieldCount > 4096 || reader.position + fieldCount * 16 > block.length) {
-      unknownTables.push(entry.shortName);
-      continue;
-    }
-
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index];
     const tableName = meta?.tableNames.get(entry.shortName) ?? null;
+    let current = resolved[index];
+
+    // Target tables additionally get backwards-anchored hypotheses. A merged run leaves the plain
+    // localiser with nothing, and even where localisation succeeded a scored hypothesis can be
+    // better, so both are compared on rows produced.
+    if (current !== null && meta !== null && tableName !== null) {
+      if (LEAD_FIELD_SIGNATURES[tableName] !== undefined) {
+        const best = bestRunFor(runs(), fieldsFor(tableName));
+        if (best === null) {
+          warnings.push(`FC27 ranked no hypotheses for ${tableName}: no run attributed to its fields.`);
+        } else {
+          const ranked = scoreHypotheses(
+            block,
+            buildHypotheses(block, best.run, meta, tableName, leadingFieldShorts(meta, tableName)),
+            meta,
+            entry.shortName,
+            tableName,
+            teamsIds
+          );
+          const top = ranked
+            .slice(0, 3)
+            .map(
+              (h) =>
+                `${h.score}@${h.arrayStart} fc=${h.fieldCount} rows=${h.rowCount} ` +
+                `cont=${Number(h.descriptorContinuity)} lead=${h.leadFieldPosition} ` +
+                `fk=${h.teamIdRate === null ? "n/a" : h.teamIdRate.toFixed(2)}`
+            )
+            .join(" | ");
+          warnings.push(
+            `FC27 ranked ${ranked.length} hypotheses for ${tableName} from run ` +
+              `${best.run.ids.length}@${best.run.start}; top: ${top}`
+          );
+          const winner = ranked[0];
+          if (winner !== undefined && winner.descriptorContinuity && winner.score >= HYPOTHESIS_MIN_SCORE) {
+            const rows = Math.min(
+              winner.rowCount,
+              blockCapacity(block, winner.read.endOffset, winner.recordSize)
+            );
+            if (rows > current.recordCount) {
+              warnings.push(
+                `FC27 ranked ${ranked.length} hypotheses for ${tableName}; accepted the anchor at ` +
+                  `${winner.arrayStart} (header ${winner.headerOffset}, score ${winner.score}, ` +
+                  `${winner.fieldCount} fields, ${rows} rows, club-id rate ` +
+                  `${winner.teamIdRate === null ? "n/a" : winner.teamIdRate.toFixed(2)}).`
+              );
+              current = {
+                headerOffset: winner.headerOffset,
+                recordSize: winner.recordSize,
+                recordCount: rows,
+                fieldCount: winner.fieldCount,
+                layout: winner.layout,
+                read: winner.read,
+                located: true,
+              };
+            } else {
+              warnings.push(
+                `FC27 ranked ${ranked.length} hypotheses for ${tableName}; kept the ordinary read ` +
+                  `(${current.recordCount} rows beats the best hypothesis' ${rows}).`
+              );
+            }
+          }
+        }
+      }
+    }
+
+    if (current === null) {
+      unknownTables.push(entry.shortName);
+      continue;
+    }
     if (tableName === null) unknownTables.push(entry.shortName);
 
-    const declared: FieldDescriptor[] = [];
-    for (let f = 0; f < fieldCount; f++) {
-      const type = reader.readUInt32LE();
-      const bitOffset = reader.readUInt32LE();
-      const shortField = latin1Text(reader.readBytes(4));
-      const bitDepth = reader.readUInt32LE();
-      const known = tableName ? fieldNameFor(meta as DbMeta, tableName, shortField) : undefined;
-      declared.push({
-        type,
-        bitOffset,
-        bitDepth,
-        shortName: shortField,
-        key: known ?? `unk_${shortField}`,
-        known: known !== undefined,
-      });
+    const layout = current.layout;
+    const fieldsRead = current.read;
+    const { headerOffset, recordSize, fieldCount } = current;
+    let recordCount = current.recordCount;
+    layoutUsage[layout.id]++;
+
+    for (const mismatch of fieldsRead.depthMismatches) {
+      warnings.push(`FC27 descriptor drift: ${tableName ?? entry.shortName}.${mismatch}`);
+    }
+    for (const recovery of fieldsRead.recoveries) {
+      warnings.push(
+        `FC27 compact descriptor: ${tableName ?? entry.shortName} read an 8-byte entry (${recovery})`
+      );
+    }
+    if (fieldsRead.fields.length < fieldCount) {
+      warnings.push(
+        `Table ${tableName ?? entry.shortName}: only ${fieldsRead.fields.length} of ${fieldCount} descriptors fit the block`
+      );
     }
 
-    const fields = declared.slice().sort((a, b) => a.bitOffset - b.bitOffset);
+    // Records must fit inside the database block. A scanned array can carry a header prefix that is
+    // not this table's, so clamp the row count to what the block can actually hold and report the
+    // clamp instead of reading past the end of the database.
+    if (recordSize > 0) {
+      const capacity = blockCapacity(block, fieldsRead.endOffset, recordSize);
+      if (recordCount > capacity) {
+        warnings.push(
+          `Table ${tableName ?? entry.shortName}: row count ${recordCount} exceeds the ${capacity} ` +
+            `rows this block can hold; clamped.`
+        );
+        recordCount = capacity;
+      }
+    } else if (recordCount > 0) {
+      warnings.push(`Table ${tableName ?? entry.shortName}: record size is 0; row count forced to 0.`);
+      recordCount = 0;
+    }
+
+    // Any FC27 field the bundled datasheet does not declare is kept as an unknown field rather than
+    // dropped, so a renamed or brand-new column is visible instead of silently missing.
+    const fields = fieldsRead.fields.slice().sort((a, b) => a.bitOffset - b.bitOffset);
+    const unknownFields = fields.filter((field) => !field.known).map((field) => field.shortName);
 
     headers.push({
       shortName: entry.shortName,
       tableName,
       headerOffset,
-      recordsStart: reader.position,
+      recordsStart: fieldsRead.endOffset,
       recordSize,
       recordCount,
       fieldCount,
       fields,
-      unknownFields: fields.filter((f) => !f.known).map((f) => f.shortName),
+      unknownFields,
     });
 
     stats.push({
@@ -514,11 +1571,11 @@ export function readTableHeaders(block: Uint8Array, meta: DbMeta | null, databas
       rows: recordCount,
       fields: fieldCount,
       recordSize,
-      unknownFields: fields.filter((f) => !f.known).map((f) => f.shortName),
+      unknownFields,
     });
   }
 
-  return { headers, unknownTables, stats };
+  return { headers, unknownTables, stats, warnings, layoutUsage };
 }
 
 interface RowRead {
@@ -940,6 +1997,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     const unknownTables: string[] = [];
     const databases: SpikeCareerData["databases"] = [];
     const tableIndex = new Map<string, { block: number; header: TableHeader }[]>();
+    const descriptorLayoutUsage = { classic16: 0, compact9: 0, fc27Long16: 0 };
 
     for (let b = 0; b < blocks.length; b++) {
       let read: HeaderRead;
@@ -951,6 +2009,10 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       }
       tableStats.push(...read.stats);
       unknownTables.push(...read.unknownTables);
+      warnings.push(...read.warnings);
+      descriptorLayoutUsage.classic16 += read.layoutUsage.classic16;
+      descriptorLayoutUsage.compact9 += read.layoutUsage.compact9;
+      descriptorLayoutUsage.fc27Long16 += read.layoutUsage.fc27Long16;
       databases.push({
         index: b,
         bytes: blocks[b].length,
@@ -1711,6 +2773,23 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     }
 
     const estimatedDate = latestDate > 0 ? asDate(latestDate) : null;
+    // Which title wrote this save, from the two signals that actually differ between titles: FC27
+    // moved its tables to the compact 9-byte descriptor, FC26 CmMgr saves are FBCHUNKS containers,
+    // and an FC25 save is a bare t3db stream. Never inferred from a filename.
+    const gameVersion: GameVersion =
+      descriptorLayoutUsage.compact9 > 0 || descriptorLayoutUsage.fc27Long16 > 0
+        ? "FC27"
+        : fingerprint.hasFbChunksTag
+        ? "FC26"
+        : "FC25";
+    fingerprint.descriptorLayout =
+      descriptorLayoutUsage.fc27Long16 > 0
+        ? "fc27Long16"
+        : descriptorLayoutUsage.compact9 > 0
+        ? "compact9"
+        : descriptorLayoutUsage.classic16 > 0
+        ? "classic16"
+        : "none";
     // Calendar year of the in-game date. `career_users.seasoncount` is only a 0-based season
     // counter within the career, which is why every career previously reported Season 1.
     const seasonYear = ageReferenceDate.getUTCFullYear();
@@ -1745,6 +2824,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         ...(clubName ? { clubName } : {}),
         ...(estimatedDate ? { currentDate: estimatedDate } : {}),
         seasonYear,
+        gameVersion,
       },
       rawPayload,
       extractedTables,
@@ -1785,12 +2865,15 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     let databaseBlocks = 0;
     let databaseBytes = 0;
     let cursor = offsets.db;
-    while (cursor >= 0) {
+    // Step past the SIGNATURE, not past the declared size: FC27's career and squads blocks overlap,
+    // so advancing by size counted one database where the save holds two.
+    while (cursor >= 0 && cursor + DB_HEADER.length + 4 <= bytes.length) {
       const size = readUInt32LE(bytes, cursor + DB_HEADER.length);
-      if (size <= 0 || cursor + size > bytes.length) break;
-      databaseBlocks++;
-      databaseBytes += size;
-      cursor = indexOfBytes(bytes, DB_HEADER, cursor + size);
+      if (size > 0 && cursor + size <= bytes.length) {
+        databaseBlocks++;
+        databaseBytes += size;
+      }
+      cursor = indexOfBytes(bytes, DB_HEADER, cursor + DB_HEADER.length);
     }
 
     const container: SaveFingerprint["container"] =
@@ -1821,6 +2904,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       hasZlibStream: offsets.zlib >= 0,
       hasLz4Frame: offsets.lz4 >= 0,
       signatureOffsets: offsets,
+      descriptorLayout: "none",
     };
   }
 

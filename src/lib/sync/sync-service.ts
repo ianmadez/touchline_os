@@ -97,7 +97,7 @@ export interface SyncResult {
  *
  * 11 - the academy: `youthProspects` from `career_youthplayers`, written to `youth_prospects`.
  */
-export const SYNC_PIPELINE_VERSION = "11";
+export const SYNC_PIPELINE_VERSION = "12";
 
 export class SyncService {
   private parser = createSaveParser();

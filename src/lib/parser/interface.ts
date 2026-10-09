@@ -22,6 +22,9 @@ export interface SaveFact {
 
 export type SaveSlotKind = "manager-career" | "player-career" | "career" | "database" | "unknown";
 
+/** Which EA SPORTS FC title wrote a save, inferred from its container and descriptor layout. */
+export type GameVersion = "FC25" | "FC26" | "FC27";
+
 export interface SaveCandidate {
   id: string;
   filePath: string;
@@ -39,6 +42,8 @@ export interface RawCareerData {
     clubName?: string;
     currentDate?: string;
     seasonYear?: number;
+    /** Inferred from the container and field-descriptor layout, never from a filename. */
+    gameVersion?: GameVersion;
   };
   rawPayload: Record<string, unknown>;
   extractedTables: Record<string, unknown[]>;
@@ -64,6 +69,12 @@ export interface DbMeta {
   fieldNamesByTable: Map<string, Map<string, string>>;
   fieldRange: Map<string, number>;
   primaryKeys: Map<string, string>;
+  /** Declared bit depth per `${tableName}\u0000${fieldShortName}` - validates compact descriptors. */
+  fieldDepth: Map<string, number>;
+  /** Declared type (0 string / 3 int / 4 float) per `${tableName}\u0000${fieldShortName}`. */
+  fieldType: Map<string, number>;
+  /** Number of fields the datasheet declares for each table. Identifies a table's descriptor grid. */
+  fieldCountByTable: Map<string, number>;
 }
 
 export interface IncompleteName {
@@ -124,6 +135,8 @@ export interface SaveFingerprint {
   hasZlibStream: boolean;
   hasLz4Frame: boolean;
   signatureOffsets: Record<string, number>;
+  /** Field-descriptor layout the save's tables use. "none" when no table resolved. */
+  descriptorLayout: "classic16" | "compact9" | "fc27Long16" | "none";
 }
 
 export interface SaveSearchLocation {
