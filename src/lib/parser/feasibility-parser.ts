@@ -400,30 +400,96 @@ export function parseNameTable(csv: string): Map<number, string> {
   return byPlayerId;
 }
 
+/** A fifa_ng_db block, and whether its table directory can be trusted as a table-address table. */
+export interface DatabaseBlock {
+  bytes: Uint8Array;
+  /** Byte offset of the block inside the save. */
+  offset: number;
+  /**
+   * True when at least one table's directory offset lands on a plausible table header.
+   *
+   * False means the directory is structurally a directory but its offsets point into record data, which
+   * is what FC27's career block does. Such a block is still a real database - it just has to be read by
+   * locallising its descriptor runs rather than by computing addresses from it.
+   */
+  addressable: boolean;
+}
+
 /**
- * Every fifa_ng_db block in the save, in file order.
+ * How a candidate block's table directory reads, independently of whether its entries land on headers.
  *
- * The scan steps past the SIGNATURE, not past the declared size: FC27's career block and squads
- * block overlap (the career block's declared size covers the squads block's start), so advancing by
- * size silently stepped over the second database. A candidate is only kept when its header and
- * directory are structurally sound, so stepping by signature cannot admit payload false positives.
+ * Every id printable, offsets that never go backwards, and every offset inside the block. This is the
+ * same shape test the differential tool uses, and it is evidence of a real database on its own: a run
+ * of payload bytes does not produce four printable characters at every eight-byte boundary with a
+ * monotonic, in-range u32 beside each.
+ *
+ * It matters because the FC27 career block's offsets DO point into record data - its tables are packed
+ * with per-table descriptor strides, so `tablesStart + offset` is not a header address. Requiring an
+ * entry that scores by its header therefore threw away an entire database that descriptor-run
+ * localisation can find perfectly well.
  */
-export function unpackDatabases(save: Uint8Array): Uint8Array[] {
-  const blocks: Uint8Array[] = [];
+function directoryShape(
+  block: Uint8Array,
+  variant: (typeof DB_HEADER_VARIANTS)[number]
+): { declared: number; shaped: boolean } {
+  if (variant.countAt + 4 > block.length) return { declared: 0, shaped: false };
+  const declared = readUInt32LE(block, variant.countAt);
+  if (declared <= 0 || declared > MAX_TABLE_COUNT) return { declared: 0, shaped: false };
+  const tablesStart = variant.dirAt + declared * 8 + DB_HEADER_TRAILER_BYTES;
+  if (tablesStart >= block.length) return { declared, shaped: false };
+
+  let previous = -1;
+  for (let index = 0; index < declared; index++) {
+    const at = variant.dirAt + index * 8;
+    if (at + 8 > block.length) return { declared, shaped: false };
+    if (!isPrintableId(block.subarray(at, at + 4))) return { declared, shaped: false };
+    const offset = readUInt32LE(block, at + 4);
+    if (offset < previous) return { declared, shaped: false };
+    if (tablesStart + offset >= block.length) return { declared, shaped: false };
+    previous = offset;
+  }
+  return { declared, shaped: true };
+}
+
+/**
+ * Every fifa_ng_db block in the save, in file order, each with a note on how its directory reads.
+ *
+ * The scan steps past the SIGNATURE, not past the declared size: FC27's career block and squads block
+ * overlap (the career block's declared size covers the squads block's start), so advancing by size
+ * silently stepped over the second database.
+ *
+ * A candidate is kept when EITHER its directory lands on plausible headers (the FC25/FC26 shape, and
+ * the FC27 squads block) OR its directory at least reads like a directory. The second test is what
+ * admits the FC27 career block, whose offsets point into record data - see `directoryShape`. An
+ * unscoreable directory is no longer fatal: it downgrades the block to un-addressable, and
+ * `readTableHeaders` locates that database's tables by scanning for descriptor runs instead.
+ */
+export function inspectDatabaseBlocks(save: Uint8Array): DatabaseBlock[] {
+  const found: DatabaseBlock[] = [];
   let offset = indexOfBytes(save, DB_HEADER);
   while (offset >= 0) {
     const size = readUInt32LE(save, offset + DB_HEADER.length);
     if (size > 0 && size <= save.length - offset) {
       const block = save.subarray(offset, offset + size);
-      const plausible = DB_HEADER_VARIANTS.some((variant) => scoreDbHeaderVariant(block, variant) > 0);
-      if (plausible) blocks.push(block);
+      let addressable = false;
+      let shaped = false;
+      for (const variant of DB_HEADER_VARIANTS) {
+        if (scoreDbHeaderVariant(block, variant) > 0) addressable = true;
+        if (directoryShape(block, variant).shaped) shaped = true;
+      }
+      if (addressable || shaped) found.push({ bytes: block, offset, addressable });
     }
     offset = indexOfBytes(save, DB_HEADER, offset + DB_HEADER.length);
   }
-  if (blocks.length === 0) {
+  if (found.length === 0) {
     throw new Error("no fifa_ng_db block with a valid header was found");
   }
-  return blocks;
+  return found;
+}
+
+/** The blocks alone, for callers that do not care how their directories read. */
+export function unpackDatabases(save: Uint8Array): Uint8Array[] {
+  return inspectDatabaseBlocks(save).map((block) => block.bytes);
 }
 
 interface FieldDescriptor {
@@ -530,6 +596,14 @@ interface DescriptorRead {
    */
   depthChecked: number;
   depthAgreed: number;
+  /**
+   * Fields that would be read from outside the block entirely.
+   *
+   * Only meaningful for ordering the layouts against each other: a misaligned array reports far more
+   * of these than a correct one, so it is a sharper discriminator than depth agreement alone. It is
+   * NOT grounds for rejecting a table - see the note on partial misalignment in `readDescriptors`.
+   */
+  outsideBlock: number;
 }
 
 function isPrintableId(bytes: Uint8Array): boolean {
@@ -568,6 +642,8 @@ function readDescriptors(
   let resolved = 0;
   let depthChecked = 0;
   let depthAgreed = 0;
+  let outsideBlock = 0;
+  const blockBits = block.length * 8;
   let cursor = headerOffset + layout.base;
 
   for (let index = 0; index < fieldCount; index++) {
@@ -612,6 +688,8 @@ function readDescriptors(
 
     const known = tableName === null || meta === null ? undefined : fieldNameFor(meta, tableName, shortField);
     if (known !== undefined) resolved++;
+    const fieldEnd = bitOffset + bitDepth;
+    if (fieldEnd > blockBits) outsideBlock++;
     fields.push({
       type,
       bitOffset,
@@ -637,10 +715,17 @@ function readDescriptors(
     }
   }
 
-  return { fields, resolved, depthMismatches, recoveries, endOffset: cursor, depthChecked, depthAgreed };
-}
-
-/**
+  return {
+    fields,
+    resolved,
+    depthMismatches,
+    recoveries,
+    endOffset: cursor,
+    depthChecked,
+    depthAgreed,
+    outsideBlock,
+  };
+}/**
  * Scores one DB header arrangement.
  *
  * Counts directory entries that name a printable table id AND point at a header whose record size
@@ -1283,9 +1368,16 @@ function resolveEntry(
   if (addressed > 0) {
     for (const layout of DESCRIPTOR_LAYOUTS.slice(1)) {
       const read = readDescriptors(block, headerOffset, addressed, layout, meta, tableName);
+      // A layout that starts its descriptor array in the wrong place reads its bit offsets from the
+      // wrong bytes, and a misread bit offset lands far outside the record. So fields reading outside
+      // the block separate the layouts more sharply than depth agreement does, and cost nothing to
+      // check: a well-formed read has none under any layout. Depth agreement still decides otherwise.
       const better =
-        read.depthAgreed > chosen.read.depthAgreed ||
-        (read.depthAgreed === chosen.read.depthAgreed &&
+        read.outsideBlock < chosen.read.outsideBlock ||
+        (read.outsideBlock === chosen.read.outsideBlock &&
+          read.depthAgreed > chosen.read.depthAgreed) ||
+        (read.outsideBlock === chosen.read.outsideBlock &&
+          read.depthAgreed === chosen.read.depthAgreed &&
           read.resolved >= compactFloor &&
           read.resolved > chosen.read.resolved);
       if (better) {
@@ -1388,6 +1480,17 @@ export function readTableHeaders(block: Uint8Array, meta: DbMeta | null, databas
     throw new Error(`database declares ${tableCount} tables`);
   }
 
+  /**
+   * Whether any table's directory offset lands on something that reads like a table header.
+   *
+   * When it does not, the directory cannot be used as an address table and every table has to be
+   * found by localisation instead. The block is still a database - see `inspectDatabaseBlocks` - but
+   * nothing about a table may be COMPUTED from it.
+   */
+  const addressable = DB_HEADER_VARIANTS.some(
+    (candidate) => scoreDbHeaderVariant(block, candidate) > 0
+  );
+
   const entries: { shortName: string; offset: number }[] = [];
   for (let index = 0; index < tableCount; index++) {
     const at = variant.dirAt + index * 8;
@@ -1403,6 +1506,15 @@ export function readTableHeaders(block: Uint8Array, meta: DbMeta | null, databas
   const stats: TableStat[] = [];
   const warnings: string[] = [];
   const layoutUsage = { classic16: 0, compact9: 0, fc27Long16: 0 };
+
+  // States the fallback out loud rather than letting an address-based read quietly produce nothing.
+  // A block reaching here with no scoring directory is read by descriptor-run localisation instead.
+  if (!addressable) {
+    warnings.push(
+      "FC27 directory is not addressable: no table offset lands on a header. Locating tables by " +
+        "descriptor-run scanning instead."
+    );
+  }
 
   // Scanning the payload is only done when a table's address-read descriptors fail to resolve, so
   // FC25/FC26 saves never pay for it.
@@ -1508,6 +1620,20 @@ export function readTableHeaders(block: Uint8Array, meta: DbMeta | null, databas
       unknownTables.push(entry.shortName);
       continue;
     }
+
+    // In a block whose directory cannot be trusted, a table is only real if localisation actually found
+    // it. Anything else has nothing behind it but a header read from record data, and the row count that
+    // produces is an artefact of clamping that misread header to the space left in the block. Reporting
+    // it would be inventing data, which is the one thing worse than reporting nothing.
+    if (!addressable && !current.located) {
+      warnings.push(
+        `FC27 ${tableName ?? entry.shortName}: not localised in a block whose directory cannot be ` +
+          `trusted; left out rather than decoded from a misread header.`
+      );
+      unknownTables.push(entry.shortName);
+      continue;
+    }
+
     if (tableName === null) unknownTables.push(entry.shortName);
 
     const layout = current.layout;
@@ -1637,6 +1763,14 @@ export function decodeRows(
         case FIELD_STRING: {
           carry = 0;
           carryBits = 0;
+          // The one read that uses an absolute position, and so the only one a misaligned bit offset can
+          // push off the end of the database. A field that cannot exist is answered as null rather than
+          // letting the reader throw: a partly misaligned field list is normal on FC27, and the fields
+          // that DO resolve (the ids near the front) are the ones the app actually reads.
+          if (field.bitOffset + field.bitDepth > block.length * 8) {
+            value = null;
+            break;
+          }
           reader.position = recordStart + (field.bitOffset >> 3);
           const decoded = decodeName(reader.readBytes(field.bitDepth >> 3));
           if (decoded.complete) {

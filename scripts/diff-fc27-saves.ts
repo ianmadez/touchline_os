@@ -797,6 +797,42 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
+/**
+ * The Save A safety baseline.
+ *
+ * `teams` (lyxL) is the one FC27 table whose header, record size and row count are all independently
+ * established, so it is the canary for any change to the descriptor reader. A regression here is
+ * SILENT - the table still decodes, just wrongly - so it is asserted rather than eyeballed.
+ */
+const BASELINE_TEAMS = { rows: 870, recordSize: 188 } as const;
+
+function assertSaveABaseline(save: LoadedSave, meta: DbMeta): boolean {
+  console.log("\nSAVE A BASELINE ASSERTION");
+  for (const block of save.blocks) {
+    let headers: ReturnType<typeof readTableHeaders>;
+    try {
+      headers = readTableHeaders(block.bytes, meta, block.index);
+    } catch (error) {
+      console.log(
+        `  skip  block ${block.index}: ${error instanceof Error ? error.message : String(error)}`
+      );
+      continue;
+    }
+    const header = headers.headers.find((candidate) => candidate.tableName === "teams");
+    if (header === undefined) continue;
+    const ok =
+      header.recordCount === BASELINE_TEAMS.rows && header.recordSize === BASELINE_TEAMS.recordSize;
+    console.log(
+      `  ${ok ? "PASS" : "FAIL"}  teams (${header.shortName}) in block ${block.index}: ` +
+        `${header.recordCount} rows @ recordSize ${header.recordSize}, ${header.fieldCount} fields ` +
+        `(baseline ${BASELINE_TEAMS.rows} rows @ ${BASELINE_TEAMS.recordSize})`
+    );
+    return ok;
+  }
+  console.log(`  FAIL  teams was not found in any block of ${save.filePath}`);
+  return false;
+}
+
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
   if (args.saveA === null || args.saveB === null) {
@@ -828,9 +864,17 @@ function main(): void {
     }
   }
 
+  // Checked before anything else is reported, so a moved baseline is the loudest thing in the output.
+  if (!assertSaveABaseline(saveA, meta)) {
+    console.log(
+      "\n  The Save A baseline has moved. That is a regression in the descriptor reader rather than a\n" +
+        "  difference between the saves: FC27's address-based path is the one every other save relies on."
+    );
+    process.exitCode = 1;
+  }
+
   // Differential profile: how much of each block actually differs between the two careers.
-  console.log("\nDIFFERENTIAL PROFILE (byte equality between A and B)");
-  for (const blockA of saveA.blocks) {
+  console.log("\nDIFFERENTIAL PROFILE (byte equality between A and B)");  for (const blockA of saveA.blocks) {
     const blockB = saveB.blockByIndex.get(blockA.index);
     if (blockB === undefined || blockB.bytes.length !== blockA.bytes.length) continue;
     let differing = 0;

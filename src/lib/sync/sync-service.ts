@@ -96,8 +96,14 @@ export interface SyncResult {
  * stay empty through two successful syncs that both reported `success: true`.
  *
  * 11 - the academy: `youthProspects` from `career_youthplayers`, written to `youth_prospects`.
+ * 13 - the descriptor reader. Not a new table this time, but changed VALUES: a field read from outside
+ *      the block now answers null instead of throwing, a database whose table directory cannot be
+ *      trusted is read by localisation alone and refuses to report a table it could not locate, and the
+ *      layout pick prefers whichever read keeps its field offsets inside the block. Any career synced
+ *      from an FC27 save can therefore hold row counts and field lists from the older reader, so the
+ *      whole transaction has to re-run rather than report NO_CHANGE.
  */
-export const SYNC_PIPELINE_VERSION = "12";
+export const SYNC_PIPELINE_VERSION = "13";
 
 export class SyncService {
   private parser = createSaveParser();
