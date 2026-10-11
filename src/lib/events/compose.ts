@@ -664,6 +664,7 @@ function riskFor(
       );
     }
     case "DEVELOPMENT": {
+      const starter = standingOf(p) === "STARTER";
       if (first.eventType === "PLAYER_POSITION_CHANGED") {
         return pickVariant(
           [
@@ -676,6 +677,16 @@ function riskFor(
       }
       const delta = num(p.delta);
       if (delta !== null && delta >= 3) {
+        if (starter) {
+          return pickVariant(
+            [
+              "He is already in the side, so this is a ceiling moving rather than a role being earned - the thing to watch is whether the level holds across a run of games.",
+              "The growth is real and he is playing every week; what has not changed yet is how the rest of the side is built around him.",
+            ],
+            seed,
+            "risk"
+          );
+        }
         return pickVariant(
           [
             "A surge this size is the point where a player outgrows a bit-part role - the growth is already there, and the question is whether the first team keeps pace.",
@@ -686,10 +697,30 @@ function riskFor(
         );
       }
       if (delta !== null && delta < 0) {
+        if (starter) {
+          return pickVariant(
+            [
+              "A drop for a player who is picked every week points at form or at the job he is being asked to do, not at a lack of minutes.",
+              "He is playing, so this is not an opportunity problem - it is either a patch of form or a role that does not suit him.",
+            ],
+            seed,
+            "risk"
+          );
+        }
         return pickVariant(
           [
             "The rating has slipped, which usually points to minutes or role rather than ability.",
             "A drop this size is normally about opportunity, not talent - left alone it becomes both.",
+          ],
+          seed,
+          "risk"
+        );
+      }
+      if (starter) {
+        return pickVariant(
+          [
+            "The growth is real but gradual, and he is already getting the minutes that drive it - what needs protecting is the run of games, not his place in it.",
+            "This is steady progress from a player who is already in the side, so the risk is interruption rather than opportunity.",
           ],
           seed,
           "risk"
@@ -795,7 +826,10 @@ function askFor(category: StorylineCategory, leading: ComposableFact[], seed: st
       );
     case "DEVELOPMENT": {
       // A position move, a surge and a gradual rise are three different planning calls, so they do
-      // not share a closing line. The newest fact decides which one this card is about.
+      // not share a closing line. The newest fact decides which one this card is about, and a starter
+      // gets a different call from a squad player because the options available are different.
+      const standing = standingOf(first ? first.payload : {});
+      const starter = standing === "STARTER";
       if (first?.eventType === "PLAYER_POSITION_CHANGED") {
         return pickVariant(
           [
@@ -808,6 +842,16 @@ function askFor(category: StorylineCategory, leading: ComposableFact[], seed: st
       }
       const delta = first ? num(first.payload.delta) : null;
       if (delta !== null && delta >= 3) {
+        if (starter) {
+          return pickVariant(
+            [
+              "The call is whether to build more of the shape around him now, or keep him in the role he already holds until the level settles.",
+              "Decide between widening his job in the side and leaving it as it is while the growth beds in.",
+            ],
+            seed,
+            "ask"
+          );
+        }
         return pickVariant(
           [
             "The call is whether to grant him a starting role now, or keep managing his minutes and risk stalling the surge.",
@@ -818,10 +862,30 @@ function askFor(category: StorylineCategory, leading: ComposableFact[], seed: st
         );
       }
       if (delta !== null && delta < 0) {
+        if (starter) {
+          return pickVariant(
+            [
+              "The call is whether to change his role in the shape, or keep picking him and back him to play through it.",
+              "Decide between moving him to a different job in the side and trusting him to come out of it.",
+            ],
+            seed,
+            "ask"
+          );
+        }
         return pickVariant(
           [
             "The call is whether to change his role, or accept that his ceiling in this squad is a supporting one.",
             "Decide between a different role and accepting a squad-level ceiling.",
+          ],
+          seed,
+          "ask"
+        );
+      }
+      if (starter) {
+        return pickVariant(
+          [
+            "The call is whether to keep starting him through it, or rest him for a game and let someone else hold the shirt.",
+            "Decide between keeping him in the side and giving him a game out.",
           ],
           seed,
           "ask"
@@ -891,11 +955,30 @@ function listClauses(clauses: string[]): string {
 export function composeStoryline(
   thread: { id?: string; category: StorylineCategory; title: string; status: StorylineStatus },
   facts: ComposableFact[],
-  inGameDate: string | null
+  inGameDate: string | null,
+  /**
+   * The manager's starting XI as it stands on this read, when the caller has it.
+   *
+   * The standing a fact was OBSERVED with is recorded on the fact, but it is not the standing it is
+   * read with: a player promoted to the first team last week would otherwise keep being described by
+   * the role he had when the rating was noticed. Overlaying the current XI here is what keeps the
+   * tactics board and the storylines describing the same squad - change the shape, reload, and the
+   * copy follows. Facts about no player, and reads where no XI was supplied, are untouched.
+   */
+  liveStarters?: ReadonlySet<string>
 ): { title: string; body: string } {
+  const standingFacts =
+    liveStarters === undefined
+      ? facts
+      : facts.map((fact) => {
+          const playerId = text(fact.payload.playerId);
+          if (playerId === null) return fact;
+          return { ...fact, payload: { ...fact.payload, isStarter: liveStarters.has(playerId) } };
+        });
+
   const subject = subjectOf(thread.title);
   // Newest first, so "the newest of each kind" is well defined regardless of how the rows came back.
-  const ordered = [...facts].sort((a, b) => b.observedAt.localeCompare(a.observedAt));
+  const ordered = [...standingFacts].sort((a, b) => b.observedAt.localeCompare(a.observedAt));
   const citable = ordered.filter((fact) => !BOOKKEEPING_TYPES.has(fact.eventType));
 
   // Seeded from the thread and its newest fact: the same card keeps its wording, two different threads

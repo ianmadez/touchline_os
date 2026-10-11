@@ -75,12 +75,16 @@ export function LandingPage({
 
   const faqs = [
     {
+      q: "Which EA SPORTS FC games does TouchlineOS support?",
+      a: "EA SPORTS FC 25 and EA SPORTS FC 26 Manager Career saves are fully supported today. EA SPORTS FC 27 support is in progress and will arrive as a free update.",
+    },
+    {
       q: "Does TouchlineOS work on PlayStation or Xbox, or PC only?",
-      a: "TouchlineOS parses save files directly from local storage, making save file auto-detection seamless on PC (EA App, Steam, Epic Games). Console players can still manually log match debriefs and manage tactical notebooks.",
+      a: "TouchlineOS parses save files directly from local storage, making save file auto-detection seamless on PC (EA App, Steam, Epic Games). It supports EA SPORTS FC 25 and EA SPORTS FC 26 saves today, with EA SPORTS FC 27 support in progress. Console players can still manually log match debriefs and manage tactical notebooks.",
     },
     {
       q: "Where do I find my EA SPORTS FC save file on my computer?",
-      a: "TouchlineOS auto-detects your save folder on launch. It checks the places EA Sports EAFC writes careers to — a settings folder inside your Documents (in the title's own folder, including OneDrive Documents) and the AppData location for your installed title — then lists every career save it finds.",
+      a: "TouchlineOS auto-detects your save folder on launch. It checks the places EA Sports writes careers to: a settings folder inside your Documents (in the title's own folder, including OneDrive Documents) and the AppData location for your installed title. It looks for EA SPORTS FC 25, EA SPORTS FC 26 and EA SPORTS FC 27 folders, then lists every career save it finds.",
     },
     {
       q: "Do I have to pick my save file every time I visit?",
@@ -96,11 +100,11 @@ export function LandingPage({
     },
     {
       q: "What happens if EA SPORTS FC receives an official title update or patch?",
-      a: "Your career records in TouchlineOS remain completely safe. Because snapshot history is written to your local database, official EA title patches will not erase your past season history or notes.",
+      a: "Your career records in TouchlineOS remain completely safe. Because snapshot history is written to your local database, official EA title patches will not erase your past season history or notes. Support for a newly released title, including EA SPORTS FC 27, arrives as a free update rather than costing you anything you have already logged.",
     },
     {
       q: "Is TouchlineOS free, and is my data sent to any cloud servers?",
-      a: "TouchlineOS is 100% free and open-source. All parsing and data storage happen locally on your PC. No personal save data is uploaded anywhere.",
+      a: "TouchlineOS is 100% free and open-source. Your save is parsed on your own device, nothing is uploaded, and there is no cloud database holding your career. On the desktop build the career database is a local file, and in the browser build it stays in this browser's own private storage on your machine.",
     },
     {
       q: "How is this different from tracking my career in Google Sheets or Excel?",
@@ -500,7 +504,7 @@ export function LandingPage({
 
           <div className="border-l-2 border-[#E11D48] pl-4">
             <span className="font-sub text-[10px] text-[#E11D48] font-bold uppercase tracking-wider block">
-              v0.3 (Active)
+              v0.3.2 (Active)
             </span>
             <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mt-0.5 mb-1">
               Transfers & Youth

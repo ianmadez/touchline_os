@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  chooseSave,
   forgetLocalBridge,
   forgetRememberedSave,
   listSaveCandidates,
@@ -49,6 +50,9 @@ export async function POST(request: Request) {
     case "reconnect":
       outcome = await reconnectRememberedSave();
       break;
+    case "choose":
+      outcome = await chooseSave();
+      break;
     case "forget":
       outcome = await forgetRememberedSave();
       break;
@@ -63,7 +67,7 @@ export async function POST(request: Request) {
         status: 400,
         body: {
           success: false,
-          error: 'action must be one of "reconnect", "forget", "bridge-pair", "bridge-forget".',
+          error: 'action must be one of "reconnect", "choose", "forget", "bridge-pair", "bridge-forget".',
         },
       };
   }

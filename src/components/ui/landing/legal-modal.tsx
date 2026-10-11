@@ -104,11 +104,13 @@ export function LegalModal({ activeDoc, onClose }: LegalModalProps) {
                 </h3>
                 <p>
                   TouchlineOS reads the career save you choose, and on the desktop app it discovers
-                  saves in the folders EA SPORTS FC writes them to. In the browser app you pick the
-                  file yourself and the choice is yours alone. Reading is all it ever does — nothing
-                  is written back to the save, and a reference to the file is all that is kept so
-                  future visits do not ask you to find it again. See the Cookie Policy for the detail
-                  on that storage and how to remove it.
+                  saves in the folders EA SPORTS FC writes them to. EA SPORTS FC 25 and EA SPORTS
+                  FC 26 Manager Career saves are fully supported today, and EA SPORTS FC 27 support
+                  is in progress. In the browser app you pick the file yourself and the choice is
+                  yours alone. Reading is all it ever does — nothing is written back to the save,
+                  and a reference to the file is all that is kept so future visits do not ask you to
+                  find it again. See the Cookie Policy for the detail on that storage and how to
+                  remove it.
                 </p>
               </div>
 

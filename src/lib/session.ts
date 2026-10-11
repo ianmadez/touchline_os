@@ -5,6 +5,7 @@
  * single versioned key. The pre-paint theme script in `layout.tsx` reads the same key, so
  * the dark class is applied before first paint (no light -> dark flash).
  */
+import type { OpponentSortOrder } from "@/lib/ui/opponent-list";
 
 export const SESSION_STORAGE_KEY = "touchline.session.v1";
 export const SESSION_VERSION = 1;
@@ -546,6 +547,28 @@ export function markTourDone(careerId: string | null, tab: string): void {
   writeAllTours(all);
 }
 
+/**
+ * Forgets the tours this career has already been shown, so every tab offers its own again.
+ *
+ * Career-scoped to match `markTourDone`: the record is keyed per career so that one career's tours are
+ * independent of another's, and asking to be walked through the screens again is a request about the
+ * screens, not a request to forget a different career.
+ *
+ * This deliberately leaves no trace of having been asked. The obvious alternative - moving the tour
+ * revision, the way `reconcileTourRevision` does - would record the new revision and then never show
+ * anything again, which is the opposite of what the button promises.
+ *
+ * Writes through `writeAllTours`, so the removal and the notification to subscribers are one operation
+ * and the tour component re-reads on the same tick.
+ */
+export function restartTours(careerId: string | null): void {
+  if (!careerId) return;
+  const all = readAllTours();
+  if (!(careerId in all)) return;
+  delete all[careerId];
+  writeAllTours(all);
+}
+
 const TOUR_REVISION_KEY = "touchline.tour.revision";
 
 /**
@@ -579,6 +602,63 @@ export function reconcileTourRevision(revision: string): void {
     window.localStorage.setItem(TOUR_REVISION_KEY, revision);
   } catch {
     /* Storage went away mid-call. The tours are cleared, which is the outcome we wanted. */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Opponent list order
+// ---------------------------------------------------------------------------
+// A display preference, and global rather than per career: how a manager likes a list of clubs sorted
+// is a habit, not a property of one save. Bounded by construction - one short string, overwritten in
+// place, so this store accumulates nothing over a long career.
+// ---------------------------------------------------------------------------
+
+const OPPONENT_SORT_KEY = "touchline.opponent.sort.v1";
+
+/** A to Z, because that is what a fixture list is read as. */
+export const OPPONENT_SORT_DEFAULT: OpponentSortOrder = "A-Z";
+
+function isOpponentSortOrder(value: unknown): value is OpponentSortOrder {
+  return value === "A-Z" || value === "Z-A" || value === "POSITION";
+}
+
+let opponentSortListeners: Array<() => void> = [];
+
+/** Lets both club pickers repaint the moment one of them changes the order. */
+export function subscribeOpponentSort(listener: () => void): () => void {
+  opponentSortListeners.push(listener);
+  return () => {
+    opponentSortListeners = opponentSortListeners.filter((entry) => entry !== listener);
+  };
+}
+
+/** The raw stored string: a primitive, so `useSyncExternalStore` can compare snapshots safely. */
+export function getOpponentSortSnapshot(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(OPPONENT_SORT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** A stable server snapshot, so a prerender never depends on storage. */
+export function getOpponentSortServerSnapshot(): null {
+  return null;
+}
+
+/** The order to use. Anything unrecognised, including nothing stored, falls back to A to Z. */
+export function opponentSortFrom(raw: string | null): OpponentSortOrder {
+  return isOpponentSortOrder(raw) ? raw : OPPONENT_SORT_DEFAULT;
+}
+
+export function setOpponentSort(order: OpponentSortOrder): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(OPPONENT_SORT_KEY, order);
+    for (const listener of [...opponentSortListeners]) listener();
+  } catch {
+    /* storage unavailable - the choice simply does not persist */
   }
 }
 

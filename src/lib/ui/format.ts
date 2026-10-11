@@ -32,3 +32,24 @@ export function currencySymbolFor(code: string | null | undefined): string {
   if (code === "USD") return "$";
   return "£";
 }
+
+/**
+ * 1 -> "1st", 2 -> "2nd", 11 -> "11th".
+ *
+ * A bare table number reads as a count beside a club name, so a placing is always written with its
+ * suffix. The teens are handled separately because 11, 12 and 13 take "th" despite ending in 1, 2, 3.
+ */
+export function ordinal(value: number): string {
+  const lastTwo = value % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${value}th`;
+  switch (value % 10) {
+    case 1:
+      return `${value}st`;
+    case 2:
+      return `${value}nd`;
+    case 3:
+      return `${value}rd`;
+    default:
+      return `${value}th`;
+  }
+}

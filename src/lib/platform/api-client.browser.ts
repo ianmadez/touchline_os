@@ -16,6 +16,7 @@ import { readFinanceReport, saveFinanceInputs } from "../operations/finance";
 import { deleteObjective, readObjectives, saveObjective } from "../operations/objectives";
 import { parseAndSyncSave } from "../operations/parse-save";
 import {
+  chooseSave,
   forgetLocalBridge,
   forgetRememberedSave,
   listSaveCandidates,
@@ -95,6 +96,7 @@ async function dispatch(call: Call): Promise<OperationResult<unknown>> {
       if (parsed.failure) return parsed.failure;
       const action = (parsed.value as { action?: unknown } | null)?.action;
       if (action === "reconnect") return reconnectRememberedSave();
+      if (action === "choose") return chooseSave();
       if (action === "forget") return forgetRememberedSave();
       if (action === "bridge-pair") return pairLocalBridge(parsed.value);
       if (action === "bridge-forget") return forgetLocalBridge();
@@ -102,7 +104,7 @@ async function dispatch(call: Call): Promise<OperationResult<unknown>> {
         status: 400,
         body: {
           success: false,
-          error: 'action must be one of "reconnect", "forget", "bridge-pair", "bridge-forget".',
+          error: 'action must be one of "reconnect", "choose", "forget", "bridge-pair", "bridge-forget".',
         },
       };
     }

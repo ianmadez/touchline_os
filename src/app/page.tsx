@@ -46,6 +46,7 @@ import {
   clearSession,
   patchSession,
   readSession,
+  restartTours,
   resolveTheme,
   watchSystemTheme,
 } from "@/lib/session";
@@ -353,6 +354,32 @@ export default function TouchlineApp() {
   ]);
 
   /**
+   * Asks the browser for a save file, from a press.
+   *
+   * The ONE place a file dialog may open. `loadSaveCandidates` used to double as this, which meant every
+   * scan opened a picker in the browser build - on load, on entering a tab, after pairing the bridge -
+   * and Chrome happily obliged whenever a click had left the page inside its activation window. Scanning
+   * and choosing are separate calls now, and only this one can open a dialog.
+   *
+   * The scan is re-run afterwards either way, so a dismissed dialog leaves the screen saying nothing has
+   * been chosen rather than looking like the click did nothing.
+   */
+  const handleChooseSave = useCallback(async () => {
+    try {
+      const res = await apiFetch("/api/saves", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "choose" }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`);
+    } catch (error) {
+      setAppError((error as Error).message);
+    }
+    await loadSaveCandidates();
+  }, [loadSaveCandidates, setAppError]);
+
+  /**
    * Re-grants access to the save this browser remembers, from a click.
    *
    * The click is load-bearing rather than decorative: a browser refuses to grant access to a file
@@ -402,8 +429,11 @@ export default function TouchlineApp() {
       }
     }
     setRememberedSave("none");
-    await loadSaveCandidates();
-  }, [rememberedSave, loadSaveCandidates, setRememberedSave]);
+    // Choosing again rather than scanning again: this path exists to point the app at a DIFFERENT save,
+    // and with the picker now off by default a plain scan would find nothing and leave the manager stuck
+    // holding the file they just said they did not want.
+    await handleChooseSave();
+  }, [rememberedSave, handleChooseSave, setRememberedSave]);
 
   /**
    * Pairs with the local bridge, from a click.
@@ -929,6 +959,19 @@ export default function TouchlineApp() {
     }
   };
 
+  /**
+   * "Start tour again" in Settings.
+   *
+   * Two halves that have to happen together: clearing the record is what makes every tab's tour
+   * available again, and bumping the token is what tells the tour currently on screen to stand down
+   * WITHOUT recording itself. Doing only the first would leave the card's Got it button to mark the very
+   * screen the manager just asked to be walked through again.
+   */
+  const handleRestartTours = () => {
+    restartTours(careerId);
+    setTourRestartToken((current) => current + 1);
+  };
+
   const handleCompleteOnboarding = async (data: OnboardingSubmission) => {
     setLastSubmission(data);
     setIsLoading(true);
@@ -1141,6 +1184,16 @@ export default function TouchlineApp() {
   // dashboard painted in full - entrance animation and all - one commit before the splash covered it.
   const splashVisible = bootPhase === "app" && !hasEntered;
 
+  /**
+   * Bumped when the manager asks for the tours again from Settings.
+   *
+   * The click clears the recorded tours itself; this exists because the tour component owns its own
+   * open/closed state, so it is the only thing that can stand the tour down without recording it. A
+   * counter rather than a boolean: pressing the button twice in a row has to mean something the second
+   * time too.
+   */
+  const [tourRestartToken, setTourRestartToken] = useState(0);
+
   // Back-compat: a career with no saved formation rows still hydrates a synthetic default (via
   // `getTacticalSystem`), so there is always exactly one formation to show before anything has been
   // saved; the first write then persists it under its label.
@@ -1230,6 +1283,7 @@ export default function TouchlineApp() {
         careerId={careerId}
         tab={displayedTab}
         enabled={isOnboardingComplete && !isRestoring && !splashVisible}
+        restartToken={tourRestartToken}
       />
 
       {/*
@@ -1322,7 +1376,7 @@ export default function TouchlineApp() {
                   </span>
                   <button
                     type="button"
-                    onClick={() => void loadSaveCandidates()}
+                    onClick={() => void (saveSourceMode === "picker" ? handleChooseSave() : loadSaveCandidates())}
                     disabled={isLoading}
                     className="font-sub text-[10px] font-bold uppercase text-[#E11D48] dark:text-[#FF8C7A] hover:underline cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -1652,6 +1706,7 @@ export default function TouchlineApp() {
             onExport={handleExportCareer}
             onImport={handleImportCareer}
             onResetCareer={handleResetCareer}
+            onRestartTours={handleRestartTours}
           />
         )}
       </div>

@@ -77,8 +77,18 @@ export interface SaveSource {
    * bridge in play rather than one where the feature has failed.
    */
   readonly mode: SaveSourceMode;
-  /** Candidates to offer, using the default save locations when `saveDirectory` is omitted. */
-  detectSaves(saveDirectory?: string): Promise<SaveCandidate[]>;
+  /**
+   * Candidates to offer, using the default save locations when `saveDirectory` is omitted.
+   *
+   * `allowPicker` decides whether this call may OPEN A FILE DIALOG. It defaults to false because this
+   * runs on load, on entering a tab, and after pairing a bridge - and a browser build that opened a
+   * picker on any of those would be opening a file dialog for no reason the manager could see. Only a
+   * call made on a press passes true.
+   */
+  detectSaves(
+    saveDirectory?: string,
+    options?: { allowPicker?: boolean }
+  ): Promise<SaveCandidate[]>;
   /**
    * Resolves a sync request into one concrete candidate.
    *

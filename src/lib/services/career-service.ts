@@ -610,7 +610,7 @@ export class CareerService {
 
     const movementCovered = new Set<number>();
     const movementFacts = [
-      ...developmentFacts(trendObservations),
+      ...developmentFacts(trendObservations, starterIds),
       ...positionChangeFacts(trendObservations),
     ];
     for (const fact of movementFacts) {
@@ -726,6 +726,17 @@ export class CareerService {
 
     const evidenceMap = await this.loadThreadEvidence(threads.map((thread) => thread.id));
 
+    // The XI as it stands now, for the copy. Read again here rather than reused from the evaluator pass:
+    // this is the read path, the evaluator is the write path, and the composition happens below, so
+    // saving a new shape and reloading is enough to change how an existing card reads. The tactics
+    // board and the storylines are the same manager's two views of the same squad, and neither should
+    // describe it the way it was two saves ago.
+    const currentXi = new Set(
+      (await this.tacticsService.getTacticalSystem(careerId)).slots
+        .map((slot) => slot.playerId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    );
+
     // The lifecycle pass. Every category decides closure through the same precedence rule, so no
     // category can quietly implement "answered beats dropped" differently to the others.
     await this.closeAnsweredThreads(
@@ -752,7 +763,8 @@ export class CareerService {
           status: s.status as StorylineStatus,
         },
         facts,
-        inGameDate
+        inGameDate,
+        currentXi
       );
 
       return {

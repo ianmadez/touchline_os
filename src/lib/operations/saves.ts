@@ -9,8 +9,28 @@ import { failed, ok, type OperationResult } from "./types";
  *
  * The scan itself lives behind the `SaveSource` port: the local build walks this machine's disk,
  * while the browser build asks the user to pick a file.
+ *
+ * It NEVER opens a file dialog. That is the boundary `allowPicker` enforces: this runs on load, on
+ * entering a tab and after pairing a bridge, and a browser build that popped a picker on any of those
+ * looked like the app was opening a file upload on its own. Choosing a file is a separate, pressed
+ * action - see `chooseSave`.
  */
 export async function listSaveCandidates(): Promise<OperationResult<unknown>> {
+  return scan({ allowPicker: false });
+}
+
+/**
+ * Asks for a save file, from a press.
+ *
+ * The one operation allowed to open a browser file dialog, and it exists as its own call for exactly
+ * that reason: a dialog is a side effect only a deliberate action should have, and folding it into the
+ * scan made it happen on every incidental scan instead.
+ */
+export async function chooseSave(): Promise<OperationResult<unknown>> {
+  return scan({ allowPicker: true });
+}
+
+async function scan({ allowPicker }: { allowPicker: boolean }): Promise<OperationResult<unknown>> {
   try {
     // The manager's configured folder, so the setting actually constrains the scan.
     //
@@ -28,7 +48,7 @@ export async function listSaveCandidates(): Promise<OperationResult<unknown>> {
       saveDirectory = undefined;
     }
 
-    const detected = await saveSource.detectSaves(saveDirectory);
+    const detected = await saveSource.detectSaves(saveDirectory, { allowPicker });
 
     // The wizard only cares about career saves; `database` slots (storageInfo.bin, ...) cannot be
     // parsed into a squad and would only produce a broken onboarding step.

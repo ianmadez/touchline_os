@@ -467,7 +467,16 @@ export interface DevelopmentObservation {
  * players present in both snapshots are reported - a player who appears in one of them was signed
  * or sold, not developed, and calling that growth would be wrong.
  */
-export function developmentFacts(observations: DevelopmentObservation[]): EvidenceFact[] {
+export function developmentFacts(
+  observations: DevelopmentObservation[],
+  /**
+   * The manager's starting XI, so a rating move can be told apart for a starter and a squad player.
+   *
+   * Read from the tactics board rather than inferred: a player who is picked every week has a role and
+   * minutes already, and copy that offers him a loan for minutes is answering a question nobody asked.
+   */
+  starterIds?: ReadonlySet<string>
+): EvidenceFact[] {
   const facts: EvidenceFact[] = [];
 
   for (const observation of observations) {
@@ -495,6 +504,10 @@ export function developmentFacts(observations: DevelopmentObservation[]): Eviden
         fromSnapshot: observation.fromSnapshot,
         toSnapshot: observation.toSnapshot,
         fromDate: observation.fromDate,
+        // Squad standing, so the copy can pitch at a starter. Absent from the tactics board means
+        // "not a starter", which is the honest default, and the composer re-reads the XI live so a
+        // player promoted later is not described by the standing he had when this was observed.
+        isStarter: starterIds?.has(observation.playerId) ?? false,
       },
     });
   }

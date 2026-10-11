@@ -20,6 +20,13 @@ export function Footer() {
           <span>•</span>
           <span>Full History Kept</span>
           <span>•</span>
+          <span
+            className="cursor-help"
+            title="TouchlineOS reads EA SPORTS FC 25 and EA SPORTS FC 26 career saves today. EA SPORTS FC 27 support is in progress and will arrive as a free update."
+          >
+            FC 25 and FC 26 saves
+          </span>
+          <span>•</span>
           <span>Nothing Rewritten</span>
         </div>
       </div>

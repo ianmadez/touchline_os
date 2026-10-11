@@ -92,7 +92,15 @@ export function LandingFooter({ onOpenLegal }: LandingFooterProps) {
                 </a>
               </li>
               <li>
-                <span className="text-slate-400 dark:text-slate-500">Local Parser Specs v1.0</span>
+                <span
+                  className="text-slate-400 dark:text-slate-500 cursor-help"
+                  title="TouchlineOS reads EA SPORTS FC 25 and EA SPORTS FC 26 career saves today. EA SPORTS FC 27 support is in progress and will arrive as a free update."
+                >
+                  Save engine: FC 25 and FC 26 supported, FC 27 in progress
+                </span>
+              </li>
+              <li>
+                <span className="text-slate-400 dark:text-slate-500">v0.3.2</span>
               </li>
             </ul>
           </div>

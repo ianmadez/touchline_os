@@ -1,12 +1,20 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type {
   BlockSummary,
   MatchPoints,
   TargetBlock,
 } from "@/lib/services/target-block-service";
 import type { LeagueTeamSummary } from "@/lib/services/career-service";
+import { OPPONENT_SORT_ORDERS, orderTeams, teamOptionLabel } from "@/lib/ui/opponent-list";
+import {
+  getOpponentSortServerSnapshot,
+  getOpponentSortSnapshot,
+  opponentSortFrom,
+  setOpponentSort,
+  subscribeOpponentSort,
+} from "@/lib/session";
 import {
   IconAlert,
   IconCalendar,
@@ -631,9 +639,17 @@ function BlockEditor({
   onCancel: () => void;
   onSave: () => void;
 }) {
-  // Only our own club is filtered out, exactly as the single debrief does, so both pickers offer
-  // the same list in the same order.
+  // Only our own club is filtered out, exactly as the single debrief does, so both pickers offer the
+  // same list in the same order. The order is the shared global preference, and one control per block
+  // sets it rather than one per match row.
+  const opponentSortRaw = useSyncExternalStore(
+    subscribeOpponentSort,
+    getOpponentSortSnapshot,
+    getOpponentSortServerSnapshot
+  );
+  const opponentSort = opponentSortFrom(opponentSortRaw);
   const selectableTeams = (leagueTeams ?? []).filter((team) => !team.isOwnClub);
+  const orderedTeams = orderTeams(selectableTeams, opponentSort);
 
   const set = <K extends keyof BlockDraft>(key: K, value: BlockDraft[K]) =>
     onChange((current) => (current ? { ...current, [key]: value } : current));
@@ -646,6 +662,21 @@ function BlockEditor({
           {draft.id ? `Edit group debrief ${draft.blockIndex}` : `New group debrief ${draft.blockIndex}`}
         </h3>
         <div className="flex items-center gap-2">
+          <label className="flex items-center gap-2 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            Sort clubs
+            <select
+              aria-label="Sort the club list"
+              value={opponentSort}
+              onChange={(event) => setOpponentSort(opponentSortFrom(event.target.value))}
+              className="rounded-lg border border-slate-300 bg-slate-50 px-2 py-1.5 font-sub text-xs text-slate-900 focus:border-[#E11D48] focus:outline-none cursor-pointer dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+            >
+              {OPPONENT_SORT_ORDERS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="flex items-center gap-2 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
             Season
             <input
@@ -725,9 +756,9 @@ function BlockEditor({
                                 ? "Choose a club from your league"
                                 : "Sync a save to load your league"}
                             </option>
-                            {selectableTeams.map((team) => (
+                            {orderedTeams.map((team) => (
                               <option key={team.teamId} value={team.name}>
-                                {team.name}
+                                {teamOptionLabel(team)}
                               </option>
                             ))}
                             <option value="other">Another club (cup or friendly)</option>

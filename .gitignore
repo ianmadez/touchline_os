@@ -52,3 +52,6 @@ references/manager-companion/
 references/ 
 
 /data/
+
+# Benched FC 27 save-decoding probes. Kept out of history on purpose.
+scripts/probes/

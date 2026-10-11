@@ -86,7 +86,15 @@ function walk(dir: string, depth: number, out: string[]): string[] {
 
 let lastScan: SaveSearchLocation[] = [];
 
-async function detectSaves(saveDirectory?: string): Promise<SaveCandidate[]> {
+/**
+ * Walks the save locations on this machine.
+ *
+ * `allowPicker` is accepted and ignored: there is no dialog to open on the desktop build, so scanning
+ * IS how a save is found here. The parameter exists because the port carries it - the browser build
+ * needs it, and a signature that only one implementation honours is worse than one that says so.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function detectSaves(saveDirectory?: string, allowPicker?: { allowPicker?: boolean }): Promise<SaveCandidate[]> {
   const locations: SaveSearchLocation[] = saveDirectory
     ? [
         {

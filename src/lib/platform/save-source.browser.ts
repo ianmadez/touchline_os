@@ -263,7 +263,12 @@ export const saveSource: SaveSource = {
   get mode() {
     return lastMode;
   },
-  detectSaves: async () => {
+  detectSaves: async (_saveDirectory?: string, options?: { allowPicker?: boolean }) => {
+    // Whether this call is allowed to open a dialog. A scan runs on load, on entering a tab and after
+    // pairing a bridge, so the default has to be "no": a picker on any of those is a file dialog the
+    // manager never asked for. Only the explicit choose-a-file action passes true.
+    const allowPicker = options?.allowPicker === true;
+
     // The bridge first, when the manager has set one up. It is the only path that needs no dialog and no
     // permission in any browser, so when it has something to offer nothing else is consulted.
     //
@@ -296,10 +301,10 @@ export const saveSource: SaveSource = {
         scan = [{ path: "", label: UNSUPPORTED, exists: false }];
         return [];
       }
-      if (!hasUserGesture()) {
-        // The mount-time scan, with no gesture behind it. Opening the dialog here would do nothing
-        // and never settle, so the honest answer is that nothing has been chosen yet and the
-        // wizard's own button is the way in.
+      if (!allowPicker || !hasUserGesture()) {
+        // Either no press behind the call, or no press at all. Opening the dialog here would do nothing
+        // and never settle, so the honest answer is that nothing has been chosen yet and the button is
+        // the way in.
         scan = [{ path: "", label: "No save file chosen yet.", exists: false }];
         return [];
       }
@@ -309,6 +314,14 @@ export const saveSource: SaveSource = {
         ? [{ path: "", label: filteredOut, exists: false }]
         : [{ path: "", label: "file picker", exists: candidates.length > 0 }];
       return candidates;
+    }
+
+    if (!allowPicker) {
+      // Chrome and Edge would happily open the picker here, and the call is inside the activation
+      // window that a nav-tab click leaves behind - which is exactly how a scan came to pop a file
+      // dialog on the way through the app. This is the boundary that stops it.
+      scan = [{ path: "", label: "No save file chosen yet.", exists: false }];
+      return [];
     }
 
     let handles: FileSystemFileHandle[];

@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SubTabs } from "@/components/ui/sub-tabs";
 import { GroupDebriefPanel } from "@/components/ui/debrief/group-debrief-panel";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import type { ParsedCareerEvent } from "@/lib/services/event-service";
 import type { LeagueTeamSummary } from "@/lib/services/career-service";
 import { resultLabel, venueLabel } from "@/lib/ui/labels";
+import { ordinal } from "@/lib/ui/format";
+import { OPPONENT_SORT_ORDERS, orderTeams, teamOptionLabel } from "@/lib/ui/opponent-list";
 import { MatchContribution } from "@/lib/events/types";
 import { POSITION_GROUP_ORDER, positionGroupOf } from "@/lib/tactics/roles";
 import {
@@ -17,7 +19,12 @@ import {
 import { apiFetch } from "@/lib/platform/api-client";
 import {
   clearDebriefDraft,
+  getOpponentSortServerSnapshot,
+  getOpponentSortSnapshot,
+  opponentSortFrom,
   readDebriefDraft,
+  setOpponentSort,
+  subscribeOpponentSort,
   writeDebriefDraft,
 } from "@/lib/session";
 interface DebriefViewProps {
@@ -111,22 +118,6 @@ function hasDraftContent(draft: DebriefDraft): boolean {
     draft.contributions.length > 0 ||
     Object.values(draft.dynamicAnswers).some((answer) => answer.trim() !== "")
   );
-}
-
-/** 1 -> "1st". Used only for the opponent list, where a bare number reads as a count. */
-function ordinal(value: number): string {
-  const mod100 = value % 100;
-  if (mod100 >= 11 && mod100 <= 13) return `${value}th`;
-  switch (value % 10) {
-    case 1:
-      return `${value}st`;
-    case 2:
-      return `${value}nd`;
-    case 3:
-      return `${value}rd`;
-    default:
-      return `${value}th`;
-  }
 }
 
 /**
@@ -415,9 +406,17 @@ export function DebriefView({
   const ourScore = ourScoreInput === "" ? 0 : Number(ourScoreInput);
   const theirScore = theirScoreInput === "" ? 0 : Number(theirScoreInput);
 
-  // Only our own club is filtered out; the rest are offered by name and in the order the save
-  // lists them. Their placings are deliberately not shown - see the note on `ownPosition` above.
+  // Only our own club is filtered out. The rest are offered in the order the manager has chosen, and
+  // each carries the save's own placing for that club where the save states one. The order is a
+  // global preference, so it is read from the shared store rather than held here as component state.
+  const opponentSortRaw = useSyncExternalStore(
+    subscribeOpponentSort,
+    getOpponentSortSnapshot,
+    getOpponentSortServerSnapshot
+  );
+  const opponentSort = opponentSortFrom(opponentSortRaw);
   const selectableTeams = leagueTeams.filter((team) => !team.isOwnClub);
+  const orderedTeams = orderTeams(selectableTeams, opponentSort);
 
   const selectedTeam = selectableTeams.find((team) => String(team.teamId) === opponentTeamId);
   // A typed name wins, so a club outside the division can still be recorded.
@@ -796,12 +795,29 @@ export function DebriefView({
           {/* Opponent & Competition Row */}
           <div data-tour="debrief-meta" className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div className="sm:col-span-2">
-              <label
-                htmlFor="debrief-opponent"
-                className="block font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5"
-              >
-                Opponent
-              </label>
+              <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                <label
+                  htmlFor="debrief-opponent"
+                  className="block font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider"
+                >
+                  Opponent
+                </label>
+                <label className="flex items-center gap-1.5 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Sort
+                  <select
+                    aria-label="Sort the club list"
+                    value={opponentSort}
+                    onChange={(e) => setOpponentSort(opponentSortFrom(e.target.value))}
+                    className="rounded-md border border-slate-200 bg-white px-1.5 py-1 font-sub text-[10px] uppercase tracking-wider text-slate-600 focus:outline-none focus:border-[#E11D48] cursor-pointer dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                  >
+                    {OPPONENT_SORT_ORDERS.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <select
                 id="debrief-opponent"
                 value={opponentTeamId}
@@ -813,13 +829,16 @@ export function DebriefView({
                     ? "Choose a club from your league"
                     : "Sync a save to load your league"}
                 </option>
-                {selectableTeams.map((team) => (
+                {orderedTeams.map((team) => (
                   <option key={team.teamId} value={String(team.teamId)}>
-                    {team.name}
+                    {teamOptionLabel(team)}
                   </option>
                 ))}
                 <option value="other">Another club (cup or friendly)</option>
               </select>
+              <p className="mt-1.5 font-sans text-[10px] text-slate-500 dark:text-slate-400">
+                Placings come from the save and are shown only for clubs it states one for.
+              </p>
               {opponentTeamId === "other" && (
                 <input
                   type="text"

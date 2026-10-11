@@ -16,6 +16,7 @@ const FORMATION_CATEGORY_LABELS: Record<FormationDefinition["category"], string>
 
 /** The folder each game keeps its career files in, as the Run dialog needs it written. */
 const SAVE_FOLDERS = [
+  { game: "EA SPORTS FC 27", path: "%LOCALAPPDATA%\\EA SPORTS FC 27\\settings" },
   { game: "EA SPORTS FC 26", path: "%LOCALAPPDATA%\\EA SPORTS FC 26\\settings" },
   { game: "EA SPORTS FC 25", path: "%LOCALAPPDATA%\\EA SPORTS FC 25\\settings" },
 ];
@@ -330,21 +331,25 @@ export function OnboardingWizard({
                   savesUnavailableReason
                 ) : saveSourceMode === "picker" ? (
                   <>
-                    TouchlineOS reads the save file you choose. Nothing is uploaded — the file is
-                    opened, parsed and kept in this browser.
+                    Upload your local EA FC save file (ManagerCareer... or Career202X...). Fully
+                    compatible with FC 25, FC 26, and working on FC 27 compatibility.
                   </>
                 ) : saveSourceMode === "bridge" ? (
                   <>
                     TouchlineOS is reading your save from the local bridge you set up, so there is
-                    nothing to pick. Nothing is uploaded — the bridge serves the file on your own
-                    machine and it is parsed in this browser.
+                    nothing to pick. Fully compatible with FC 25, FC 26, and working on FC 27
+                    compatibility.
                   </>
                 ) : (
                   <>
                     TouchlineOS reads manager careers from your EA SPORTS FC settings folders and from{" "}
                     <code className="font-mono text-slate-900 dark:text-slate-100">data/saves/</code>.
+                    Fully compatible with FC 25, FC 26, and working on FC 27 compatibility.
                   </>
                 )}
+              </p>
+              <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                Nothing is uploaded. Everything is parsed and kept on this device.
               </p>
               {rememberedSave === "needs-permission" && onRegrant ? (
                 <button

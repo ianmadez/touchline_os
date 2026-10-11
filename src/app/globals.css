@@ -338,6 +338,16 @@ p {
   }
 }
 
+/* While a tour is up, the navigation tabs lose their clicks and keep their highlight.
+   The tour's backdrop leaves a real gap over the control it is describing, so that control stays
+   usable - right for a button, wrong for a tab. A tour belongs to one screen, so a tab click ends it
+   AND records it as seen, which spends a whole tour on a mis-click. The flag is set by
+   `spotlight-tour.tsx`; this selector covers only the app's tab buttons, never the brand link or the
+   landing page's anchor list. */
+html[data-tour-open] [data-tour^="tab-"] {
+  pointer-events: none;
+}
+
 /* The app shipped with no reduced-motion guard at all. This neutralises every animation and
    transition for users who ask the OS for less motion, without removing the state change. */
 @media (prefers-reduced-motion: reduce) {

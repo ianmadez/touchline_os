@@ -2,7 +2,14 @@
 
 A local-first companion app for EA SPORTS FC Career Mode. It automatically reads and saves your actual save file, keeps an honest, immutable record of your career, and layers deterministic advice, storylines and season intelligence on top, without ever inventing a fact the save didn't give it.
 
-> Built and tested against **EA SPORTS FC 25** Manager Career saves, should work fine with EAFC 26.
+## Compatibility
+
+| Game Version | Save Parsing | Browser Support | Status |
+|---|---|---|---|
+| Older FIFA Games | FIFA 17 onwards, credit to [sammygriffiths](https://github.com/sammygriffiths/fifa-career-save-parser) | | |
+| EA FC 25 | Native (classic16) | Chrome / Edge / Brave / Firefox | Full Support |
+| EA FC 26 | Native (classic16) | Chrome / Edge / Brave / Firefox | Full Support |
+| EA FC 27 | Native (compact9) | Chrome / Edge / Brave / Firefox | Upcoming Support |
 
 <img width="1917" height="935" alt="image" src="https://github.com/user-attachments/assets/055151fc-34f9-4c72-acd9-53feb5e822e8" />
 
@@ -82,6 +89,14 @@ Sync behavior, theme, and career/data management, all kept honest, there are no 
 
 ---
 
+## Local privacy model
+
+- **Parsing runs on your device.** The save decoder runs in your browser, with SQLite compiled to WebAssembly, or in the local Node service on the desktop build. Your save is read there and nowhere else.
+- **Zero cloud database uploads.** There is no server holding your career. Nothing about your save file, your squad or your notes leaves the machine, and there are no accounts to create.
+- **Session persistence is local.** A reference to the save file you picked, and your career database itself, live in your browser's own private storage: IndexedDB for the file reference and OPFS for the database image. On the desktop build the same data is a plain local SQLite file.
+
+---
+
 ## Architecture
 
 ```
@@ -112,7 +127,7 @@ SQLite (Drizzle ORM)              Deterministic Evaluators
 - **Frontend:** Next.js / React, Tailwind
 - **Backend:** local Node service, Next API routes
 - **Database:** SQLite via Drizzle ORM
-- **Save parsing:** a dedicated FC25 save-format decoder, developed and verified against the format's own schema metadata
+- **Save parsing:** a dedicated EA SPORTS FC save-format decoder, verified against the format's own schema metadata. FC 25 and FC 26 saves use the classic 16-byte descriptor layout, and FC 27 saves use the compact 9-byte layout.
 
 ---
 

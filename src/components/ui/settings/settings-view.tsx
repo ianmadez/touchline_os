@@ -82,6 +82,13 @@ interface SettingsViewProps {
    */
   onImport: (contents: string) => Promise<ActionResult>;
   onResetCareer: () => Promise<ActionResult>;
+  /**
+   * Brings every tab's guided tour back, and replays the current screen's immediately.
+   *
+   * Owned by the caller rather than done here because clearing the record is only half of it: the tour
+   * component owns whether a tour is open, so it has to be told to stand down as well.
+   */
+  onRestartTours: () => void;
 }
 
 type SettingsSubTab = "PREFERENCES" | "TIMELINE";
@@ -235,6 +242,7 @@ export function SettingsView({
   onExport,
   onImport,
   onResetCareer,
+  onRestartTours,
 }: SettingsViewProps) {
   const [subTab, setSubTab] = useState<SettingsSubTab>("PREFERENCES");
   const [confirmText, setConfirmText] = useState("");
@@ -473,6 +481,16 @@ export function SettingsView({
           </Section>
 
           <Section
+            title="Supported saves"
+            description="EA SPORTS FC 25 and EA SPORTS FC 26 Manager Career saves are fully supported. EA SPORTS FC 27 support is in progress."
+          >
+            <p className="font-sans text-xs text-slate-600 dark:text-slate-400">
+              Your save is read on this device. Nothing is uploaded to a server, and there is no cloud
+              copy of your career anywhere.
+            </p>
+          </Section>
+
+          <Section
             tour="settings-data"
             title="Data Management"
             description="What is actually stored on disk, and the tools to take a copy or clear it."
@@ -595,6 +613,29 @@ export function SettingsView({
               one-way and one-time, with nothing moving on its own. If the same career is already
               here it is replaced outright, so what you end up with is exactly what you exported.
             </p>
+          </Section>
+
+          <Section
+            title="Guides"
+            description="Every tab has a short guided tour that points at the real controls. They show once per career, and this brings the whole set back."
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="min-w-[12rem] flex-1 font-sans text-[11px] text-slate-500 dark:text-slate-400">
+                Starting again forgets which screens you have already been walked through, then
+                replays the one you are on. Every other tab will offer its own tour the next time you
+                open it.
+              </p>
+              <button
+                type="button"
+                // The anchor the Settings tour ends on, and the reason the tour can end on a real
+                // control instead of a description of one.
+                data-tour="settings-restart-tour"
+                onClick={onRestartTours}
+                className="cursor-pointer rounded-xl border border-slate-300 px-4 py-2.5 font-sub text-[11px] font-bold uppercase text-slate-700 transition-colors hover:border-[#E11D48] hover:text-[#E11D48] dark:border-slate-700 dark:text-slate-200"
+              >
+                Start tour again
+              </button>
+            </div>
           </Section>
 
           <Section

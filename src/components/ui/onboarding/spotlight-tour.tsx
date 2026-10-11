@@ -81,7 +81,7 @@ const MIN_READ_MS = 900;
  * `reconcileTourRevision`, which takes this value rather than deriving one, because "worth reshowing"
  * is an editorial call and cannot be computed.
  */
-const TOUR_REVISION = "2026-10-10";
+const TOUR_REVISION = "2026-10-10-restart";
 
 /**
  * The fewest steps worth showing. A tour that survived filtering down to its tab button alone would
@@ -99,6 +99,20 @@ export interface TourStep {
   title: string;
   body: string;
 }
+
+/**
+ * The closing step of every tab's tour, and one object rather than seven copies.
+ *
+ * It says the same thing on every screen, so a copy per tab would be seven places to keep in step. It
+ * points at the Settings TAB rather than at the button itself: the button only exists on the Settings
+ * screen, so a step anchored to it would be silently dropped from six of the seven tours by
+ * `availableSteps` - the tour would simply lose its ending and never say so.
+ */
+const REPLAY_STEP: TourStep = {
+  anchor: "tab-SETTINGS",
+  title: "Want the tour again?",
+  body: "Settings has a Start tour again button. Press it whenever you fancy another lap through these screens, because nobody takes all of this in the first time.",
+};
 
 const TOURS: Record<string, TourStep[]> = {
   DASHBOARD: [
@@ -132,6 +146,7 @@ const TOURS: Record<string, TourStep[]> = {
       title: "Recent activity",
       body: "Everything the app has written down for this career, newest first. The full history lives in Settings, under Career Timeline.",
     },
+    REPLAY_STEP,
   ],
   SEASON: [
     {
@@ -159,6 +174,7 @@ const TOURS: Record<string, TourStep[]> = {
       title: "The Vault",
       body: "Open this when you want a season match by match. Once a season is written down it is never overwritten, so the record stays honest.",
     },
+    REPLAY_STEP,
   ],
   DEBRIEF: [
     {
@@ -191,6 +207,7 @@ const TOURS: Record<string, TourStep[]> = {
       title: "Your debriefs",
       body: "Every match you have logged so far. Open one to edit it in place, or delete it and write it again.",
     },
+    REPLAY_STEP,
   ],
   SQUAD: [
     {
@@ -223,6 +240,7 @@ const TOURS: Record<string, TourStep[]> = {
       title: "The squad list",
       body: "Click any column heading to sort it. Click a player to open his profile, which is where his tactical role and your notes about him live.",
     },
+    REPLAY_STEP,
   ],
   TACTICS: [
     {
@@ -250,6 +268,7 @@ const TOURS: Record<string, TourStep[]> = {
       title: "The bench",
       body: "Sort the bench by any column to find who you are after, then click him and click the slot he belongs in. Click him again to take him back off.",
     },
+    REPLAY_STEP,
   ],
   FINANCE: [
     {
@@ -277,6 +296,7 @@ const TOURS: Record<string, TourStep[]> = {
       title: "Contract commitment",
       body: "What you are already on the hook for over the seasons to come, worked out from your squad's own contract end dates. Worth a look before you promise anybody anything.",
     },
+    REPLAY_STEP,
   ],
   SETTINGS: [
     {
@@ -303,6 +323,13 @@ const TOURS: Record<string, TourStep[]> = {
       anchor: "settings-data",
       title: "Data management",
       body: "What is actually stored, how to take a copy of your career, and where to start over. Everything else on this screen is safe to poke at.",
+    },
+    {
+      // The one tour whose closing step is the button itself, because on this screen it is on screen.
+      // Every other tab's tour can only point at the tab that leads here.
+      anchor: "settings-restart-tour",
+      title: "And you can always come back",
+      body: "Press this whenever you want another lap. It brings every tab's tour back, starting with this one.",
     },
   ],
 
@@ -486,6 +513,16 @@ interface SpotlightTourProps {
    * behind the tour is the one the tour is about.
    */
   enabled: boolean;
+  /**
+   * Bumped when the manager presses Start tour again in Settings.
+   *
+   * The click itself clears the record of what has been seen, which is what makes every tab's tour
+   * available again. This is the other half: the tour that was on screen has to stand down WITHOUT
+   * recording itself. The tour component owns whether it is open, so a caller cannot do that part for
+   * it, and without it the card's own Got it button would mark the very screen the manager just asked
+   * to be walked through again.
+   */
+  restartToken: number;
 }
 
 /**
@@ -531,7 +568,7 @@ function resolveTourKey(tab: string, subTab: string | null): string {
   return TOURS[composed] === undefined ? tab : composed;
 }
 
-export function SpotlightTour({ careerId, tab, enabled }: SpotlightTourProps) {
+export function SpotlightTour({ careerId, tab, enabled, restartToken }: SpotlightTourProps) {
   const raw = useSyncExternalStore(subscribeTour, getTourSnapshot, getTourServerSnapshot);
   const done = useMemo(() => toursDoneFor(raw, careerId), [raw, careerId]);
   /** The inner tab on screen, or null where the screen has no strip. Read from the DOM, not props. */
@@ -604,6 +641,39 @@ export function SpotlightTour({ careerId, tab, enabled }: SpotlightTourProps) {
     },
     [careerId, ownedTab]
   );
+
+  /*
+    Stands down when the manager asks for the tours again, without recording the one they were reading.
+
+    A ref rather than comparing against the prop directly, so mounting never looks like a restart: the
+    first render adopts whatever token it was given. Deferred a tick because `close` sets state, and
+    this effect body is not allowed to do that synchronously.
+  */
+  const lastRestartRef = useRef(restartToken);
+  useEffect(() => {
+    if (lastRestartRef.current === restartToken) return;
+    lastRestartRef.current = restartToken;
+    const timer = window.setTimeout(() => close(false), 0);
+    return () => window.clearTimeout(timer);
+  }, [restartToken, close]);
+
+  /*
+    Marks the document while a tour is up, which is how the stylesheet takes the clicks off the
+    navigation tabs.
+
+    The backdrop leaves a real gap over whatever it is describing, so the highlighted control stays
+    usable - right for a button, wrong for a tab. A tour belongs to ONE screen, so a tab click ends it
+    and records it as seen, spending a whole tour on a mis-click. The highlight stays; only the click
+    goes. Keyed on `open` so the attribute cannot outlive the overlay, and removed on unmount too.
+  */
+  useEffect(() => {
+    const root = document.documentElement;
+    if (open) root.dataset.tourOpen = "true";
+    else delete root.dataset.tourOpen;
+    return () => {
+      delete root.dataset.tourOpen;
+    };
+  }, [open]);
 
   /**
    * Opens once per tour per career, once the screen has settled.

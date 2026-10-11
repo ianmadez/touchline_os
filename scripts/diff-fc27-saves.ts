@@ -95,9 +95,7 @@ interface SaveFile {
   blocks: BlockLayout[];
 }
 
-interface LoadedSave extends SaveFile {
-  blockByIndex: Map<number, BlockLayout>;
-}
+type LoadedSave = SaveFile;
 
 function layoutBlock(bytes: Uint8Array, index: number, meta: DbMeta): BlockLayout | null {
   for (const variant of DB_HEADER_VARIANTS) {
@@ -174,7 +172,6 @@ function loadSave(label: "A" | "B", filePath: string, meta: DbMeta): LoadedSave 
     filePath,
     bytes,
     blocks,
-    blockByIndex: new Map(blocks.map((block) => [block.index, block])),
   };
 }
 
@@ -186,6 +183,37 @@ function blockForTable(save: LoadedSave, short: string): BlockLayout | null {
 
 function entryFor(block: BlockLayout, short: string): DirEntry | null {
   return block.entries.find((entry) => entry.short === short) ?? null;
+}
+
+/** What makes two blocks "the same database": length, table count and the directory's shortname set. */
+function directoryIdentity(block: BlockLayout): string {
+  const shorts = block.entries
+    .map((entry) => entry.short)
+    .sort()
+    .join(",");
+  return `${block.bytes.length}:${block.tableCount}:${shorts}`;
+}
+
+/**
+ * The same database in another save.
+ *
+ * Matched by directory identity, NOT by block index. These are the same career at two points in time and the
+ * container is rewritten between saves, so the career block appears in one and not the other and the world
+ * database therefore sits at block 1 in one save and block 0 in the other. Pairing on the index compares the
+ * wrong bytes - or, as happened here, nothing at all, and then reports "0 of 0 tables changed size", which
+ * reads like a clean result and is really a failed pairing.
+ */
+function sameBlockIn(save: LoadedSave, block: BlockLayout): BlockLayout | null {
+  const identity = directoryIdentity(block);
+  const exact = save.blocks.find((candidate) => directoryIdentity(candidate) === identity);
+  if (exact !== undefined) return exact;
+  // A table added or dropped between the saves changes the shortname set but not the shape; accept that.
+  return (
+    save.blocks.find(
+      (candidate) =>
+        candidate.bytes.length === block.bytes.length && candidate.tableCount === block.tableCount
+    ) ?? null
+  );
 }
 
 /** The first shortname the datasheet declares for a table - its lead field. */
@@ -693,8 +721,8 @@ function directoryDeltas(
   const rows: DeltaRow[] = [];
   const seen = new Set<string>();
   for (const blockA of saveA.blocks) {
-    const blockB = saveB.blockByIndex.get(blockA.index);
-    if (blockB === undefined) continue;
+    const blockB = sameBlockIn(saveB, blockA);
+    if (blockB === null) continue;
     for (const entryA of blockA.entries) {
       if (seen.has(entryA.short)) continue;
       seen.add(entryA.short);
@@ -864,6 +892,19 @@ function main(): void {
     }
   }
 
+  // Which block in B is which database in A. Printed because every later module depends on the pairing,
+  // and a silent mismatch is indistinguishable from a genuinely identical save.
+  console.log("  pairing");
+  for (const blockA of saveA.blocks) {
+    const blockB = sameBlockIn(saveB, blockA);
+    console.log(
+      `    A block ${blockA.index}  ->  ` +
+        (blockB === null
+          ? "no counterpart in B (the other save does not carry this database)"
+          : `B block ${blockB.index}  (${blockB.tableCount} tables, ${blockB.bytes.length.toLocaleString()} bytes)`)
+    );
+  }
+
   // Checked before anything else is reported, so a moved baseline is the loudest thing in the output.
   if (!assertSaveABaseline(saveA, meta)) {
     console.log(
@@ -874,9 +915,10 @@ function main(): void {
   }
 
   // Differential profile: how much of each block actually differs between the two careers.
-  console.log("\nDIFFERENTIAL PROFILE (byte equality between A and B)");  for (const blockA of saveA.blocks) {
-    const blockB = saveB.blockByIndex.get(blockA.index);
-    if (blockB === undefined || blockB.bytes.length !== blockA.bytes.length) continue;
+  console.log("\nDIFFERENTIAL PROFILE (byte equality between A and B)");
+  for (const blockA of saveA.blocks) {
+    const blockB = sameBlockIn(saveB, blockA);
+    if (blockB === null || blockB.bytes.length !== blockA.bytes.length) continue;
     let differing = 0;
     let firstDiff = -1;
     let lastDiff = -1;
@@ -934,7 +976,7 @@ function main(): void {
       strides.set(tableName, null);
       continue;
     }
-    const blockB = saveB.blockByIndex.get(blockA.index) ?? null;
+    const blockB = sameBlockIn(saveB, blockA);
     const entryA = entryFor(blockA, short);
     const entryB = blockB === null ? null : entryFor(blockB, short);
     if (entryA === null || entryB === null) {
@@ -1058,12 +1100,17 @@ function main(): void {
 
   // ---- Module 3: directory delta math --------------------------------------------------------
   const rowsByName = new Map<string, { a: number | null; b: number | null }>();
+  // A save that produced no oracle has an UNKNOWN row count, not zero. Recording 0 here produced a
+  // "teams Δrows=-870" validation line that looked like a real row drop, when all it meant was that the
+  // other save could not be decoded at all.
+  const knownRowsA = oracleA.rows > 0 ? oracleA.rows : null;
+  const knownRowsB = oracleB.rows > 0 ? oracleB.rows : null;
   for (const block of saveA.blocks) {
     for (const entry of block.entries) {
-      rowsByName.set(entry.short, { a: entry.short === "lyxL" ? oracleA.rows : null, b: null });
+      rowsByName.set(entry.short, { a: entry.short === "lyxL" ? knownRowsA : null, b: null });
     }
   }
-  for (const [short, value] of rowsByName) value.b = short === "lyxL" ? oracleB.rows : null;
+  for (const [short, value] of rowsByName) value.b = short === "lyxL" ? knownRowsB : null;
   // Tables whose row count the stride finder recovered get a real row pair, which is what turns a
   // payload delta into a record width.
   for (const [tableName, short] of targets) {
@@ -1081,12 +1128,27 @@ function main(): void {
   console.log(`\n${rule()}\n[3] DIRECTORY DELTA PAYLOAD MATH\n${rule()}`);
   console.log(`  FC 27 offsets are cumulative payload sizes, so consecutive deltas are table sizes.`);
   const changed = deltas.filter((row) => row.deltaSize !== 0);
-  console.log(`  ${changed.length} of ${deltas.length} tables changed size between the saves\n`);
+  const moved = deltas.filter((row) => row.deltaOffset !== 0);
   console.log(
-    `  ${pad("table", 26)} ${pad("short", 6)} ${padLeft("Δoffset", 10)} ${padLeft("sizeA", 11)} ${padLeft("sizeB", 11)} ` +
+    `  ${changed.length} of ${deltas.length} tables changed size; ${moved.length} changed position`
+  );
+  if (changed.length === 0 && moved.length > 0) {
+    console.log(
+      "  Every table kept its size, so the payload shapes are unchanged - but they are not in the same\n" +
+        "  order. FC 27 rewrites the directory in a different order between saves, so tables move even though\n" +
+        "  nothing grew. A raw byte diff of the block is then dominated by relocation rather than by edited\n" +
+        "  data, and the rows below are ranked by distance moved instead of by a size delta that is always 0."
+    );
+  }
+  console.log(
+    `\n  ${pad("table", 26)} ${pad("short", 6)} ${padLeft("Δoffset", 10)} ${padLeft("sizeA", 11)} ${padLeft("sizeB", 11)} ` +
       `${padLeft("Δsize", 9)} ${padLeft("Δrows", 7)} ${padLeft("implied w", 10)}`
   );
-  for (const row of changed.sort((a, b) => Math.abs(b.deltaSize) - Math.abs(a.deltaSize)).slice(0, 18)) {
+  const ranked =
+    changed.length > 0
+      ? changed.sort((a, b) => Math.abs(b.deltaSize) - Math.abs(a.deltaSize))
+      : moved.sort((a, b) => Math.abs(b.deltaOffset) - Math.abs(a.deltaOffset));
+  for (const row of ranked.slice(0, 18)) {
     console.log(
       `  ${pad(row.tableName ?? "?", 26)} ${pad(row.short, 6)} ${padLeft(row.deltaOffset, 10)} ` +
         `${padLeft(row.sizeA.toLocaleString(), 11)} ${padLeft(row.sizeB.toLocaleString(), 11)} ` +
@@ -1096,9 +1158,15 @@ function main(): void {
   const teamsDelta = deltas.find((row) => row.tableName === "teams");
   if (teamsDelta !== undefined) {
     console.log(
-      `\n  validation: teams Δsize=${teamsDelta.deltaSize} Δrows=${teamsDelta.deltaRows} ` +
+      `\n  validation: teams Δsize=${teamsDelta.deltaSize} Δrows=${teamsDelta.deltaRows ?? "—"} ` +
         `implied width=${teamsDelta.impliedRecordWidth ?? "—"} (the known true value is 188)`
     );
+    if (teamsDelta.deltaRows === null) {
+      console.log(
+        "      Δrows is unavailable, not zero: a row delta needs a row count from BOTH saves and one of\n" +
+          "      them produced none. Read the oracle section above to see which save failed."
+      );
+    }
   }
 
   // ---- Module 4: report ---------------------------------------------------------------------
