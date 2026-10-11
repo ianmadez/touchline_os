@@ -67,6 +67,43 @@ async function main(): Promise<void> {
     console.log("notes:");
     for (const note of rules.notes) console.log(`  - ${note}`);
   }
+
+  /*
+   * Re-proves, on whatever save is in the database, which of the save's two team ids on a deal is the
+   * SELLER. The parser had them inverted until pipeline 15 and the only symptom was a ledger showing every
+   * move backwards, so the evidence is worth printing rather than trusting a comment: the player's own
+   * current club (from the world pool) is the club he is being sold BY, and it should sit on the column
+   * named for the club he is registered to.
+   *
+   * A healthy save answers `current club == selling column` for nearly every deal and `== buying column`
+   * for none. If that flips, the mapping is wrong again.
+   */
+  const { transferDeals, worldPlayers } = await import("../src/lib/db/schema");
+  const { and, eq } = await import("drizzle-orm");
+  const deals = await db
+    .select({ buying: transferDeals.buyingTeamId, selling: transferDeals.sellingTeamId, playerId: transferDeals.playerId })
+    .from(transferDeals)
+    .where(eq(transferDeals.careerId, career.id));
+
+  let currentIsSelling = 0;
+  let currentIsBuying = 0;
+  let unresolved = 0;
+  for (const deal of deals) {
+    const pool = await db
+      .select({ clubId: worldPlayers.clubId })
+      .from(worldPlayers)
+      .where(and(eq(worldPlayers.careerId, career.id), eq(worldPlayers.eaPlayerId, deal.playerId)))
+      .get();
+    if (!pool?.clubId) {
+      unresolved += 1;
+      continue;
+    }
+    if (pool.clubId === deal.selling) currentIsSelling += 1;
+    if (pool.clubId === deal.buying) currentIsBuying += 1;
+  }
+  console.log(`\n=== DEAL DIRECTION (${deals.length} deals, ${unresolved} with no pool row) ===`);
+  console.log(`  player's current club == SELLING team: ${currentIsSelling}  (want: nearly all)`);
+  console.log(`  player's current club == BUYING team:  ${currentIsBuying}  (want: 0, or the mapping is inverted)`);
 }
 
 void main();

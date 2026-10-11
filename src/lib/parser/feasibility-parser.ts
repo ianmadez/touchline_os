@@ -2951,6 +2951,18 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     // Decoded and then thrown away until now. These agreed fees are the only real market evidence
     // in the file: the game writes no player value anywhere, so any estimate has to be fitted on
     // what the world actually paid rather than on an invented price table.
+    //
+    // THE TWO TEAM IDS WERE MAPPED THE WRONG WAY ROUND, for months. `teamid` in this table is the club the
+    // player is REGISTERED TO (the one selling him) and `offerteamid` is the club that made the offer (the
+    // one buying him) - the field is literally named for the offer. Read the other way round, every deal
+    // in the ledger showed the direction of the move reversed, which is a very convincing-looking bug: the
+    // row for a player SOLD to Preston read "from Preston North End" and the one for a player BOUGHT from
+    // Monaco read "to AS Monaco", with the fees, dates and names all correct.
+    //
+    // The proof is in the world pool rather than in the field names, and it is worth re-running on any save:
+    // for 37 of the 39 deals in the reference career, `world_players.club_id` for that player equals this
+    // table's `teamid` and equals `offerteamid` for NONE of them. The player's current club is the selling
+    // club, which is what "teamid" means. `scripts/probe-money.ts` prints that count.
     const presignedDeals: PresignedDeal[] = presigned
       .map((row) => {
         const playerId = num(row, "playerid");
@@ -2962,8 +2974,8 @@ export class FeasibilitySaveParser implements CareerDataProvider {
           offeredWage: num(row, "offeredwage"),
           signedDate: num(row, "signeddate"),
           completeDate: num(row, "completedate"),
-          buyingTeamId: num(row, "teamid"),
-          sellingTeamId: num(row, "offerteamid"),
+          buyingTeamId: num(row, "offerteamid"),
+          sellingTeamId: num(row, "teamid"),
           isLoanBuy: num(row, "isloanbuy") === 1,
           isExchangePlayer: num(row, "isexchangedplayer") === 1,
         } satisfies PresignedDeal;

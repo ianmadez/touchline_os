@@ -59,15 +59,35 @@ export async function fetchFlag(nationId: number): Promise<Uint8Array | null> {
       // header list serves both, the same way `fetchSprite` does it.
       headers: { "User-Agent": "TouchlineOS/0.1 (local companion)" },
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      // A refused flag and a nation with no flag look the same on screen, and only one of them is worth
+      // acting on, so the status is named rather than swallowed. Throttled to once per nation: a squad
+      // renders the same flag once per player, which would otherwise be a wall of identical lines.
+      warnFlagOnce(nationId, `[flag] ${nationId} came back ${response.status}`);
+      return null;
+    }
 
     const bytes = new Uint8Array(await response.arrayBuffer());
-    return isPng(bytes) ? bytes : null;
-  } catch {
+    if (!isPng(bytes)) {
+      warnFlagOnce(nationId, `[flag] ${nationId} came back as bytes that are not a PNG`);
+      return null;
+    }
+    return bytes;
+  } catch (error) {
     // A timeout or an offline machine is not evidence that the nation has no flag, and the caller
-    // treats it as "nothing to draw" either way, so no distinction is worth propagating.
+    // treats it as "nothing to draw" either way, so no distinction is worth propagating. It is still
+    // worth a line: a blocked CDN is otherwise invisible.
+    warnFlagOnce(nationId, `[flag] ${nationId} could not be fetched: ${(error as Error).message}`);
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** One report per nation, so a squad of one nationality does not repeat itself twenty times. */
+const warnedFlags = new Set<number>();
+function warnFlagOnce(nationId: number, message: string): void {
+  if (warnedFlags.has(nationId)) return;
+  warnedFlags.add(nationId);
+  console.warn(message);
 }

@@ -17,6 +17,54 @@ import { readCachedFace, writeCachedFace } from "./face-store.browser";
 const objectUrls = new Map<number, string>();
 const inFlight = new Map<number, Promise<string | null>>();
 
+/** Reports a given problem once per player. A squad table retries as it scrolls, and a warning per row
+ * per render would bury the one line that explains it. */
+const warned = new Set<string>();
+function warnOnce(tag: string, message: string, error?: unknown): void {
+  if (warned.has(tag)) return;
+  warned.add(tag);
+  if (error === undefined) console.warn(message);
+  else console.warn(message, error);
+}
+
+/** The eight bytes every PNG starts with: the same test the CDN fetch makes, applied to the cache. */
+function looksLikePng(bytes: Uint8Array): boolean {
+  const magic = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  return bytes.byteLength >= magic.length && magic.every((byte, index) => bytes[index] === byte);
+}
+
+/**
+ * The cache, but never a reason to skip the CDN.
+ *
+ * This used to be the first half of an `??` chain, so ANY throw out of the cache - OPFS unavailable, a
+ * private window, a quota error, a handle that cannot be reopened - ended the whole lookup before the
+ * fetch was ever reached. The symptom of that is indistinguishable from "this player has no face": a
+ * disc of initials and not one network request in the log, forever. The cache is an optimisation and it
+ * now behaves like one.
+ *
+ * Bytes that are not a PNG are treated as absent for the same reason. A cache written by an interrupted
+ * fetch, or by a build that stored the CDN's error page, describes the player just as convincingly as a
+ * real sprite does unless something checks.
+ */
+async function cachedFace(eaPlayerId: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  try {
+    const bytes = await readCachedFace(eaPlayerId);
+    if (!bytes) return null;
+    if (!looksLikePng(bytes)) {
+      warnOnce(`bad:${eaPlayerId}`, `[face] ${eaPlayerId} has cached bytes that are not a PNG, refetching`);
+      return null;
+    }
+    return bytes;
+  } catch (error) {
+    warnOnce(
+      "cache-read",
+      "[face] the sprite cache could not be read, so faces are fetched from the CDN instead",
+      error
+    );
+    return null;
+  }
+}
+
 /**
  * Asks the CDN for one sprite and caches it, or null when there is nothing worth caching.
  *
@@ -31,7 +79,15 @@ const inFlight = new Map<number, Promise<string | null>>();
  */
 async function fetchAndCache(eaPlayerId: number): Promise<Uint8Array<ArrayBuffer> | null> {
   const sprite = await fetchSprite(eaPlayerId);
-  if (!sprite.bytes) return null;
+  if (!sprite.bytes) {
+    // "No sprite" is a normal answer for a newgen or an id the CDN does not have. It is worth a line in
+    // the log for anything else, because "the face never appeared" and "the CDN refused us" look exactly
+    // the same on screen and only one of them is fixable by the person looking at it.
+    if (sprite.outcome === "no-sprite") {
+      warnOnce(`miss:${eaPlayerId}`, `[face] ${eaPlayerId} came back with no sprite (status or size)`);
+    }
+    return null;
+  }
 
   // `Uint8Array.from` narrows to `Uint8Array<ArrayBuffer>`, which both the cache write and the Blob
   // require: a bare `Uint8Array` is `Uint8Array<ArrayBufferLike>` and neither accepts that.
@@ -60,7 +116,7 @@ async function fetchAndCache(eaPlayerId: number): Promise<Uint8Array<ArrayBuffer
  * any request, and what comes back is cached, so it costs one request ever.
  */
 async function resolveFace(eaPlayerId: number): Promise<string | null> {
-  const bytes = (await readCachedFace(eaPlayerId)) ?? (await fetchAndCache(eaPlayerId));
+  const bytes = (await cachedFace(eaPlayerId)) ?? (await fetchAndCache(eaPlayerId));
   if (!bytes) return null;
 
   const url = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
@@ -94,7 +150,7 @@ export async function faceImageUrl(eaPlayerId: number): Promise<string | null> {
 
   const promise = resolveFace(eaPlayerId)
     .catch((error: unknown) => {
-      console.warn(`[face] ${eaPlayerId} could not be resolved:`, error);
+      warnOnce(`throw:${eaPlayerId}`, `[face] ${eaPlayerId} could not be resolved:`, error);
       return null;
     })
     .finally(() => inFlight.delete(eaPlayerId));

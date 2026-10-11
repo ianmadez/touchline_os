@@ -1,4 +1,4 @@
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, notInArray } from "drizzle-orm";
 import { sha256Hex } from "../parser/sha";
 import { storage } from "../platform/storage";
 import {
@@ -107,8 +107,20 @@ export interface SyncResult {
  *      `youth_prospects` and `world_players`, resolved to a country name through a reference table.
  *      Nothing about that is visible to the change detector, which compares against the save file, so
  *      without this bump every existing career would report NO_CHANGE and stay with no nationality.
+ * 15 - the DIRECTION of every transfer deal, and a deals table that mirrors the save rather than
+ *      accumulating. `career_presignedcontract` carries `teamid` (the club the player is registered to,
+ *      so the seller) and `offerteamid` (the club that made the offer, so the buyer), and the parser had
+ *      them the other way round. The fees, dates and names were all correct, so the only symptom was a
+ *      ledger showing every move reversed: a player sold to Preston read "from Preston North End" and one
+ *      bought from Monaco read "to AS Monaco". The two are only ever right together, because the stored
+ *      rows carry the SWAPPED values: a row written by the old mapping cannot be reinterpreted, so the
+ *      whole table has to be rewritten. And `transfer_deals` now deletes rows the save no longer lists -
+ *      a deal that completed or was cancelled used to sit there forever still marked "not yet completed",
+ *      which is what made a corrected direction look wrong on a row no re-sync could ever reach.
+ *      Evidence, re-runnable on any save: the club named on a deal for a player we are signing is always
+ *      the club he is registered to, and `scripts/probe-presigned-deals.ts` prints the raw rows.
  */
-export const SYNC_PIPELINE_VERSION = "14";
+export const SYNC_PIPELINE_VERSION = "16";
 
 export class SyncService {
   private parser = createSaveParser();
@@ -791,6 +803,14 @@ export class SyncService {
       // `career_presignedcontract` is every deal agreed across the save's world, fees included. It
       // was decoded and discarded for weeks. It is the only real market evidence in the file, and
       // the value model is fitted on it, so it is persisted rather than recomputed from a parse.
+      //
+      // THIS TABLE MIRRORS THE SAVE, so deals the save no longer lists are REMOVED. It used to only
+      // upsert, which meant a deal that completed, was cancelled or was renamed out of the file stayed in
+      // the ledger forever, still claiming "not yet completed". One such fossil is what made a corrected
+      // direction look wrong: the row named a club the save had stopped mentioning weeks earlier, so no
+      // re-sync could ever update it and the ledger showed a move that no longer existed. A row is a fact
+      // about the save that produced it, and a save that no longer says it is not the same fact.
+      const dealIds: string[] = [];
       for (const deal of rawData.presignedDeals) {
         const dealValues = {
           id: `${careerId}_${deal.playerId}_${deal.signedDate ?? 0}`,
@@ -807,6 +827,7 @@ export class SyncService {
           provenance: "SAVE" as const,
           updatedAt: new Date().toISOString(),
         };
+        dealIds.push(dealValues.id);
         tx.insert(transferDeals)
           .values(dealValues)
           .onConflictDoUpdate({
@@ -815,6 +836,13 @@ export class SyncService {
           })
           .run();
       }
+      tx.delete(transferDeals)
+        .where(
+          dealIds.length > 0
+            ? and(eq(transferDeals.careerId, careerId), notInArray(transferDeals.id, dealIds))
+            : eq(transferDeals.careerId, careerId)
+        )
+        .run();
 
       // --- What the save itself says about our table position -------------------------------
       //

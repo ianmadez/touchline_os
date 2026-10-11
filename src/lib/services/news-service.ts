@@ -17,6 +17,7 @@ import { db } from "../db/client";
 import { careerEvents, careers, leagues } from "../db/schema";
 import { SquadService } from "./squad-service";
 import { SeasonService } from "./season-service";
+import { TacticsService } from "./tactics-service";
 import { TargetBlockService } from "./target-block-service";
 import { TrophyService } from "./trophy-service";
 import { YouthService } from "./youth-service";
@@ -160,6 +161,18 @@ export class NewsService {
     // the desk needs the expired ones to write the return story, and deciding which is which is the desk's
     // job, not this one's. A row with no date carries no news at all and is left out.
     //
+    // The XI comes with it, because the desk's injury copy turns on it: the same absence is a selection
+    // problem for a starter and a depth problem for a squad player, and the wrong one of those two sentences
+    // is the kind of error a manager does not forgive. This is the manager's OWN saved shape, so an empty
+    // slot means "not a starter" rather than a guess drawn from a rating.
+    //
+    const tacticalSystem = await new TacticsService().getTacticalSystem(careerId);
+    const starterIds = new Set(
+      tacticalSystem.slots
+        .map((slot) => slot.playerId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    );
+
     const injuries: NewsAbsence[] = squad.flatMap((player) => {
       const injury = player.userProfile?.injury;
       if (!injury?.until) return [];
@@ -171,6 +184,7 @@ export class NewsService {
           until: injury.until,
           note: injury.note,
           reportedOn: injury.reportedOn,
+          isStarter: starterIds.has(player.id),
         },
       ];
     });

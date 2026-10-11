@@ -890,8 +890,15 @@ check(
   rich.every((item, index) => item.article.at(-1) !== rich[index - 1]?.article.at(-1))
 );
 check(
-  "and the edition does not keep ending on the same handful of lines",
-  new Set(rich.map((item) => item.article.at(-1))).size >= Math.ceil(rich.length * 0.6),
+  "and no sentence of the closing paragraph is reused anywhere else in the edition",
+  (() => {
+    // The closing paragraph is the last thing a reader sees of a story and the first thing he notices when it
+    // comes back. This is the check that fails if a pool is exhausted or a frame is chosen by position again:
+    // every closing sentence in the edition has to be a sentence no other story used.
+    const closings = rich.map((item) => item.article.at(-1) ?? "");
+    const reused = closings.filter((closing, index) => closings.indexOf(closing) !== index);
+    return reused.length === 0;
+  })(),
   `${new Set(rich.map((item) => item.article.at(-1))).size} distinct closings for ${rich.length} stories`
 );
 check(
@@ -1339,6 +1346,71 @@ check(
 check(
   "and a report with no note does not invent one",
   weeks !== undefined && !/hamstring|ankle|knee|groin/.test(weeks.article.join(" "))
+);
+
+// A player the manager has actually picked and a player he has not are two different stories. The first
+// version of this piece told both of them that he "has been a regular part of this side", which is a claim
+// about the team sheet the desk had never checked - and a manager reads that sentence about his own bench.
+console.log("\nwho the absent player is decides what is lost");
+
+const hurtStarter = buildNews(
+  input({ injuries: [absence({ until: "2026-12-06", isStarter: true })] })
+).find((item) => item.id.startsWith("injury-"));
+const hurtSquadPlayer = buildNews(
+  input({ injuries: [absence({ until: "2026-12-06", isStarter: false })] })
+).find((item) => item.id.startsWith("injury-"));
+const copyOf = (item: NonNullable<typeof hurtStarter>) =>
+  [item.headline, item.body, ...item.article].join(" ");
+
+check(
+  "a starter's absence is written as a change to the XI",
+  hurtStarter !== undefined &&
+    hurtSquadPlayer !== undefined &&
+    copyOf(hurtStarter) !== copyOf(hurtSquadPlayer)
+);
+check(
+  "and a squad player's absence never claims he has been playing",
+  (() => {
+    if (!hurtSquadPlayer) return false;
+    const copy = copyOf(hurtSquadPlayer);
+    return !/regular part of this|has been carrying|in the manager's XI when everybody is fit/.test(copy);
+  })(),
+  hurtSquadPlayer ? copyOf(hurtSquadPlayer) : "no story"
+);
+check(
+  "and it does not pretend the team sheet has to be rewritten either",
+  (() => {
+    if (!hurtSquadPlayer) return false;
+    const copy = copyOf(hurtSquadPlayer);
+    return !/the team looks like without|what the XI loses|has to change how the side plays/.test(copy);
+  })(),
+  hurtSquadPlayer ? copyOf(hurtSquadPlayer) : "no story"
+);
+check(
+  "a manager with no XI saved gets the version that claims nothing about him",
+  (() => {
+    const unknown = buildNews(input({ injuries: [absence({ until: "2026-12-06" })] })).find((item) =>
+      item.id.startsWith("injury-")
+    );
+    if (!unknown) return false;
+    return !/regular part of this|in the manager's XI when everybody is fit/.test(copyOf(unknown));
+  })()
+);
+check(
+  "two players out in the same week do not share a standing sentence",
+  (() => {
+    const two = buildNews(
+      input({
+        injuries: [
+          absence({ name: "Jordan Pike", role: "ST", until: "2026-12-06", isStarter: true }),
+          absence({ name: "Callum Reid", role: "CB", until: "2026-12-06", isStarter: true }),
+        ],
+      })
+    ).filter((item) => item.id.startsWith("injury-"));
+    if (two.length !== 2) return false;
+    const secondParagraphs = two.map((item) => item.article[1] ?? "");
+    return new Set(secondParagraphs).size === 2;
+  })()
 );
 
 // Two players hurt in the same week is a real situation, and it is two stories.
