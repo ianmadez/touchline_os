@@ -19,6 +19,7 @@
     "matchstats:test": "tsx scripts/test-match-stats.ts",
     "nations:test": "tsx scripts/test-nations.ts",
     "trophies:test": "tsx scripts/test-trophies.ts",
+    "browser:schema:test": "tsx scripts/test-browser-schema.ts",
     "news:test": "tsx scripts/test-news.ts",
     "injury:test": "tsx scripts/test-injury.ts",
     "news:archive": "tsx scripts/test-news-archive.ts",

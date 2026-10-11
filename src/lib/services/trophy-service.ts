@@ -65,8 +65,7 @@ export interface TrophyCabinetView {
   /** Every league title the manager's country offers, lowest tier first. */
   leagues: CabinetTrophyView[];
   /** Every cup, domestic first then continental. */
-  cups: CabinetTrophyView[];
-  /** Seasons a win can be attributed to, from the save's own history. Ascending, newest last. */
+  cups: CabinetTrophyView[];  /** Seasons a win can be attributed to, from the save's own history. Ascending, newest last. */
   seasons: number[];
   totals: {
     won: number;
@@ -121,8 +120,19 @@ export class TrophyService {
       .select()
       .from(careerTrophies)
       .where(eq(careerTrophies.careerId, careerId));
+    const reportedElsewhere = new Map<string, { name: string; kind: TrophyKind; level: number | null }>();
     for (const row of reported) {
       addWin(wins, { key: row.key, season: row.season, fromSave: false });
+      // The row carries its own name and kind (see the schema note) precisely so it still reads when its
+      // catalogue entry is gone. That is what makes the catalogue safe to prune: a competition removed
+      // from the list cannot erase a trophy the manager already recorded against it.
+      if (!reportedElsewhere.has(row.key)) {
+        reportedElsewhere.set(row.key, {
+          name: row.name,
+          kind: row.kind as TrophyKind,
+          level: row.level,
+        });
+      }
     }
 
     // ---- what could be won ----------------------------------------------------------------
@@ -178,6 +188,27 @@ export class TrophyService {
     );
 
     const cups = [...domestic, ...continental];
+
+    // Anything the manager recorded against a competition this catalogue no longer lists. Kept, and kept
+    // at the end so it never displaces a live entry: a prune is an editorial decision about what to
+    // OFFER, and it must not quietly delete something he won.
+    const offered = new Set(cups.map((cup) => cup.key));
+    const pruned = [...reportedElsewhere.entries()]
+      .filter(([key]) => !offered.has(key))
+      .map(([key, meta]) =>
+        toView({
+          key,
+          name: meta.name,
+          kind: meta.kind,
+          level: meta.level,
+          wins: wins.get(key) ?? [],
+          openToCurrentTier: false,
+          isCurrentDivision: false,
+        })
+      )
+      .sort((left, right) => left.name.localeCompare(right.name));
+    cups.push(...pruned);
+
     const all = [...countryLeagues, ...cups];
 
     return {

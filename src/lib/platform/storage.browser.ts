@@ -16,7 +16,7 @@
 import initSqlJs from "sql.js";
 import { drizzle } from "drizzle-orm/sql-js";
 import * as schema from "../db/schema";
-import { SCHEMA_DDL, SCHEMA_MIGRATIONS } from "../db/schema-sql";
+import { applySchema } from "../db/schema-apply";
 import type { AppDatabase, Storage } from "./types";
 
 /** The OPFS file the image lives in. */
@@ -151,23 +151,17 @@ async function readImage(
 }
 
 /**
- * Creates the schema on a brand new database.
+ * Brings the database up to the current schema.
  *
- * The DDL and the additive migration statements are the ones the local initialiser runs, shared from
- * `../db/schema-sql`, so a browser database and a desktop database have the same shape.
+ * The DDL and the additive migration statements come from `../db/schema-sql`, shared with the local
+ * initialiser, so a browser database and a desktop database have the same shape. Applying them is
+ * `applySchema`'s job now; see that module for why this runs on a LOADED database and not only on a new
+ * one. It used to run only on a new one, which meant a database written by an earlier build kept its
+ * earlier shape for good and the manager met `table leagues has no column named country_name` on the
+ * entry screen months later with nothing he could do about it.
  */
-function createSchema(sqlite: import("sql.js").Database): void {
-  sqlite.run(SCHEMA_DDL);
-  // Enforced here for the same reason it is enforced locally: the cascade rules are what keep a
-  // deleted career from leaving orphaned rows behind.
-  sqlite.run("PRAGMA foreign_keys = ON");
-  for (const statement of SCHEMA_MIGRATIONS) {
-    try {
-      sqlite.run(statement);
-    } catch {
-      // Column already exists, ignore duplicate column error.
-    }
-  }
+function createSchema(sqlite: import("sql.js").Database): boolean {
+  return applySchema(sqlite);
 }
 
 let storageImpl: Storage = unavailable;
@@ -178,7 +172,10 @@ if (inBrowser) {
   const handle = await opfsFile();
   const loaded = await readImage(handle);
   const sqlite = loaded.kind === "loaded" ? new SQL.Database(loaded.bytes) : new SQL.Database();
-  if (loaded.kind !== "loaded") createSchema(sqlite);
+  // ALWAYS, whether the database was just created or read back from OPFS. A new database needs the whole
+  // schema; an existing one needs whatever has been added since it was written, and it is the only chance
+  // it will ever get.
+  const schemaMoved = createSchema(sqlite);
 
   /**
    * Reading the existing file failed. The session still works, but it must not write: the file on
@@ -204,6 +201,16 @@ if (inBrowser) {
   let persistedRows = writtenRows();
   let queue: Promise<void> = Promise.resolve();
   const scratch = loaded.kind === "new" ? await leftoverScratch() : null;
+
+  /**
+   * True when this session CHANGED THE SCHEMA of a database it read back from OPFS.
+   *
+   * A schema change has to be written even though no row moved, and the flush gate below is a row count:
+   * `total_changes()` counts INSERT, UPDATE and DELETE, and DDL does not touch it. Without this flag a
+   * migration would live only in memory and be lost on the next reload, which is exactly how a manager
+   * ends up meeting the same schema error every single visit.
+   */
+  let schemaDirty = schemaMoved && loaded.kind === "loaded";
 
   const persist = async (): Promise<void> => {
     if (!handle || readOnly) return;
@@ -237,14 +244,16 @@ if (inBrowser) {
   };
 
   flushImpl = async () => {
-    if (!handle || readOnly || writtenRows() === persistedRows) return;
+    if (!handle || readOnly) return;
+    if (writtenRows() === persistedRows && !schemaDirty) return;
     // Serialised, and the change is re-checked inside: two overlapping whole-image writes would
     // race, and the later one is not necessarily the newer one.
     queue = queue.then(async () => {
       const changed = writtenRows();
-      if (changed === persistedRows) return;
+      if (changed === persistedRows && !schemaDirty) return;
       await persist();
       persistedRows = changed;
+      schemaDirty = false;
     });
     return queue;
   };
@@ -255,6 +264,11 @@ if (inBrowser) {
 
   // Last chance to get the image out before the page goes away.
   window.addEventListener("pagehide", () => void flushImpl().catch(() => {}));
+
+  // A migrated schema does not wait for the poll: the next read of this page may be the same session, and
+  // a tab closed inside the interval would drop it. Fire and forget, because the app must not block its
+  // first paint on a file write it can retry.
+  if (schemaDirty) void flushImpl().catch(() => {});
 
   storageImpl = {
     db,

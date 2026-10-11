@@ -293,14 +293,20 @@ export function SquadTable({ players, inGameDate = null, onSelectPlayer }: Squad
                     }
                     const timeOut = describeTimeOut(injury?.until ?? null, inGameDate);
                     return (
+                      /*
+                        No truncation and no max width. This pill was cut to "OUT A COUPLE ...", which is
+                        the one word in the row that has to be readable - a squad table is scanned for who
+                        is NOT available, and a half-said injury is worse than no column at all. The table
+                        already scrolls sideways, so the width costs nothing.
+                      */
                       <span
                         title={[injury?.note, injury?.until ? `Back ${injury.until}` : null]
                           .filter(Boolean)
                           .join(". ")}
-                        className="inline-flex max-w-[9rem] items-center gap-1.5 rounded-md border border-rose-300 bg-rose-50 px-2 py-0.5 font-sub text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-300"
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-rose-300 bg-rose-50 px-2 py-0.5 font-sub text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-300"
                       >
                         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" />
-                        <span className="truncate">{timeOut ? `Out ${timeOut}` : "Out"}</span>
+                        {timeOut ? `Out ${timeOut}` : "Out"}
                       </span>
                     );
                   })()}

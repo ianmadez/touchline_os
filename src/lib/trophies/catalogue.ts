@@ -21,6 +21,40 @@
  * THE KEY IS THE ARTWORK FILENAME. `key` doubles as the `<slug>` in `/trophies/<slug>.png`, so the
  * cabinet, the database and the artwork can never drift apart. League keys are `league-<saveId>`
  * because the save's own id is the only stable identifier a league has.
+ *
+ * ---------------------------------------------------------------------------------------------
+ * WHAT THIS LIST WAS AUDITED AGAINST (2026-10-12)
+ *
+ * THE TRAP IS THE WORD "LICENSED". A licensed-competitions list (25 competitions in FC 25, 27 in FC 26)
+ * is about BRANDING and trophy presentation, not about which cups are played. The KNVB Beker is on
+ * neither list and is still played in career mode, which is measurable from any Ajax career. So a cup the
+ * game does not license is still a cup a manager can win, and this table keeps it. Pruning by "not
+ * licensed" would have deleted most of the list and been wrong.
+ *
+ * Two kinds of evidence were used instead, in this order:
+ *
+ *   1. THE SAVE'S OWN COMPETITION TABLE. `competition` carries no names - 169 rows of adboards, badges
+ *      and colours, measured with `scripts/probe-competition-names.ts` - but it binds a competition to a
+ *      country, and for England that binding is EXACTLY four: the FA Cup, the EFL Cup, the EFL Trophy and
+ *      the Community Shield. The same save's `career_competitionprogress` shows the club entering four
+ *      competitions in its League One season (league + FA Cup + EFL Cup + EFL Trophy) and three in the
+ *      Championship, which is how those four were identified rather than assumed.
+ *   2. THE GAMES' OWN COMPETITION LISTS, for what a save cannot show. That check is what found the two
+ *      competitions this file had been MISSING: the UEFA Super Cup and the CONMEBOL Recopa.
+ *
+ * DROPPED, each with its reason, because offering a trophy the game cannot award is worse than a missing
+ * line:
+ *
+ *   - FIFA Confederations Cup: discontinued after 2017, and in no modern title.
+ *   - FIFA Club World Cup: not a career competition in FC 25 or FC 26. EA's Club World Cup content is in
+ *     FC Mobile, a different game.
+ *   - UEFA Nations League: not in the game. UEFA's competitions there are the Champions League, the
+ *     Europa League, the Conference League, the Super Cup and the European Championship.
+ *   - Supercopa de España: on no competition list for either title, and one of the competitions
+ *     third-party career-mode overhauls add. The COPA DEL REY stays, because a La Liga career plays it.
+ *
+ * If a manager wins something that is not below, adding one line to this table is the whole cost, and it
+ * is deliberately lower than the cost of offering him a competition his game does not run.
  */
 
 export type TrophyKind = "LEAGUE" | "DOMESTIC_CUP" | "CONTINENTAL" | "INTERNATIONAL";
@@ -54,8 +88,9 @@ const DOMESTIC_CUPS: Record<number, readonly CupDefinition[]> = {
     { key: "community-shield", name: "Community Shield", openToTiers: [1] },
   ],
   45: [
+    // The Supercopa de España is NOT here: it is on no competition list for FC 25 or FC 26, and it is one
+    // of the competitions third-party career overhauls add. See the audit note at the top of this file.
     { key: "copa-del-rey", name: "Copa del Rey", openToTiers: null },
-    { key: "supercopa-espana", name: "Supercopa de España", openToTiers: [1] },
   ],
   21: [
     { key: "dfb-pokal", name: "DFB-Pokal", openToTiers: null },
@@ -116,14 +151,23 @@ const CONTINENTAL: Record<Region, readonly CupDefinition[]> = {
     { key: "ucl", name: "UEFA Champions League", openToTiers: [1] },
     { key: "uel", name: "UEFA Europa League", openToTiers: [1, 2] },
     { key: "uecl", name: "UEFA Conference League", openToTiers: [1, 2] },
+    // Played by the Champions League winner against the Europa League winner, and licensed in both FC 25
+    // and FC 26. It was missing from this file until the audit.
+    { key: "uefa-super-cup", name: "UEFA Super Cup", openToTiers: [1] },
   ],
   CONMEBOL: [
     { key: "libertadores", name: "CONMEBOL Libertadores", openToTiers: [1] },
     { key: "sudamericana", name: "CONMEBOL Sudamericana", openToTiers: [1, 2] },
+    // The Libertadores winner against the Sudamericana winner. Licensed in both titles, and the save's own
+    // competition table carries it under its CONMEBOL group, so it was missing rather than absent.
+    { key: "recopa-sudamericana", name: "CONMEBOL Recopa", openToTiers: [1, 2] },
   ],
   AFC: [
-    { key: "afc-champions-league", name: "AFC Champions League", openToTiers: [1] },
-    { key: "afc-cup", name: "AFC Cup", openToTiers: [1, 2] },
+    // The current names, renamed by the confederation in 2024-25: the AFC Champions League became the
+    // Champions League Elite and the AFC Cup became the Champions League Two. The JSON keys stay as they
+    // are so the artwork filenames do not move.
+    { key: "afc-champions-league", name: "AFC Champions League Elite", openToTiers: [1] },
+    { key: "afc-cup", name: "AFC Champions League Two", openToTiers: [1, 2] },
   ],
   CONCACAF: [{ key: "concacaf-champions-cup", name: "CONCACAF Champions Cup", openToTiers: [1] }],
 };
@@ -146,13 +190,15 @@ const REGION_OF_NATION: Record<number, Region> = {
  * result - so they are offered the way a cup is: the manager records the win and the cabinet keeps it.
  *
  * The keys are the artwork filenames, exactly as the club cups are.
+ *
+ * The FIFA Confederations Cup, the FIFA Club World Cup and the UEFA Nations League are deliberately NOT
+ * here: none of them is a competition in a modern title. The audit note at the top of this file has the
+ * reasoning, and a confederation's flagship tournament stays even though only its winner's own save would
+ * ever show it.
  */
 const INTERNATIONAL: readonly CupDefinition[] = [
   { key: "fifa-world-cup", name: "FIFA World Cup", openToTiers: null },
-  { key: "fifa-confederations-cup", name: "FIFA Confederations Cup", openToTiers: null },
-  { key: "fifa-club-world-cup", name: "FIFA Club World Cup", openToTiers: null },
   { key: "euro", name: "UEFA European Championship", openToTiers: null },
-  { key: "uefa-nations-league", name: "UEFA Nations League", openToTiers: null },
   { key: "copa-america", name: "Copa America", openToTiers: null },
   { key: "afcon", name: "Africa Cup of Nations", openToTiers: null },
   { key: "afc-asian-cup", name: "AFC Asian Cup", openToTiers: null },

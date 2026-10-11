@@ -123,11 +123,50 @@ check(
   knownCupNations().every((id) => allCupsFor(id).every((cup) => !/women|frauen|f[eé]minine/i.test(cup.name)))
 );
 
+console.log("\nthe competitions the games do not run, which must not come back");
+
+// Audited 2026-10-12 against the save's own competition table and the two titles' own competition lists.
+// Kept as checks rather than as a comment so a later edit cannot quietly re-offer a manager a trophy his
+// game has no competition for. See the audit note at the top of the catalogue.
+for (const [key, why] of [
+  ["fifa-confederations-cup", "discontinued after 2017, in no modern title"],
+  ["fifa-club-world-cup", "not a career competition in FC 25 or FC 26"],
+  ["uefa-nations-league", "not in the game's UEFA competition set"],
+  ["supercopa-espana", "on no competition list for either title"],
+] as const) {
+  check(`${key} is not offered (${why})`, !everyKey.includes(key));
+}
+
+check(
+  "Spain still has a cup, because a La Liga career does play the Copa del Rey",
+  domesticCupsFor(45).some((cup) => cup.key === "copa-del-rey")
+);
+
+console.log("\nthe competitions the audit found were MISSING");
+
+check("the UEFA Super Cup is offered", continentalFor(14).some((cup) => cup.key === "uefa-super-cup"));
+check(
+  "and it is open to the division that can reach it",
+  isOpenToTier(continentalFor(14).find((cup) => cup.key === "uefa-super-cup")!, 1)
+);
+check("the CONMEBOL Recopa is offered", continentalFor(52).some((cup) => cup.key === "recopa-sudamericana"));
+check(
+  "the Asian club competitions carry their current names",
+  ["AFC Champions League Elite", "AFC Champions League Two"].every((name) =>
+    continentalFor(167).some((cup) => cup.name === name)
+  )
+);
+check(
+  "England's four domestic competitions are exactly the four the save's own table binds",
+  domesticCupsFor(14).map((cup) => cup.key).join(",") ===
+    "fa-cup,efl-cup,efl-trophy,community-shield",
+  domesticCupsFor(14).map((cup) => cup.key).join(",")
+);
+
 // The manifest, printed rather than kept somewhere else: this script is the one place that knows every
 // key, so it is the right place to ask "what do I name the artwork?". League trophies are not listed -
 // their keys come from the save's own league ids, which `scripts/probe-trophies.ts` prints.
-console.log(`\nARTWORK MANIFEST (${everyKey.length} files, all in public/trophies/):`);
-for (const cup of catalogueCups()) {
+console.log(`\nARTWORK MANIFEST (${everyKey.length} files, all in public/trophies/):`);for (const cup of catalogueCups()) {
   const holders = knownCupNations().filter((id) =>
     allCupsFor(id).some((candidate) => candidate.key === cup.key)
   );
