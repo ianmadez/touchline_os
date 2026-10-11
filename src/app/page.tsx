@@ -11,6 +11,7 @@ import { PlayerDrawer } from "@/components/ui/squad/player-drawer";
 import { LandingFooter } from "@/components/ui/landing/landing-footer";
 import { Pitch2D } from "@/components/ui/squad/pitch-2d";
 import { DashboardView } from "@/components/ui/dashboard/dashboard-view";
+import { NewsView } from "@/components/ui/news/news-view";
 import { GroupDebriefPrompt } from "@/components/ui/dashboard/group-debrief-prompt";
 import { SeasonView } from "@/components/ui/season/season-view";
 import type { SeasonSubTab } from "@/lib/ui/labels";
@@ -114,10 +115,22 @@ export default function TouchlineApp() {
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   /**
+   * The news desk, which is an inner view of the dashboard rather than a tab of its own.
+   *
+   * Held here, and not inside the dashboard, for one concrete reason: a manager reading the paper sees
+   * the Dashboard button lit up, so clicking it has to mean "take me back", and the dashboard switch is
+   * the only place that can hear a click on the tab already being shown.
+   */
+  const [newsOpen, setNewsOpen] = useState(false);
+
+  /**
    * Navigates between in-app pages with a fade. Repeated clicks mid-fade retarget the pending swap
    * rather than queueing, so a rapid sequence of clicks still ends on the last tab chosen.
    */
   const switchTab = (next: AppTab) => {
+    // Any navigation closes the paper. A tab click is a statement of where the manager wants to be, and
+    // the news desk is somewhere you are inside the dashboard, never a place to be left stranded in.
+    setNewsOpen(false);
     // An onboarded manager must never be routed back into the setup wizard.
     const portalResolved = next === "PORTAL" && isOnboardingComplete ? "DASHBOARD" : next;
     // A tab that has since been folded into another section must land on its new home - this covers
@@ -1058,6 +1071,9 @@ export default function TouchlineApp() {
     importanceMarker: "UNTOUCHABLE" | "KEY_PLAYER" | "ROTATION" | "SURPLUS";
     userNotes: string;
     primaryPosition: string | null;
+    /** Absent when the manager only edited a note; null means he is fit again. */
+    injuryUntil?: string | null;
+    injuryNote?: string | null;
   }) => {
     setSquad((prev) =>
       prev.map((p) => {
@@ -1072,6 +1088,20 @@ export default function TouchlineApp() {
               importanceMarker: profileData.importanceMarker,
               userNotes: profileData.userNotes,
               positionOverride: profileData.primaryPosition,
+              injury: {
+                until:
+                  profileData.injuryUntil !== undefined
+                    ? profileData.injuryUntil
+                    : (p.userProfile?.injury.until ?? null),
+                note:
+                  profileData.injuryNote !== undefined
+                    ? profileData.injuryNote
+                    : (p.userProfile?.injury.note ?? null),
+                reportedOn:
+                  profileData.injuryUntil === null || profileData.injuryUntil === undefined
+                    ? (p.userProfile?.injury.reportedOn ?? null)
+                    : (careerInfo.inGameDate ?? null),
+              },
             },
           };
         }
@@ -1599,7 +1629,15 @@ export default function TouchlineApp() {
           />
         )}
 
-        {displayedTab === "DASHBOARD" && (
+        {displayedTab === "DASHBOARD" &&
+          (newsOpen ? (
+            <NewsView
+              careerId={careerId ?? ""}
+              clubName={careerInfo.clubName}
+              badgeUrl={careerInfo.clubLogoUrl}
+              onBack={() => setNewsOpen(false)}
+            />
+          ) : (
           <div>
             <GroupDebriefPrompt
               careerId={careerId}
@@ -1628,9 +1666,10 @@ export default function TouchlineApp() {
               setSelectedStorylineId(storylineId);
               patchSession({ openStorylineId: storylineId });
             }}
+            onOpenNews={() => setNewsOpen(true)}
             />
           </div>
-        )}
+          ))}
 
         {displayedTab === "SEASON" && (
           <SeasonView
@@ -1649,6 +1688,7 @@ export default function TouchlineApp() {
               <SquadView
                 careerId={careerId}
                 players={squad}
+                inGameDate={careerInfo?.inGameDate ?? null}
                 onSelectPlayer={(player) => setSelectedPlayer(player)}
                 currencySymbol={currencySymbolFor(appSettings?.currencySymbol)}
               />
@@ -1662,6 +1702,7 @@ export default function TouchlineApp() {
             squad={squad}
             formations={formationsForUi}
             activeFormationLabel={activeFormationLabel}
+            inGameDate={careerInfo?.inGameDate ?? null}
             onSelectFormation={setActiveFormationLabel}
             onSaveTactics={handleSaveTactics}
             onFormationAction={handleFormationAction}
@@ -1715,6 +1756,7 @@ export default function TouchlineApp() {
         key={selectedPlayer?.id ?? "no-player"}
         player={selectedPlayer}
         valuation={selectedPlayer ? valuations[selectedPlayer.eaPlayerId] : undefined}
+        inGameDate={careerInfo?.inGameDate ?? null}
         onClose={() => setSelectedPlayer(null)}
         onSaveProfile={handleSavePlayerProfile}
       />

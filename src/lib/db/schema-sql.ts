@@ -57,6 +57,8 @@ export const SCHEMA_DDL = `
       injury INTEGER,
       position_code INTEGER,
       name_source TEXT,
+      nationality_id INTEGER,
+      nationality TEXT,
       wage INTEGER NOT NULL DEFAULT 0,
       wage_provenance TEXT NOT NULL DEFAULT 'DERIVED',
       is_youth_prospect INTEGER NOT NULL DEFAULT 0,
@@ -105,6 +107,8 @@ export const SCHEMA_DDL = `
       injury INTEGER,
       position_code INTEGER,
       name_source TEXT,
+      nationality_id INTEGER,
+      nationality TEXT,
       has_high_quality_head INTEGER,
       head_asset_id INTEGER,
       avatar_pom_id INTEGER,
@@ -144,11 +148,18 @@ export const SCHEMA_DDL = `
       trust_level TEXT,
       importance_marker TEXT,
       user_notes TEXT,
+      primary_position TEXT,
+      trust_source TEXT,
+      injury_until TEXT,
+      injury_note TEXT,
+      injury_reported_on TEXT,
       provenance TEXT NOT NULL DEFAULT 'USER',
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_player_user_profiles_career_id ON player_user_profiles(career_id);
     CREATE UNIQUE INDEX IF NOT EXISTS uq_player_user_profiles_career_player ON player_user_profiles(career_id, player_id);
+    -- NOTE: the injury index is created in SCHEMA_MIGRATIONS, not here. On an existing database the CREATE
+    -- TABLE above is skipped, so the column does not exist yet at this point and the index would fail.
 
     -- 8. CAREER EVENTS SPINE
     CREATE TABLE IF NOT EXISTS career_events (
@@ -394,6 +405,8 @@ export const SCHEMA_DDL = `
       name TEXT NOT NULL,
       level INTEGER,
       country_id INTEGER,
+      country_name TEXT,
+      is_women_competition INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (career_id, league_id)
     );
@@ -501,6 +514,8 @@ export const SCHEMA_DDL = `
       primary_position TEXT,
       age INTEGER,
       birthdate INTEGER,
+      nationality_id INTEGER,
+      nationality TEXT,
       overall_rating INTEGER,
       potential_rating INTEGER,
       tier_low INTEGER,
@@ -521,6 +536,125 @@ export const SCHEMA_DDL = `
     -- Added after the fact: links a pinned target back to its world-pool player. Null for typed rows.
     -- No index: the shortlist is tens of rows and is never queried BY this column.
 
+    -- 25. HONOURS CABINET
+    -- One row per trophy per winning season, so "x3" is a count of rows rather than a stored number
+    -- that has to be incremented somewhere. League titles are NOT stored: they are derived on read from
+    -- season_history, which the save fills in, so there is nothing to keep in step. Everything here is
+    -- USER data - the save cannot name a cup, so a cup win is reported by the manager or it is absent.
+    -- NOTE: no backticks anywhere in this SQL - it lives inside a template literal.
+    CREATE TABLE IF NOT EXISTS career_trophies (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      country_id INTEGER,
+      level INTEGER,
+      season INTEGER NOT NULL,
+      provenance TEXT NOT NULL DEFAULT 'USER',
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_career_trophies_career_id ON career_trophies(career_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_career_trophies_career_key_season ON career_trophies(career_id, key, season);
+
+    -- 26. NEWS ARCHIVE
+    -- A story is published once and kept, rather than regenerated on every read. That is what lets the
+    -- paper be capped, have its oldest rows overwritten, have a dislike dismissed, and have a favourite
+    -- kept forever - none of which is possible if the archive is rebuilt from scratch every time.
+    -- The saved flag is the only thing that exempts a row from the cap, and read_at is what the unread
+    -- badge counts.
+    -- NOTE: no backticks anywhere in this SQL - it lives inside a template literal.
+    CREATE TABLE IF NOT EXISTS news_items (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      category TEXT NOT NULL,
+      tone TEXT NOT NULL,
+      headline TEXT NOT NULL,
+      body TEXT NOT NULL,
+      evidence_json TEXT NOT NULL DEFAULT '[]',
+      player_names_json TEXT NOT NULL DEFAULT '[]',
+      player_ids_json TEXT NOT NULL DEFAULT '[]',
+      quote TEXT,
+      published_on TEXT,
+      weight INTEGER NOT NULL DEFAULT 0,
+      sort_index INTEGER NOT NULL DEFAULT 0,
+      copy_version INTEGER NOT NULL DEFAULT 0,
+      saved INTEGER NOT NULL DEFAULT 0,
+      read_at TEXT,
+      edition INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_news_items_career_id ON news_items(career_id);
+    CREATE INDEX IF NOT EXISTS idx_news_items_career_edition ON news_items(career_id, edition);
+
+    -- 27. NEWS TOMBSTONES
+    -- Every story id a career has ever published, kept after the story itself is gone.
+    --
+    -- Without this the desk would republish anything it still has evidence for the moment its row was
+    -- dismissed or overwritten, so a manager who dismissed a story would see it again on the next read and
+    -- the paper would churn on every open. A row here is a few dozen bytes and there is one per story ever
+    -- published, which is nothing next to the stories themselves.
+    CREATE TABLE IF NOT EXISTS news_published (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      first_published_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_news_published_career_id ON news_published(career_id);
+
+    -- 28. MEMORABLE MATCHES
+    -- The debriefs the manager starred, so the ones worth keeping can be found again among a season of
+    -- routine ones. A row IS the star: no flag to keep in step, and unstaring deletes it.
+    -- Deliberately separate from the debrief itself: a debrief is a record of what happened and is never
+    -- rewritten, while a star is the manager's own opinion of it and changes as often as he likes.
+    -- NOTE: no backticks anywhere in this SQL - it lives inside a template literal.
+    CREATE TABLE IF NOT EXISTS debrief_marks (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      event_id TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_debrief_marks_career_id ON debrief_marks(career_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_debrief_marks_career_event ON debrief_marks(career_id, event_id);
+
+    -- 29. TRANSFER LEDGER, ENTERED BY HAND
+    -- The save carries an agreed fee only for pre-signed contracts, so anything that happened before
+    -- TouchlineOS was installed on this save - or that the game simply does not write - has no row at all.
+    -- An entered deal is information, so the app asks for it rather than printing a note about its absence.
+    -- Provenance is USER on every row here, and the ledger shows it: a typed fee and a saved fee are never
+    -- blended into one number without saying which is which.
+    -- NOTE: no backticks anywhere in this SQL - it lives inside a template literal.
+    CREATE TABLE IF NOT EXISTS transfer_inputs (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      direction TEXT NOT NULL,
+      player_name TEXT NOT NULL,
+      counterparty TEXT,
+      fee INTEGER NOT NULL,
+      moved_on TEXT,
+      season INTEGER,
+      note TEXT,
+      provenance TEXT NOT NULL DEFAULT 'USER',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_transfer_inputs_career_id ON transfer_inputs(career_id);
+
+    -- 30. COUNTERPARTY NAMES THE MANAGER SUPPLIES
+    -- The save names no club outside the manager's own division, so a deal with anybody else carries an id
+    -- and nothing else. Rather than printing a paragraph about what the file cannot say, the ledger asks the
+    -- manager to name the club once: the row then reads as it should, with the name badged as his.
+    -- Keyed on the deal's own id, so a later sync of the same deal cannot lose the name.
+    -- NOTE: no backticks anywhere in this SQL - it lives inside a template literal.
+    CREATE TABLE IF NOT EXISTS transfer_counterparty_names (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      deal_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      provenance TEXT NOT NULL DEFAULT 'USER',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_transfer_counterparty_names_career_id ON transfer_counterparty_names(career_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_transfer_counterparty_names_deal ON transfer_counterparty_names(career_id, deal_id);
+
     -- 23. WORLD PLAYERS (every professional in the save, for scouting search)
     CREATE TABLE IF NOT EXISTS world_players (
       id TEXT PRIMARY KEY,
@@ -535,6 +669,8 @@ export const SCHEMA_DDL = `
       overall_rating INTEGER,
       potential_rating INTEGER,
       age INTEGER,
+      nationality_id INTEGER,
+      nationality TEXT,
       preferred_foot INTEGER,
       weak_foot INTEGER,
       skill_moves INTEGER,
@@ -626,8 +762,7 @@ export const SCHEMA_MIGRATIONS: string[] = [
     // A manager may keep as many formations as they like, so the one-row-per-career constraint is
     // replaced by one-row-per-(career, label). The old index MUST be dropped first, or the second
     // formation is rejected on every existing database.
-    "ALTER TABLE tactical_systems ADD COLUMN label TEXT NOT NULL DEFAULT 'Primary';",
-    "ALTER TABLE tactical_systems ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0;",
+    "ALTER TABLE tactical_systems ADD COLUMN label TEXT NOT NULL DEFAULT 'Primary';",    "ALTER TABLE tactical_systems ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0;",
     "DROP INDEX IF EXISTS uq_tactical_systems_career_id;",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_tactical_systems_career_label ON tactical_systems(career_id, label);",
     // The single pre-existing formation becomes the manager's default so the current XI is unchanged.
@@ -644,4 +779,35 @@ export const SCHEMA_MIGRATIONS: string[] = [
     "ALTER TABLE scout_targets ADD COLUMN contract_at_archive INTEGER;",
     "ALTER TABLE scout_targets ADD COLUMN budget_at_archive INTEGER;",
     "ALTER TABLE scout_targets ADD COLUMN resurfaced_at TEXT;",
+    // Nationality: the save stores a bare code on the player row and names no country anywhere, so
+    // the code travels with the name the committed reference table gives it. Same pair on all four
+    // player tables, and on the snapshot table so history keeps the nationality it was synced with.
+    "ALTER TABLE players ADD COLUMN nationality_id INTEGER;",
+    "ALTER TABLE players ADD COLUMN nationality TEXT;",
+    "ALTER TABLE player_snapshots ADD COLUMN nationality_id INTEGER;",
+    "ALTER TABLE player_snapshots ADD COLUMN nationality TEXT;",
+    "ALTER TABLE youth_prospects ADD COLUMN nationality_id INTEGER;",
+    "ALTER TABLE youth_prospects ADD COLUMN nationality TEXT;",
+    "ALTER TABLE world_players ADD COLUMN nationality_id INTEGER;",
+    "ALTER TABLE world_players ADD COLUMN nationality TEXT;",
+    // The league catalogue predates this column, so an existing database needs it added; `leagues` is
+    // written before the snapshot hash check, so it self-heals on the next sync with no version bump.
+    "ALTER TABLE leagues ADD COLUMN country_name TEXT;",
+    "ALTER TABLE leagues ADD COLUMN is_women_competition INTEGER NOT NULL DEFAULT 0;",
+    // The paper grew a long-form article and a byline. A story published before these columns existed has
+    // no article, and the reader falls back to the card's own summary rather than printing an empty page.
+    "ALTER TABLE news_items ADD COLUMN article_json TEXT NOT NULL DEFAULT '[]';",
+    "ALTER TABLE news_items ADD COLUMN outlet TEXT;",
+    "ALTER TABLE news_items ADD COLUMN writer TEXT;",
+    "ALTER TABLE news_items ADD COLUMN writer_role TEXT;",
+    "ALTER TABLE news_items ADD COLUMN dateline TEXT;",
+    "ALTER TABLE news_items ADD COLUMN copy_version INTEGER NOT NULL DEFAULT 0;",
+    // The manager's own injury report. The save's own `injury` column read 0 for every player on the
+    // reference career, so this is USER data and the only source there is.
+    "ALTER TABLE player_user_profiles ADD COLUMN injury_until TEXT;",
+    "ALTER TABLE player_user_profiles ADD COLUMN injury_note TEXT;",
+    "ALTER TABLE player_user_profiles ADD COLUMN injury_reported_on TEXT;",
+    // After the ALTERs above, never in the DDL block: an existing database skips the CREATE TABLE there, so
+    // an index on a brand new column has to come after the column exists.
+    "CREATE INDEX IF NOT EXISTS idx_player_user_profiles_injury ON player_user_profiles(career_id, injury_until);",
   ];

@@ -14,6 +14,10 @@ export type CoreEventType =
   // USER-sourced events. MATCH_DEBRIEF is written directly by POST /api/debrief and
   // is never produced by DeterministicDiffEngine, so it cannot affect sync event counts.
   | "MATCH_DEBRIEF"
+  // USER-sourced, and written by POST /api/media-comment after a debrief. Optional by design: a manager
+  // who says nothing is recorded as REFUSING, which is a different thing from never being asked, and the
+  // news desk needs to tell them apart.
+  | "MEDIA_COMMENT"
   // DERIVED: raised when the save writes a finishing position for a season, which is the only
   // "the season is over" signal the file carries. There is no SEASON_ENDED flag in the save itself.
   | "SEASON_ENDED"

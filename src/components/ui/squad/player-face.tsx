@@ -48,9 +48,15 @@ export function PlayerFace({ eaPlayerId, name, size = 40, className = "" }: Play
 
   useEffect(() => {
     let cancelled = false;
-    void faceImageUrl(eaPlayerId).then((url) => {
-      if (!cancelled) setSrc(url);
-    });
+    void faceImageUrl(eaPlayerId)
+      .then((url) => {
+        if (!cancelled) setSrc(url);
+      })
+      // `faceImageUrl` resolves null rather than rejecting, so this is belt and braces for the day a
+      // future edit breaks that promise: the disc is the fallback, never a stuck spinner.
+      .catch(() => {
+        if (!cancelled) setSrc(null);
+      });
     return () => {
       cancelled = true;
     };

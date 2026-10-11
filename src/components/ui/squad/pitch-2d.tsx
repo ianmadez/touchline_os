@@ -5,6 +5,7 @@ import Image from "next/image";
 import { FORMATIONS_REGISTRY, getFormationById } from "@/lib/tactics/formations";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import { PitchSlotAssignment, TacticalSystemState } from "@/lib/services/tactics-service";
+import { describeTimeOut, isInjured } from "@/lib/squad/injury";
 
 type BenchSort = "POSITION" | "OVERALL" | "POTENTIAL" | "AGE" | "NAME";
 
@@ -36,6 +37,8 @@ interface Pitch2DProps {
   /** Every formation the manager has saved. They may keep as many as they like. */
   formations: TacticalSystemState[];
   activeFormationLabel: string;
+  /** The save's clock: an injury that has run out must not keep a player out of the XI. */
+  inGameDate?: string | null;
   onSelectFormation: (label: string) => void;
   onSaveTactics: (label: string, formationId: string, slots: PitchSlotAssignment[]) => void;
   onFormationAction: (
@@ -49,6 +52,7 @@ export function Pitch2D({
   squad,
   formations,
   activeFormationLabel,
+  inGameDate = null,
   onSelectFormation,
   onSaveTactics,
   onFormationAction,
@@ -67,6 +71,14 @@ export function Pitch2D({
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
+  /**
+   * Why the last click did nothing.
+   *
+   * A refused click that says nothing reads as a broken page, and "he is injured" is a fact the
+   * manager already knows and needs to see applied - so the refusal is spoken out loud rather than
+   * being a chip he has to go and find.
+   */
+  const [refusal, setRefusal] = useState<string | null>(null);
 
   const formationDef = getFormationById(selectedFormationId);
 
@@ -94,6 +106,21 @@ export function Pitch2D({
 
   // Assign player to active selected pitch slot
   const assignPlayerToSlot = (player: EnrichedPlayer, slotIndex: number) => {
+    //
+    // THE ONE GATE. An injured player cannot be named in the XI, so the click is refused here
+    // rather than after the fact. Placed in front of the state update on purpose: a refusal that
+    // still wrote the slot would leave an unavailable player on the pitch with a warning next to
+    // him, which is a worse lie than the chip.
+    //
+    if (isInjured(player.userProfile?.injury, inGameDate)) {
+      const timeOut = describeTimeOut(player.userProfile?.injury.until ?? null, inGameDate);
+      setRefusal(
+        `${player.name} cannot be picked${timeOut ? `, out for ${timeOut}` : ", he is injured"}. Clear him in his dossier once he is fit.`
+      );
+      return;
+    }
+
+    setRefusal(null);
     const updated = slots.map((s) => {
       if (s.slotIndex === slotIndex) {
         return {
@@ -127,6 +154,31 @@ export function Pitch2D({
   const assignedPlayerIds = useMemo(
     () => new Set(slots.map((s) => s.playerId).filter(Boolean)),
     [slots]
+  );
+
+  /**
+   * Squad members named in this XI who have since been ruled out.
+   *
+   * Not blocked, only flagged: an injury reported after the team sheet was saved is a real state of
+   * the world, and silently emptying the slot would throw away the manager's selection. He is told
+   * the sheet is no longer valid and chooses the replacement himself.
+   */
+  const unavailableInXi = useMemo(
+    () =>
+      slots
+        .map((slot) => ({
+          slot,
+          player: squad.find((p) => p.id === slot.playerId),
+        }))
+        .filter(
+          ({ player }) => player && isInjured(player.userProfile?.injury, inGameDate)
+        )
+        .map(({ slot, player }) => ({
+          slotIndex: slot.slotIndex,
+          name: player!.name,
+          timeOut: describeTimeOut(player!.userProfile?.injury.until ?? null, inGameDate),
+        })),
+    [slots, squad, inGameDate]
   );
 
   const [benchSort, setBenchSort] = useState<BenchSort>("POSITION");
@@ -343,6 +395,10 @@ export function Pitch2D({
               (s) => s.slotIndex === slotDef.slotIndex
             );
             const isSelected = selectedSlotIndex === slotDef.slotIndex;
+            const slotPlayer = currentSlotData?.playerId
+              ? squad.find((p) => p.id === currentSlotData.playerId)
+              : undefined;
+            const slotPlayerOut = isInjured(slotPlayer?.userProfile?.injury, inGameDate);
 
             return (
               <div
@@ -361,6 +417,8 @@ export function Pitch2D({
                   className={`w-20 sm:w-24 bg-slate-950/90 border rounded-lg p-1.5 backdrop-blur-md shadow-xl text-center ${
                     isSelected
                       ? "border-amber-400 ring-2 ring-amber-400/40"
+                      : slotPlayerOut
+                      ? "border-rose-500 ring-2 ring-rose-500/40"
                       : currentSlotData?.playerName
                       ? "border-slate-600 hover:border-slate-400"
                       : "border-dashed border-amber-500/60 bg-amber-950/20"
@@ -384,6 +442,14 @@ export function Pitch2D({
                       </span>
                     )}
                   </div>
+
+                  {/* Named and unavailable: the team sheet is stale, and the slot says so itself so
+                      the warning above does not have to be matched to a position by eye. */}
+                  {slotPlayerOut && (
+                    <div className="mt-0.5 text-[9px] font-sub font-bold uppercase tracking-wider text-rose-400">
+                      Out injured
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -405,6 +471,29 @@ export function Pitch2D({
               : "Click a pitch card on the left to assign or swap a player."}
           </p>
         </div>
+
+        {/* The refusal, where the click happened. */}
+        {refusal && (
+          <p
+            role="status"
+            className="mb-2.5 rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-2 font-sans text-[11px] leading-relaxed text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-300"
+          >
+            {refusal}
+          </p>
+        )}
+
+        {/* An XI that no longer stands up. Named rather than counted, because the manager has to go
+            and find that exact slot. */}
+        {unavailableInXi.length > 0 && (
+          <p
+            role="status"
+            className="mb-2.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 font-sans text-[11px] leading-relaxed text-amber-800 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-300"
+          >
+            {unavailableInXi.length === 1
+              ? `${unavailableInXi[0].name} is named at ${formationDef.slots.find((s) => s.slotIndex === unavailableInXi[0].slotIndex)?.label ?? "a position"} and is now out${unavailableInXi[0].timeOut ? ` for ${unavailableInXi[0].timeOut}` : ""}. Replace him before you play.`
+              : `${unavailableInXi.length} of this XI are out injured. Replace them before you play.`}
+          </p>
+        )}
 
         {sortedBench.length === 0 && (
           <p className="font-sans text-xs text-slate-500 dark:text-slate-400">
@@ -447,7 +536,12 @@ export function Pitch2D({
         )}
 
         <div className="space-y-1.5 max-h-[580px] overflow-y-auto pr-1">
-          {sortedBench.map((player) => (
+          {sortedBench.map((player) => {
+            const out = isInjured(player.userProfile?.injury, inGameDate);
+            const timeOut = out
+              ? describeTimeOut(player.userProfile?.injury.until ?? null, inGameDate)
+              : null;
+            return (
             <div
               key={player.id}
               onClick={() => {
@@ -455,10 +549,17 @@ export function Pitch2D({
                   assignPlayerToSlot(player, selectedSlotIndex);
                 }
               }}
-              className={`p-2.5 rounded-lg border bg-slate-50 dark:bg-slate-950/60 transition-colors flex items-center justify-between cursor-pointer ${
-                selectedSlotIndex !== null
+              title={out ? `Out injured${timeOut ? `, ${timeOut}` : ""}` : undefined}
+              className={`p-2.5 rounded-lg border bg-slate-50 dark:bg-slate-950/60 transition-colors flex items-center justify-between ${
+                out
+                  ? "border-amber-400/70 dark:border-amber-500/50 cursor-not-allowed"
+                  : "cursor-pointer"
+              } ${
+                selectedSlotIndex !== null && !out
                   ? "hover:border-amber-500 dark:hover:border-amber-400 hover:bg-slate-100 dark:hover:bg-slate-900"
-                  : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                  : !out
+                  ? "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                  : ""
               }`}
             >
               <div>
@@ -466,7 +567,7 @@ export function Pitch2D({
                   <span className="font-heading text-xs text-emerald-700 dark:text-emerald-400 font-bold">
                     {player.overallRating}
                   </span>
-                  <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                  <span className={`font-bold text-sm ${out ? "text-slate-500 dark:text-slate-400" : "text-slate-900 dark:text-slate-100"}`}>
                     {player.name}
                   </span>
                 </div>
@@ -480,13 +581,20 @@ export function Pitch2D({
                 </div>
               </div>
 
-              {player.userProfile?.importanceMarker === "UNTOUCHABLE" && (
-                <span className="text-[10px] bg-amber-500/15 border border-amber-500/40 text-amber-700 dark:text-amber-400 font-sub px-1.5 py-0.5 rounded uppercase">
-                  Untouchable
+              {out ? (
+                <span className="shrink-0 rounded border border-amber-500/50 bg-amber-500/15 px-1.5 py-0.5 font-sub text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                  {timeOut ? `Out ${timeOut}` : "Out"}
                 </span>
+              ) : (
+                player.userProfile?.importanceMarker === "UNTOUCHABLE" && (
+                  <span className="text-[10px] bg-amber-500/15 border border-amber-500/40 text-amber-700 dark:text-amber-400 font-sub px-1.5 py-0.5 rounded uppercase">
+                    Untouchable
+                  </span>
+                )
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

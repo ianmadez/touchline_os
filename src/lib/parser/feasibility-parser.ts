@@ -374,6 +374,59 @@ function sanitiseName(value: string): string {
   return (cut ? trimmed.slice(0, cut.index) : trimmed).trim();
 }
 
+/**
+ * The save's nation ids, mapped to the country name to display.
+ *
+ * The save stores a nationality as a bare integer on the player row and nothing else: there is no
+ * nation table in the schema we read, and no code anywhere in the file that spells one out. The
+ * mapping therefore has to come from outside the save, exactly as player names do, and it is a
+ * committed reference table for the same reason - a hosted build cannot reach the machine the file
+ * came from.
+ *
+ * Deliberately NOT a three-letter code table. Every football code a reader might expect (ENG, DEN,
+ * DEU) would have to be INVENTED here, and an invented abbreviation sitting beside real save data is
+ * indistinguishable from a fact the game recorded. Names are what the reference table actually
+ * carries, so names are what is shown. The raw id travels alongside the name so a code table can be
+ * added later without re-reading anyone's save.
+ *
+ * Why not read the names out of the save itself: the meta DOES declare a `nations` table (`Crbb`) with
+ * `nationname` and even an `isocountrycode`, and that would have been the better source. Measured on
+ * the reference career with `allTables: true`, that table is not in the save's database blocks at all
+ * - 19 tables decode and not one of them, or of the unrecognised names, is `nations`. It is game data,
+ * not career data. So the mapping has to come from outside, exactly as player names do.
+ *
+ * Known gap, measured rather than assumed: the source dataset carries 160 of the 163 codes the
+ * reference career's pool actually uses. Codes 141, 165 and 197 carry a real flag on the CDN but no
+ * name here. They are left unnamed rather than guessed; the raw code is still stored, so the UI can
+ * say a nation is recorded but not named.
+ *
+ * Same parsing rules as `parseNameTable`: comment lines skipped, a header row found rather than
+ * assumed, and a first-wins duplicate rule so a repeated id cannot flip a name between syncs.
+ */
+export function parseNationTable(csv: string): Map<number, string> {
+  const byNationId = new Map<number, string>();
+  const lines = csv.split(/\r?\n/);
+  const headerAt = lines.findIndex((line) => line.trim() !== "" && !line.startsWith("#"));
+  if (headerAt === -1) return byNationId;
+
+  const header = parseCsvLine(lines[headerAt]).map((cell) => cell.trim().replace(/^\uFEFF/, ""));
+  const idCol = header.indexOf("nation_id");
+  const nameCol = header.indexOf("name");
+  if (idCol === -1 || nameCol === -1) return byNationId;
+
+  for (let i = headerAt + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line || line.startsWith("#")) continue;
+    const cells = parseCsvLine(line);
+    const id = Number(cells[idCol]);
+    if (!Number.isInteger(id) || id <= 0) continue;
+    const name = sanitiseName(cells[nameCol] ?? "");
+    if (!name) continue;
+    if (!byNationId.has(id)) byNationId.set(id, name);
+  }
+  return byNationId;
+}
+
 export function parseNameTable(csv: string): Map<number, string> {
   const byPlayerId = new Map<number, string>();
   const lines = csv.split(/\r?\n/);
@@ -2019,12 +2072,28 @@ const asDate = (yyyymmdd: number | null): string | null => {
   return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
 };
 
+/**
+ * The nationality a player row carries, or null when the save records none.
+ *
+ * `0` is the game's "no nation" code, not a country: measured on the reference career, the face CDN
+ * serves 104x62 flag sprites for every real code it knows and returns 404 for 0, and the meta declares
+ * `nations.nationid` as `rangelow="0"` alongside the real ids. A code is therefore only reported when
+ * it is positive, the same way the `-1` "no preference" position sentinel is filtered rather than
+ * mapped. Without this, 0 would be stored as a nationality and rendered as a country nobody can name.
+ */
+const nationalityCodeOf = (row: Row | undefined, key = "nationality"): number | null => {
+  const value = num(row, key);
+  return value !== null && value > 0 ? value : null;
+};
+
 export class FeasibilitySaveParser implements CareerDataProvider {
   private readonly options: {
     metaXml: string | null;
     metaSource: string | null;
     nameTableCsv: string | null;
     nameTableSource: string | null;
+    nationTableCsv: string | null;
+    nationTableSource: string | null;
     rowLimit: number;
     allTables: boolean;
     sampleRows: number;
@@ -2034,6 +2103,8 @@ export class FeasibilitySaveParser implements CareerDataProvider {
   private metaSource: string | null = null;
   private names: Map<number, string> = new Map();
   private nameTableSource: string | null = null;
+  private nations: Map<number, string> = new Map();
+  private nationTableSource: string | null = null;
 
   constructor(options: ParseOptions = {}) {
     this.options = {
@@ -2041,6 +2112,8 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       metaSource: options.metaSource ?? null,
       nameTableCsv: options.nameTableCsv ?? null,
       nameTableSource: options.nameTableSource ?? null,
+      nationTableCsv: options.nationTableCsv ?? null,
+      nationTableSource: options.nationTableSource ?? null,
       rowLimit: options.rowLimit ?? 60,
       allTables: options.allTables ?? false,
       sampleRows: options.sampleRows ?? 3,
@@ -2084,6 +2157,39 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     }
   }
 
+  private loadNations(): void {
+    if (this.nationTableSource !== null) return;
+
+    const csv = this.options.nationTableCsv;
+    if (csv === null) {
+      this.nationTableSource = "none";
+      return;
+    }
+    try {
+      const table = parseNationTable(csv);
+      if (table.size === 0) {
+        this.nationTableSource = "none";
+        return;
+      }
+      this.nations = table;
+      this.nationTableSource = this.options.nationTableSource ?? "provided";
+    } catch {
+      this.nationTableSource = "none";
+    }
+  }
+
+  /**
+   * The country name for a save nationality code, or null when nothing names it.
+   *
+   * Null is the honest answer in both directions: the save may carry no nationality at all, or it may
+   * carry one this build's reference table does not know. Neither is padded into a placeholder - the
+   * row simply shows nothing, and the raw id stays available for a future lookup table.
+   */
+  private nationName(nationalityId: number | null): string | null {
+    if (nationalityId === null) return null;
+    return this.nations.get(nationalityId) ?? null;
+  }
+
   async parse(save: SaveCandidate, bytes: Uint8Array): Promise<SpikeCareerData> {
     const startedAt = performance.now();
     const warnings: string[] = [];
@@ -2116,6 +2222,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
 
     this.loadMeta();
     this.loadNames();
+    this.loadNations();
     const meta = this.meta;
 
     const blocks: Uint8Array[] = [];
@@ -2262,11 +2369,17 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       const name = str(league, "leaguename");
       if (leagueId === null || !name) continue;
       leagueNameById.set(leagueId, name);
+      const countryId = num(league, "countryid");
       leagueDirectory.push({
         leagueId,
         name,
         level: num(league, "level"),
-        countryId: num(league, "countryid"),
+        countryId,
+        // Captioned here, once, so no surface has to re-read the nation table to say which country a
+        // competition belongs to. `leagues.countryid` uses the SAME id space as a player's nationality
+        // (England 14, Spain 45, Scotland 42 all match), which is why the same table serves both.
+        countryName: this.nationName(countryId),
+        isWomenCompetition: (num(league, "iswomencompetition") ?? 0) > 0,
       });
     }
 
@@ -2517,6 +2630,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       const rawAge = num(player, "age");
       const birthdate = num(player, "birthdate");
       const computedAge = calculateAgeFromBirthdate(birthdate, rawAge, ageReferenceDate);
+      const nationalityId = nationalityCodeOf(player);
       // Null means the save did not say, which is different from "no real head". Only a definite
       // non-zero reading lets the face importer skip the network. The two related ids are kept
       // because they distinguish a real scanned head from a generic one.
@@ -2533,6 +2647,8 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         potential: num(player, "potential"),
         age: computedAge,
         birthdate,
+        nationalityId,
+        nationality: this.nationName(nationalityId),
         contractValidUntil:
           num(player, "contractvaliduntil") ?? num(contract, "contractvaliduntil"),
         wage: num(contract, "wage"),
@@ -2597,6 +2713,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         const preferred = num(player, "preferredposition1");
         const rawPosCode = preferred !== null && preferred >= 0 ? preferred : null;
         const birthdate = num(player, "birthdate");
+        const nationalityId = nationalityCodeOf(player);
 
         const [tierLow, tierHigh] = observedRange(rows, "playertier");
         const [swingLowMin, swingLowMax] = observedRange(rows, "swinglowpotential");
@@ -2611,6 +2728,8 @@ export class FeasibilitySaveParser implements CareerDataProvider {
           primaryPosition: positionCodeToRole(rawPosCode),
           age: calculateAgeFromBirthdate(birthdate, num(player, "age"), ageReferenceDate),
           birthdate,
+          nationalityId,
+          nationality: this.nationName(nationalityId),
           overallRating: num(player, "overallrating"),
           potentialRating: num(player, "potential"),
           tierLow,
@@ -2702,6 +2821,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       }
 
       const clubId = clubByPlayer.get(playerId) ?? null;
+      const nationalityId = nationalityCodeOf(row);
       worldPlayers.push({
         playerId,
         name: name ?? `#${playerId}`,
@@ -2716,7 +2836,8 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         birthdate,
         heightCm: num(row, "height"),
         weightKg: num(row, "weight"),
-        nationalityId: num(row, "nationality"),
+        nationalityId,
+        nationality: this.nationName(nationalityId),
         contractValidUntil: num(row, "contractvaliduntil"),
         preferredFoot: num(row, "preferredfoot"),
         weakFoot: num(row, "weakfootabilitytypecode"),
@@ -2950,6 +3071,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       blobTags: sections.map((section) => section.tag),
       metaSource: this.metaSource,
       nameTableSource: this.nameTableSource,
+      nationTableSource: this.nationTableSource,
     };
 
     return {
@@ -2965,6 +3087,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       fingerprint,
       metaSource: this.metaSource === "none" ? null : this.metaSource,
       nameTableSource: this.nameTableSource === "none" ? null : this.nameTableSource,
+      nationTableSource: this.nationTableSource === "none" ? null : this.nationTableSource,
       databases,
       tableStats,
       unknownTables: [...new Set(unknownTables)],

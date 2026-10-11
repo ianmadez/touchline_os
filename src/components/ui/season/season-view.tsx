@@ -6,6 +6,7 @@ import type { TargetBlock } from "@/lib/services/target-block-service";
 import { leagueLabel } from "@/lib/ui/leagues";
 import { SeasonPanel } from "@/components/ui/dashboard/season-panel";
 import { SeasonVaultView } from "./season-vault-view";
+import { TrophyCabinet } from "./trophy-cabinet";
 import { BoardObjectivesPanel } from "./board-objectives-panel";
 
 import { apiFetch } from "@/lib/platform/api-client";
@@ -152,7 +153,7 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
               data-subtab={tab}
               data-tour={`season-subtab-${tab}`}
               onClick={() => setActiveSubTab(tab)}
-              className={`cursor-pointer rounded-lg px-4 py-2 text-xs font-sub font-bold uppercase tracking-wider transition-all ${
+              className={`cursor-pointer rounded-lg px-4 py-2 text-xs font-sub font-bold uppercase tracking-wider transition-[background-color,color,box-shadow] duration-200 ease-[var(--ease-brand)] ${
                 activeSubTab === tab
                   ? "bg-[#E11D48] text-white shadow-sm shadow-rose-600/20"
                   : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
@@ -178,6 +179,8 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
             )}
 
             <SeasonHistoryTable seasons={seasons} unreadableDebriefs={unreadableDebriefs} />
+
+            {careerId && <TrophyCabinet careerId={careerId} />}
           </div>
         )}
 

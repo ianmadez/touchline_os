@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { SeasonRecord } from "@/lib/services/season-service";
+import { HeadToHeadPanel } from "./head-to-head-panel";
 import type {
   SeasonDebriefDigest,
   SeasonDossier,
@@ -38,6 +39,7 @@ export function SeasonVaultView({
   selectedSeason,
   onSelectSeason,
 }: SeasonVaultViewProps) {
+  const [view, setView] = useState<"VAULT" | "H2H">("VAULT");
   const browsable = [...seasons].reverse();
   const active = browsable.find((s) => s.season === selectedSeason) ?? browsable[0] ?? null;
 
@@ -101,28 +103,60 @@ export function SeasonVaultView({
 
   return (
     <div className="space-y-6">
-      <div data-tour="vault-seasons" className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200/80 bg-white/90 p-4 shadow-xs backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
-        <span className="mr-2 text-xs font-sub font-bold uppercase text-slate-400">Season</span>
-        {browsable.map((s) => {
-          const isSelected = active?.season === s.season;
-          return (
-            <button
-              key={s.season}
-              type="button"
-              onClick={() => onSelectSeason(s.season)}
-              className={`cursor-pointer rounded-lg px-3.5 py-1.5 text-xs font-sub font-bold uppercase transition-all ${
-                isSelected
-                  ? "bg-[#E11D48] text-white shadow-xs"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-              }`}
-            >
-              S{s.season}
-              {!s.complete && <span className="ml-1 font-normal opacity-70">• live</span>}
-            </button>
-          );
-        })}
+      <div
+        data-tour="vault-seasons"
+        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200/80 bg-white/90 p-4 shadow-xs backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="mr-2 text-xs font-sub font-bold uppercase text-slate-400">Season</span>
+          {browsable.map((s) => {
+            const isSelected = active?.season === s.season && view === "VAULT";
+            return (
+              <button
+                key={s.season}
+                type="button"
+                onClick={() => {
+                  setView("VAULT");
+                  onSelectSeason(s.season);
+                }}
+                className={`cursor-pointer rounded-lg px-3.5 py-1.5 text-xs font-sub font-bold uppercase transition-[background-color,color,box-shadow] duration-200 ease-[var(--ease-brand)] ${
+                  isSelected
+                    ? "bg-[#E11D48] text-white shadow-xs"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                }`}
+              >
+                S{s.season}
+                {!s.complete && <span className="ml-1 font-normal opacity-70">• live</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        {/*
+          The head-to-head record sits at this end of the header because it belongs to the same question as
+          the seasons do: what has already happened in this career. It is career-wide rather than per season
+          (the season pills go quiet while it is open) because a record against a club is not a season-long
+          thing.
+        */}
+        <button
+          type="button"
+          data-tour="vault-h2h"
+          onClick={() => setView(view === "H2H" ? "VAULT" : "H2H")}
+          aria-pressed={view === "H2H"}
+          className={`inline-flex min-h-10 items-center gap-2 rounded-lg border px-3.5 font-sub text-xs font-bold uppercase tracking-wider transition-[border-color,background-color,color] duration-200 ease-[var(--ease-brand)] cursor-pointer ${
+            view === "H2H"
+              ? "border-[#E11D48]/40 bg-[#E11D48]/10 text-[#E11D48] dark:text-[#FF8C7A]"
+              : "border-slate-200 text-slate-500 hover:border-slate-300 hover:text-slate-900 dark:border-slate-800 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:text-slate-100"
+          }`}
+        >
+          {view === "H2H" ? "Back to the vault" : "H2H Stats"}
+        </button>
       </div>
 
+      {view === "H2H" ? (
+        <HeadToHeadPanel careerId={careerId} />
+      ) : (
+        <>
       {error && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-xs font-sub text-amber-700 dark:text-amber-300">
           {error}
@@ -146,6 +180,8 @@ export function SeasonVaultView({
             <NotObservedPanel />
           )}
         </div>
+      )}
+        </>
       )}
     </div>
   );

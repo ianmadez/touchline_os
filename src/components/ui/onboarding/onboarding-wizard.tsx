@@ -153,11 +153,17 @@ export function OnboardingWizard({
     saveCandidates[0] || null
   );
 
-  const [managerName, setManagerName] = useState("Jean Lacroix");
-  const [nationality, setNationality] = useState("France");
-  const [clubName, setClubName] = useState("Wigan Athletic");
+  //
+  // NOT pre-filled with anybody's name. These used to default to one particular career's manager, club
+  // and club note, so every new manager opened this screen looking at somebody else's identity - and
+  // clicking straight through stored it as his own. Left blank, the manager's name and the club are
+  // taken from the save once it has been parsed, which is the only thing that actually knows whose
+  // career this is. The blanks are also what the app looks for when it does that filling.
+  const [managerName, setManagerName] = useState("");
+  const [nationality, setNationality] = useState("");
+  const [clubName, setClubName] = useState("");
   const [clubLogoUrl, setClubLogoUrl] = useState("");
-  const [clubInfo, setClubInfo] = useState("League One rebuild targeting sustainable youth development and tactical dominance.");
+  const [clubInfo, setClubInfo] = useState("");
   const [logoInputMode, setLogoInputMode] = useState<"UPLOAD" | "LINK">("UPLOAD");
   const [isDragging, setIsDragging] = useState(false);
   const [tacticalPhilosophy, setTacticalPhilosophy] = useState("Gegenpress Heavy");
@@ -444,6 +450,7 @@ export function OnboardingWizard({
                 type="text"
                 value={managerName}
                 onChange={(e) => setManagerName(e.target.value)}
+                placeholder="Taken from your save if you leave this blank"
                 className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#E11D48]"
               />
             </div>
@@ -456,6 +463,7 @@ export function OnboardingWizard({
                 type="text"
                 value={nationality}
                 onChange={(e) => setNationality(e.target.value)}
+                placeholder="Optional"
                 className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#E11D48]"
               />
             </div>
@@ -585,6 +593,7 @@ export function OnboardingWizard({
                     type="text"
                     value={clubName}
                     onChange={(e) => setClubName(e.target.value)}
+                    placeholder="Your club, as your save spells it"
                     className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#E11D48]"
                   />
                 </div>

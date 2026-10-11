@@ -27,6 +27,15 @@ interface PatchCareerRequest {
     userNotes?: string;
     /** Manual position override for players whose save position is UNKNOWN. */
     primaryPosition?: string | null;
+    /**
+     * The manager's injury report: the day he is expected back, and what it is.
+     *
+     * `null` marks him fit again. `undefined` leaves the report alone, so a position edit never quietly
+     * clears an injury. The save's own `injury` column reads 0 for every player, which is why this is
+     * asked for rather than read.
+     */
+    injuryUntil?: string | null;
+    injuryNote?: string | null;
   };
 }
 
@@ -112,6 +121,20 @@ export async function patchCareer(body: unknown): Promise<OperationResult<unknow
             ? requestedPosition.trim().toUpperCase()
             : undefined;
 
+      // The injury date is validated here rather than trusted: a free-text return date would break every
+      // availability comparison downstream, and the whole mechanism is one date compared against the save's
+      // own clock. An absent key leaves the existing report alone; null clears it.
+      const injuryUntil = request.playerProfile.injuryUntil;
+      const validInjuryUntil =
+        injuryUntil === null
+          ? null
+          : typeof injuryUntil === "string" && /^\d{4}-\d{2}-\d{2}$/.test(injuryUntil.trim())
+            ? injuryUntil.trim()
+            : undefined;
+      if (injuryUntil !== undefined && validInjuryUntil === undefined) {
+        return at(400, { success: false, error: "An expected return date has to be a calendar day." });
+      }
+
       await new UserProfileService().setPlayerProfile({
         careerId: request.careerId,
         eaPlayerId: request.playerProfile.eaPlayerId,
@@ -120,6 +143,12 @@ export async function patchCareer(body: unknown): Promise<OperationResult<unknow
         importanceMarker: request.playerProfile.importanceMarker,
         userNotes: request.playerProfile.userNotes,
         primaryPosition,
+        injuryUntil: validInjuryUntil,
+        injuryNote: request.playerProfile.injuryNote,
+        // The save's own date is the dateline, so a report written today is dated the day the manager is in,
+        // not the day the machine is. Filed once and then left alone, which is what makes it a report.
+        injuryReportedOn:
+          validInjuryUntil !== undefined && validInjuryUntil !== null ? career.inGameDate : undefined,
       });
     }
 

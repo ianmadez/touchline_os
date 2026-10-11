@@ -102,19 +102,44 @@ export const ATTRIBUTE_GROUPS: ReadonlyArray<AttributeGroupView> = [
 ];
 
 /**
- * A sequence, not a traffic light.
+ * The colour ramp for one face stat, as a sequence of bands.
  *
- * The old scale went straight to red below 50, so a perfectly ordinary lower-league squad rendered
- * as a wall of red - the same colour the app reserves for genuine errors - and the eye had nowhere
- * to settle. Weak-but-normal now reads as dim, developing as sky, strong as emerald. Nothing here is
- * an alarm.
+ * Five steps, read low to high: dim slate, then the oranges warming up, then green for the range a
+ * first-team player is actually expected to live in. It is deliberately NOT a traffic light - nothing
+ * here ever reaches red, which the app reserves for genuine errors, because a lower-league squad is
+ * full of perfectly ordinary 45s and dressing them as alarms made the whole panel unreadable.
+ *
+ * The bands are DATA, so they can be retuned in one place. `upTo` is exclusive, so band `40` starts
+ * at 40 and the last band is open-ended.
  */
+export interface AttributeBand {
+  /** Exclusive upper bound. Null on the final band, which has no ceiling. */
+  readonly upTo: number | null;
+  readonly light: string;
+  readonly dark: string;
+  /** Read back by the legend, so the scale is never described twice. */
+  readonly label: string;
+}
+
+export const ATTRIBUTE_BANDS: ReadonlyArray<AttributeBand> = [
+  { upTo: 40, light: "bg-slate-400", dark: "dark:bg-slate-600", label: "Under 40" },
+  { upTo: 50, light: "bg-orange-600", dark: "dark:bg-orange-600", label: "40 to 49" },
+  { upTo: 60, light: "bg-orange-500", dark: "dark:bg-orange-500", label: "50 to 59" },
+  { upTo: 70, light: "bg-orange-400", dark: "dark:bg-orange-400", label: "60 to 69" },
+  { upTo: 80, light: "bg-emerald-400", dark: "dark:bg-emerald-500", label: "70 to 79" },
+  { upTo: null, light: "bg-emerald-600", dark: "dark:bg-emerald-400", label: "80 and above" },
+];
+
+/** The band a value falls in. Null values get the inert track colour, which is not a band. */
+export function attributeBand(value: number | null): AttributeBand | null {
+  if (value === null) return null;
+  return ATTRIBUTE_BANDS.find((band) => band.upTo === null || value < band.upTo) ?? null;
+}
+
 export function attributeTone(value: number | null): string {
-  if (value === null) return "bg-slate-200 dark:bg-slate-800";
-  if (value < 50) return "bg-slate-400 dark:bg-slate-600";
-  if (value < 65) return "bg-sky-400 dark:bg-sky-500";
-  if (value < 80) return "bg-emerald-500 dark:bg-emerald-500";
-  return "bg-emerald-600 dark:bg-emerald-400";
+  const band = attributeBand(value);
+  if (!band) return "bg-slate-200 dark:bg-slate-800";
+  return `${band.light} ${band.dark}`;
 }
 
 /** Deliberately loose: the JSON comes out of storage, so callers pass whatever shape they hold. */

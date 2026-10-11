@@ -54,7 +54,7 @@ export function SubTabs<T extends string>({
               data-tour={tab.tour}
               data-subtab={tab.id}
               onClick={() => onChange(tab.id)}
-              className={`flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 font-sub text-xs font-bold uppercase tracking-wider transition-all ${
+              className={`flex cursor-pointer items-center gap-2 rounded-lg px-4 py-2 font-sub text-xs font-bold uppercase tracking-wider transition-[background-color,color,box-shadow] duration-200 ease-[var(--ease-brand)] ${
                 isActive
                   ? "bg-[#E11D48] text-white shadow-sm shadow-rose-600/20"
                   : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"

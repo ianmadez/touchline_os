@@ -20,6 +20,15 @@ export interface EnrichedPlayer {
   potentialRating: number;
   age: number | null;
   birthdate: number | null;
+  /**
+   * The save's own nationality code, and the country name our reference table gives it.
+   *
+   * Both are SAVE-sourced in the sense that matters: the code is read straight from the player row,
+   * and the name is a lookup on that code - the same arrangement as `name` and `nameSource`. A null
+   * name means the save carried no code or our table does not name it, never "unknown country".
+   */
+  nationalityId: number | null;
+  nationality: string | null;
   wage: number;
   wageProvenance: Provenance;
   /**
@@ -71,6 +80,14 @@ export interface EnrichedPlayer {
     userNotes: string | null;
     /** Explicit position override; null/undefined means trust the save-derived role. */
     positionOverride: string | null;
+    /**
+     * The manager's own injury report: the day he is expected back, what it is, and when it was filed.
+     *
+     * Reported rather than read, because the save's own `injury` column above reads 0 for every player. The
+     * DATE is the point: availability is a comparison against the save's in-game clock, so an injury expires
+     * by itself and nothing has to be cleared by hand.
+     */
+    injury: { until: string | null; note: string | null; reportedOn: string | null };
   };
 }
 
@@ -157,6 +174,11 @@ export class SquadService {
 
     return rawPlayers.map((player) => {
       const profile = profileMap.get(player.id);
+      const injury = {
+        until: profile?.injuryUntil ?? null,
+        note: profile?.injuryNote ?? null,
+        reportedOn: profile?.injuryReportedOn ?? null,
+      };
       return {
         ...player,
         form: player.form,
@@ -175,6 +197,7 @@ export class SquadService {
               importanceMarker: profile.importanceMarker,
               userNotes: profile.userNotes,
               positionOverride: profile.primaryPosition,
+              injury,
             }
           : undefined,
       };
@@ -228,6 +251,8 @@ export class SquadService {
       potentialRating: p.potentialRating,
       age: p.age,
       birthdate: p.birthdate,
+      nationalityId: p.nationalityId,
+      nationality: p.nationality,
       wage: p.wage,
       wageProvenance: p.wageProvenance as Provenance,
       form: p.form,

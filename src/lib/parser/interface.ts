@@ -306,6 +306,15 @@ export interface SquadEntry {
   potential: number | null;
   age: number | null;
   birthdate: number | null;
+  /**
+   * The save's own nationality code, and the country name this build's reference table gives it.
+   *
+   * The id is the SAVE fact and is always kept; the name is null when the save omits a nationality
+   * or when the reference table does not name the code. Never a three-letter abbreviation: none is
+   * published anywhere in this project, and an invented one would be indistinguishable from data.
+   */
+  nationalityId: number | null;
+  nationality: string | null;
   contractValidUntil: number | null;
   wage: number | null;
   form: number | null;
@@ -355,6 +364,8 @@ export interface YouthProspectRow {
   primaryPosition: string;
   age: number | null;
   birthdate: number | null;
+  nationalityId: number | null;
+  nationality: string | null;
   overallRating: number | null;
   potentialRating: number | null;
 
@@ -434,6 +445,21 @@ export interface LeagueEntry {
   /** `leagues.level`: the tier the save records, 0-7. Null when the save omits it. */
   level: number | null;
   countryId: number | null;
+  /**
+   * The nation `countryId` names, from the same reference table a player's nationality uses.
+   *
+   * Resolved here rather than on read because the two runtimes read that table differently, and a
+   * country a surface wants to caption should not need a second lookup path. Null when the save records
+   * no country or the table does not name it.
+   */
+  countryName: string | null;
+  /**
+   * `leagues.iswomencompetition`. Carried because the honours cabinet follows the men's career and the
+   * women's leagues sit at the SAME level and country as their men's equivalents (England 14 has both
+   * a Premier League and a WSL), so no other field can tell them apart. Matching on the name would work
+   * today and break on the first competition EA renames.
+   */
+  isWomenCompetition: boolean;
 }
 
 /** A named group of face stats, grouped exactly as the game groups them. */
@@ -462,6 +488,8 @@ export interface WorldPlayerEntry {
   heightCm: number | null;
   weightKg: number | null;
   nationalityId: number | null;
+  /** The resolved country name, or null. See `SquadEntry.nationality` for why it is not a code. */
+  nationality: string | null;
   contractValidUntil: number | null;
   preferredFoot: number | null;
   weakFoot: number | null;
@@ -512,6 +540,16 @@ export interface ParseOptions {
   nameTableCsv?: string | null;
   /** Where that name table came from, carried through to the report. */
   nameTableSource?: string | null;
+  /**
+   * Contents of the nation-id CSV, already read.
+   *
+   * The save stores a nationality as a bare integer and names no country anywhere, so this is the
+   * same class of lookup as the player-name table above: reference data, committed with the parser,
+   * without which every player's nationality is a number nobody can read.
+   */
+  nationTableCsv?: string | null;
+  /** Where that nation table came from, carried through to the report. */
+  nationTableSource?: string | null;
   rowLimit?: number;
   allTables?: boolean;
   sampleRows?: number;
@@ -521,6 +559,8 @@ export interface SpikeCareerData extends RawCareerData {
   fingerprint: SaveFingerprint;
   metaSource: string | null;
   nameTableSource: string | null;
+  /** Where the nation id table came from, or null when this build had none to hand. */
+  nationTableSource: string | null;
   databases: { index: number; bytes: number; tableCount: number; tables: string[] }[];
   tableStats: TableStat[];
   unknownTables: string[];

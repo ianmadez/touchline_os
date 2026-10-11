@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/platform/api-client";
+import { NationFlag } from "./nation-flag";
 /**
  * The academy: the save's own unpromoted prospects.
  *
@@ -31,6 +32,9 @@ interface Prospect {
   nameSource: string;
   primaryPosition: string | null;
   age: number | null;
+  /** The save's own nationality code, plus the country name our reference table gives it. */
+  nationalityId: number | null;
+  nationality: string | null;
   overallRating: number | null;
   potentialRating: number | null;
   tierLow: number | null;
@@ -181,6 +185,25 @@ export function YouthAcademyPanel({ careerId, query }: { careerId: string; query
                 <span className="rounded bg-slate-200 px-1.5 py-0.5 font-sub text-label font-bold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                   {row.primaryPosition || "—"}
                 </span>
+                {(row.nationality !== null || row.nationalityId !== null) && (
+                  <span
+                    className="flex items-center gap-1.5 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 dark:border-slate-800 dark:bg-slate-900"
+                    title={
+                      row.nationality
+                        ? `Nationality recorded by your save: ${row.nationality}`
+                        : `Your save records nationality code ${row.nationalityId}, which this build's country list does not name.`
+                    }
+                  >
+                    <NationFlag nationId={row.nationalityId} name={row.nationality} height={11} />
+                    {/* No name to print for a code this build cannot name; the flag and the tooltip
+                        carry what is actually known rather than a placeholder country. */}
+                    {row.nationality && (
+                      <span className="font-sub text-label font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                        {row.nationality}
+                      </span>
+                    )}
+                  </span>
+                )}
               </div>
               <span className="font-sub text-label font-bold uppercase tracking-wider tabular-nums text-slate-500 dark:text-slate-400">
                 {row.age !== null ? `Age ${row.age}` : "Age unknown"}

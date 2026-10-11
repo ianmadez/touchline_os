@@ -82,6 +82,15 @@ export const playerSnapshots = sqliteTable(
     // Where the displayed name came from: the save's edited names, the imported name table, or
     // neither. Lets the UI be honest about the two rather than presenting them as one thing.
     nameSource: text("name_source"),
+    /**
+     * The save's own nationality code, and the country name the committed reference table gives it.
+     *
+     * The code is the SAVE fact. The name is a lookup, exactly like `name` beside `nameSource`, and is
+     * null when the save carries no nationality or the table does not name the code. Deliberately not
+     * an invented three-letter abbreviation - see `SquadEntry.nationality` in the parser interface.
+     */
+    nationalityId: integer("nationality_id"),
+    nationality: text("nationality"),
     wage: integer("wage").notNull().default(0),
     wageProvenance: text("wage_provenance", { enum: provenanceEnum }).notNull().default("DERIVED"),
     isYouthProspect: integer("is_youth_prospect", { mode: "boolean" }).notNull().default(false),
@@ -167,6 +176,9 @@ export const players = sqliteTable(
     // Where the displayed name came from: the save's edited names, the imported name table, or
     // neither. Lets the UI be honest about the two rather than presenting them as one thing.
     nameSource: text("name_source"),
+    /** Same pair as on `player_snapshots`. */
+    nationalityId: integer("nationality_id"),
+    nationality: text("nationality"),
     // Head-asset flags, decoded purely so the face importer can skip the network for players who
     // have no real head sprite instead of discovering that via a failed fetch.
     hasHighQualityHead: integer("has_high_quality_head", { mode: "boolean" }),
@@ -245,6 +257,23 @@ export const playerUserProfiles = sqliteTable(
      * career objectives use.
      */
     trustSource: text("trust_source"),
+    /**
+     * The manager's own injury report, which is the only source there is.
+     *
+     * The save carries an `injury` column per player and it read 0 for every single one on the reference
+     * career, so the game keeps this in memory exactly as it keeps the transfer and wage budgets. A manager
+     * knows who is fit, so he says so, and the app does the arithmetic that follows: who cannot be picked,
+     * and what it means for the shape.
+     *
+     * `injuryUntil` is the day he is expected back. Null means fit. The date is what makes this expire on its
+     * own: nothing has to be cleared by hand when the day passes, which is the difference between a feature
+     * and a chore.
+     */
+    injuryUntil: text("injury_until"),
+    /** What the injury is, in the manager's words. Optional, and never invented. */
+    injuryNote: text("injury_note"),
+    /** The day the manager filed it, which is the news story's dateline: a report is written once. */
+    injuryReportedOn: text("injury_reported_on"),
     provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
     updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   },
@@ -493,6 +522,16 @@ export const leagues = sqliteTable(
     /** `leagues.level` (0-7): the tier the save itself records for this competition. */
     level: integer("level"),
     countryId: integer("country_id"),
+    /**
+     * The nation that id names, resolved from the same reference table a player's nationality uses.
+     *
+     * Stored rather than looked up on read because the two runtimes read that table differently (a file
+     * on disk, a fetch in the browser) and a caption is not worth a second lookup path. Null when the
+     * save records no country or the table does not name it, never a guess.
+     */
+    countryName: text("country_name"),
+    /** `leagues.iswomencompetition`. The women's leagues share a level and a country with the men's. */
+    isWomenCompetition: integer("is_women_competition", { mode: "boolean" }).notNull().default(false),
     updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   },
   (table) => ({
@@ -941,7 +980,71 @@ export const careerFinanceInputs = sqliteTable(
 );
 
 export type CareerFinanceInputsRow = typeof careerFinanceInputs.$inferSelect;
+/**
+ * Transfer deals the manager has to type in himself.
+ *
+ * The save carries an agreed fee only for pre-signed contracts, so a player who arrived before TouchlineOS
+ * was installed, or whose deal the game simply does not write, has no row anywhere. Rather than print a note
+ * about the absence, the app asks: signed from whom, for how much, sold to whom, for how much, and when.
+ *
+ * Every row here is USER provenance and the ledger says so. A typed fee and a saved fee are never averaged
+ * into one confident number.
+ */
+export const transferInputs = sqliteTable(
+  "transfer_inputs",
+  {
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    /** IN for a player arriving, OUT for one leaving. */
+    direction: text("direction").notNull(),
+    playerName: text("player_name").notNull(),
+    /** The club at the other end. Free text, because the save names no club outside our own division. */
+    counterparty: text("counterparty"),
+    fee: integer("fee").notNull(),
+    /** The in-game date money changed hands, as the manager records it. */
+    movedOn: text("moved_on"),
+    season: integer("season"),
+    note: text("note"),
+    provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_transfer_inputs_career_id").on(table.careerId),
+  })
+);
 
+export type TransferInputsRow = typeof transferInputs.$inferSelect;
+
+/**
+ * The manager's own name for a club the save cannot name.
+ *
+ * The save holds no club table, so a deal with anybody outside the manager's own division comes back with a
+ * numeric id and nothing else. Printing "club 69, not named in the save" is honest and useless, so the
+ * ledger asks instead: name the club once and the row reads properly, with the name badged as the manager's
+ * own rather than as something the file said. Keyed on the deal's id, so a later sync cannot lose it.
+ */
+export const transferCounterpartyNames = sqliteTable(
+  "transfer_counterparty_names",
+  {
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    /** The `transfer_deals.id` this name belongs to. */
+    dealId: text("deal_id").notNull(),
+    name: text("name").notNull(),
+    provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_transfer_counterparty_names_career_id").on(table.careerId),
+    uniqueDeal: uniqueIndex("uq_transfer_counterparty_names_deal").on(table.careerId, table.dealId),
+  })
+);
+
+export type TransferCounterpartyNameRow = typeof transferCounterpartyNames.$inferSelect;
 // ============================================================================
 // SCOUT TARGETS (the manager's own scouting board, all USER provenance)
 // ============================================================================
@@ -1046,6 +1149,190 @@ export const scoutTargets = sqliteTable(
 export type ScoutTargetRow = typeof scoutTargets.$inferSelect;
 
 //
+// The manager's honours cabinet.
+//
+// One row per trophy per season it was won in, so the cabinet can show "x3" by counting rows rather
+// than keeping a number that has to be incremented somewhere. A repeat win therefore cannot be
+// double-counted or lost.
+//
+// LEAGUE TITLES ARE NOT STORED. They are derived on read from `season_history`, which the save fills
+// in with a final table position and its own league-trophy count per season. Deriving them means no
+// pipeline version bump, nothing to keep in step, and nothing to go stale when the save is re-synced.
+//
+// EVERY ROW HERE IS USER DATA. The cups a manager wins are exactly the thing the save cannot tell us:
+// the save's cup rows carry no name and its per-competition progress table is empty on a real career,
+// so a cup win is reported by the manager or it does not exist. `kind` and `level` are copied from the
+// catalogue at write time so a row still reads correctly if a catalogue entry is later removed.
+//
+export const careerTrophies = sqliteTable(
+  "career_trophies",
+  {
+    /** `${careerId}_${key}_${season}` - one row per trophy per winning season. */
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    /** The catalogue key, which is also the artwork filename stem. See `@/lib/trophies/catalogue`. */
+    key: text("key").notNull(),
+    /** Display name, kept so a row still reads if its catalogue entry is later renamed or removed. */
+    name: text("name").notNull(),
+    /** LEAGUE | DOMESTIC_CUP | CONTINENTAL, copied from the catalogue for the same reason. */
+    kind: text("kind").notNull(),
+    countryId: integer("country_id"),
+    /** The league tier it was won at, for a league trophy. Null for a cup. */
+    level: integer("level"),
+    /** The save's season ORDINAL (1, 2, 3...), not a calendar year. */
+    season: integer("season").notNull(),
+    provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_career_trophies_career_id").on(table.careerId),
+    uniqueWin: uniqueIndex("uq_career_trophies_career_key_season").on(
+      table.careerId,
+      table.key,
+      table.season
+    ),
+  })
+);
+
+export type CareerTrophyRow = typeof careerTrophies.$inferSelect;
+
+/**
+ * The news archive.
+ *
+ * A story is PUBLISHED once and then lives here, rather than being regenerated on every read. That is what
+ * makes the rest of the user's asks possible: an archive can be capped, the oldest can be overwritten, a
+ * story can be dismissed to free its slot, and a story the manager likes can be kept forever. It also means
+ * the paper stops reshuffling under him: rewording the desk applies to new stories, and what was printed
+ * stays printed.
+ *
+ * `id` is the story's own stable key from the engine (`result-evt_...`, `depth-CM`), so publishing is
+ * idempotent - a story whose condition holds again is not written twice - and a running story that changes
+ * ("4 in 5" becoming "5 in 5") is a different id and therefore a new story, which is how a paper behaves.
+ *
+ * `saved` is the manager's bookmark and is the only thing that exempts a row from the cap and from
+ * dismissal. `read_at` is what the unread badge counts.
+ */
+export const newsItems = sqliteTable(
+  "news_items",
+  {
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    category: text("category").notNull(),
+    tone: text("tone").notNull(),
+    headline: text("headline").notNull(),
+    body: text("body").notNull(),
+    /**
+     * The long-form article, as a JSON array of paragraphs.
+     *
+     * The card is the short read and this is what the reader gets when he opens the story, which is how a
+     * newspaper works: a few sentences on the front, the whole piece inside. Written by the desk at the same
+     * time as the rest of the item, so the two can never disagree about the facts.
+     */
+    articleJson: text("article_json").notNull().default("[]"),
+    /**
+     * The masthead the story is filed under, and who wrote it.
+     *
+     * These are AUTHORED fictional outlets, not real publications: a paper needs a name on it for the piece
+     * to read as a piece, and putting a real newsroom's name on invented quotes would be the one thing this
+     * feature must never do. Null on a story the desk files as a short notice rather than as an article.
+     */
+    outlet: text("outlet"),
+    writer: text("writer"),
+    writerRole: text("writer_role"),
+    /** Where the piece is filed from, which is the club's own town for a club story. */
+    dateline: text("dateline"),
+    /** The app's own note of why the story ran, as a JSON array of strings. */
+    evidenceJson: text("evidence_json").notNull().default("[]"),
+    /** The names on the card, as a JSON array of strings, kept for the initials fallback. */
+    playerNamesJson: text("player_names_json").notNull().default("[]"),
+    /** EA player ids for the faces on the card, as a JSON array of numbers. */
+    playerIdsJson: text("player_ids_json").notNull().default("[]"),
+    /** What the manager told the press, when a report carries a comment. */
+    quote: text("quote"),
+    /** The in-game dateline, or null when the save carries no date at all. */
+    publishedOn: text("published_on"),
+    /** How significant the story was when it was written, so the paper can be re-ordered on read. */
+    weight: integer("weight").notNull().default(0),
+    /** The position the desk gave it in its edition, so the interleaving survives storage. */
+    sortIndex: integer("sort_index").notNull().default(0),
+    /**
+     * Which revision of the desk's voice wrote it.
+     *
+     * A story is printed once and kept, which is what makes the paper a paper. That rule has one exception:
+     * if the desk itself is rewritten, the old rows are reprinted in the new voice rather than leaving the
+     * manager reading wording that has been fixed. Saved stories are never touched, and a dismissed story has
+     * no row to reprint, so neither its bookmark nor its dismissal is disturbed.
+     */
+    copyVersion: integer("copy_version").notNull().default(0),
+    /** The manager's bookmark. Never overwritten, never dismissed. */
+    saved: integer("saved", { mode: "boolean" }).notNull().default(false),
+    /** Null until the paper has been opened over it. */
+    readAt: text("read_at"),
+    /** The publish pass that produced it, so one edition can be told from the next. */
+    edition: integer("edition").notNull().default(1),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_news_items_career_id").on(table.careerId),
+    editionIdx: index("idx_news_items_career_edition").on(table.careerId, table.edition),
+  })
+);
+
+export type NewsItemRow = typeof newsItems.$inferSelect;
+
+/**
+ * Every story id a career has ever published, kept after the story itself is gone.
+ *
+ * Without this the desk would republish anything it still has evidence for the moment its row was dismissed
+ * or overwritten: a manager who dismissed a story would meet it again on the next read, and a paper at its
+ * cap would reshuffle itself on every open. A row here is a few dozen bytes, one per story ever published,
+ * which is nothing next to the stories.
+ */
+export const newsPublished = sqliteTable(
+  "news_published",
+  {
+    /** The story's own stable key from the desk. */
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    firstPublishedAt: text("first_published_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_news_published_career_id").on(table.careerId),
+  })
+);
+
+/**
+ * The debriefs the manager starred.
+ *
+ * A row IS the star, so there is no flag to keep in step and unstarring is a delete. Kept apart from the
+ * debrief itself on purpose: a debrief is a record of what happened and is never rewritten, while a star is
+ * an opinion of it and can change as often as the manager likes.
+ */
+export const debriefMarks = sqliteTable(
+  "debrief_marks",
+  {
+    /** `${careerId}_${eventId}`. */
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    /** The MATCH_DEBRIEF event this star belongs to. */
+    eventId: text("event_id").notNull(),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_debrief_marks_career_id").on(table.careerId),
+    uniqueMark: uniqueIndex("uq_debrief_marks_career_event").on(table.careerId, table.eventId),
+  })
+);
+
+//
 // The manager's own academy, decoded from `career_youthplayers`.
 //
 // This is NOT the first-team squad filtered by age, which is what the Youth tab had to show before
@@ -1073,6 +1360,9 @@ export const youthProspects = sqliteTable(
     primaryPosition: text("primary_position"),
     age: integer("age"),
     birthdate: integer("birthdate"),
+    /** Same pair as on `players`: the save's code plus the resolved country name. */
+    nationalityId: integer("nationality_id"),
+    nationality: text("nationality"),
     overallRating: integer("overall_rating"),
     potentialRating: integer("potential_rating"),
     tierLow: integer("tier_low"),
@@ -1134,6 +1424,12 @@ export const worldPlayers = sqliteTable(
     overallRating: integer("overall_rating"),
     potentialRating: integer("potential_rating"),
     age: integer("age"),
+    /**
+     * Decoded for the pool all along but never persisted, so the scouting dossier was the one player
+     * surface with no nationality on it. Stored as the same code + name pair as `players`.
+     */
+    nationalityId: integer("nationality_id"),
+    nationality: text("nationality"),
     preferredFoot: integer("preferred_foot"),
     weakFoot: integer("weak_foot"),
     skillMoves: integer("skill_moves"),

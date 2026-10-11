@@ -7,7 +7,7 @@ import type {
   TargetBlock,
 } from "@/lib/services/target-block-service";
 import type { LeagueTeamSummary } from "@/lib/services/career-service";
-import { OPPONENT_SORT_ORDERS, orderTeams, teamOptionLabel } from "@/lib/ui/opponent-list";
+import { OPPONENT_SORT_ORDERS, orderTeams } from "@/lib/ui/opponent-list";
 import {
   getOpponentSortServerSnapshot,
   getOpponentSortSnapshot,
@@ -758,7 +758,7 @@ function BlockEditor({
                             </option>
                             {orderedTeams.map((team) => (
                               <option key={team.teamId} value={team.name}>
-                                {teamOptionLabel(team)}
+                                {team.name}
                               </option>
                             ))}
                             <option value="other">Another club (cup or friendly)</option>

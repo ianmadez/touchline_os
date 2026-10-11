@@ -84,6 +84,14 @@ export function summariseEvent(evt: ParsedCareerEvent | DomainEvent): string {
       const scoreline = typeof payload.scoreline === "string" ? payload.scoreline : "no scoreline";
       return `You logged a debrief against ${opponent}, ${scoreline}.`;
     }
+    case "MEDIA_COMMENT": {
+      const opponent = typeof payload.opponent === "string" ? payload.opponent : "that match";
+      if (payload.refused === true) return `You declined to comment after ${opponent}.`;
+      const comment = typeof payload.comment === "string" ? payload.comment : "";
+      return comment.length > 0
+        ? `You spoke to the media after ${opponent}: "${comment}"`
+        : `You spoke to the media after ${opponent}.`;
+    }
     case "SEASON_ENDED":
       return "The season finished.";
     case "STORYLINE_OPENED":

@@ -8,13 +8,23 @@ import type { ParsedCareerEvent } from "@/lib/services/event-service";
 import type { LeagueTeamSummary } from "@/lib/services/career-service";
 import { resultLabel, venueLabel } from "@/lib/ui/labels";
 import { ordinal } from "@/lib/ui/format";
-import { OPPONENT_SORT_ORDERS, orderTeams, teamOptionLabel } from "@/lib/ui/opponent-list";
+import { OPPONENT_SORT_ORDERS, orderTeams } from "@/lib/ui/opponent-list";
 import { MatchContribution } from "@/lib/events/types";
 import { POSITION_GROUP_ORDER, positionGroupOf } from "@/lib/tactics/roles";
 import {
   evaluateMatchAnomalies,
   DebriefHistoryPayload,
 } from "@/lib/events/debrief-anomalies";
+import {
+  expectedGoals,
+  finishingEdge,
+  finishingVerdict,
+  keptCleanSheet,
+  overperformanceAlert,
+  shotsOutsideBox,
+  type AlertInput,
+  type MatchStats,
+} from "@/lib/events/match-stats";
 
 import { apiFetch } from "@/lib/platform/api-client";
 import {
@@ -41,6 +51,8 @@ interface DebriefViewProps {
   seasonNumber?: number | null;
   onDebriefSubmitted: () => void;
 }
+
+import type { CompetitionContext } from "@/lib/services/competition-service";
 
 type DebriefSubTab = "MATCH" | "GROUP";
 
@@ -72,6 +84,11 @@ interface DebriefHistory {
     ownPoints?: number | null;
   };
   dynamicPrompts?: Array<{ id: string; question: string; answer: string }>;
+  /** When our goals went in, and theirs, in match minutes. Absent when nothing was timed. */
+  goalMinutes?: number[] | null;
+  concededMinutes?: number[] | null;
+  /** The figures the manager logged after the match. Absent when none were entered. */
+  matchStats?: MatchStats | null;
 }
 
 /**
@@ -99,10 +116,64 @@ interface DebriefDraft {
   opponentPoints: string;
   ownPosition: string;
   ownPoints: string;
+  goalMinutes: string[];
+  concededMinutes: string[];
+  matchStats: MatchStatDraft;
+}
+
+/**
+ * The five observable figures, held as text.
+ *
+ * Text for the same reason the score boxes are: an empty box is a real state and means "not recorded",
+ * which is a different thing from zero. A keeper who made no saves is not the same as one nobody counted.
+ */
+type MatchStatDraft = Record<
+  "shots" | "shotsInsideBox" | "bigChances" | "possession" | "passesCompleted",
+  string
+>;
+
+const EMPTY_MATCH_STATS: MatchStatDraft = {
+  shots: "",
+  shotsInsideBox: "",
+  bigChances: "",
+  possession: "",
+  passesCompleted: "",
+};
+
+/** The boxes in the order they are shown, each with the hint that says exactly what to count. */
+const MATCH_STAT_FIELDS: ReadonlyArray<{ key: keyof MatchStatDraft; label: string; hint: string }> = [
+  { key: "shots", label: "Shots", hint: "Every shot, including the ones blocked or off target." },
+  { key: "shotsInsideBox", label: "Inside box", hint: "Shots taken from inside the penalty area." },
+  { key: "bigChances", label: "Big chances", hint: "Chances you would have expected to be scored." },
+  { key: "possession", label: "Possession %", hint: "Your share of the ball, 0 to 100." },
+  { key: "passesCompleted", label: "Passes", hint: "Passes you completed." },
+];
+
+/** A box's text as a number, or null when it is empty or not a number. Never turns blank into zero. */
+function statNumberOf(value: string | undefined): number | null {
+  const trimmed = (value ?? "").trim();
+  if (trimmed === "") return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** True when any stat box holds something. */
+function hasAnyMatchStat(stats: Partial<MatchStatDraft> | undefined): boolean {
+  if (!stats) return false;
+  return Object.values(stats).some((value) => typeof value === "string" && value.trim() !== "");
 }
 
 /** The single debrief's draft surface. A group debrief keys by block id instead. */
 const MATCH_DRAFT_SURFACE = "MATCH";
+
+/**
+ * The most goal timing boxes the form will ever show.
+ *
+ * A guard, not a claim about football: the score boxes accept three digits, and without a cap a single
+ * mistyped score would build a wall of inputs. When a score exceeds it the form says so rather than
+ * silently dropping the rest.
+ */
+const MAX_TIMING_SLOTS = 20;
 
 /** True when a draft holds something the manager actually entered. */
 function hasDraftContent(draft: DebriefDraft): boolean {
@@ -112,6 +183,9 @@ function hasDraftContent(draft: DebriefDraft): boolean {
     draft.theirScoreInput !== "" ||
     draft.opponentPosition !== "" ||
     draft.opponentPoints !== "" ||
+    draft.goalMinutes.some((minute) => minute.trim() !== "") ||
+    draft.concededMinutes.some((minute) => minute.trim() !== "") ||
+    hasAnyMatchStat(draft.matchStats) ||
     draft.weaknessIdentified.trim() !== "" ||
     draft.managerReflection.trim() !== "" ||
     draft.standoutPlayerIds.length > 0 ||
@@ -163,6 +237,23 @@ function TableNumberBox({
         onFocus={(e) => e.currentTarget.select()}
         className="h-10 w-full text-center font-sub text-sm font-bold tabular-nums bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100 placeholder:font-normal placeholder:text-slate-300 dark:placeholder:text-slate-600 focus:outline-none focus:border-[#E11D48] focus:ring-2 focus:ring-[#E11D48]/20 transition-[border-color,box-shadow] duration-150"
       />
+    </div>
+  );
+}
+
+/** One worked out figure, with the basis for it stated underneath rather than left to trust. */
+function StatReadout({ label, value, note }: { label: string; value: string; note: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+      <span className="block font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+        {label}
+      </span>
+      <span className="mt-0.5 block font-heading text-lg tabular-nums text-slate-900 dark:text-slate-100">
+        {value}
+      </span>
+      <span className="mt-0.5 block font-sans text-[10px] leading-snug text-slate-500 dark:text-slate-400">
+        {note}
+      </span>
     </div>
   );
 }
@@ -271,6 +362,12 @@ export function DebriefView({
   // the save holds no rival record for our division at all - see the note on the API payload.
   const [opponentPosition, setOpponentPosition] = useState<string>("");
   const [opponentPoints, setOpponentPoints] = useState<string>("");
+  // Match minutes for our goals and theirs, one entry per box. Empty strings are unrecorded, so a
+  // goal that was not timed leaves no trace rather than becoming a zero.
+  const [goalMinutes, setGoalMinutes] = useState<string[]>([]);
+  const [concededMinutes, setConcededMinutes] = useState<string[]>([]);
+  // The observable post-match figures. Empty is a real state here too, so they are stored as text.
+  const [matchStats, setMatchStats] = useState<MatchStatDraft>(EMPTY_MATCH_STATS);
   //
   // Neither side's placing is prefilled, on purpose. The save's `currenttableposition` is not a
   // league table: in this division the 24 clubs carry values with ties (two 4ths, two 8ths, two
@@ -281,12 +378,50 @@ export function DebriefView({
   const [ownPosition, setOwnPosition] = useState<string>("");
   const [ownPoints, setOwnPoints] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  /**
+   * The press, when they come looking.
+   *
+   * Set from the debrief's own answer rather than decided here: whether a result is worth a word is a
+   * property of the match, and the operation works it out. Null means either nobody asked or the question
+   * has been dealt with, which are the same thing on screen.
+   */
+  const [mediaPrompt, setMediaPrompt] = useState<{
+    eventId: string;
+    prompt: string;
+    subject: string;
+    opponent: string;
+  } | null>(null);
+  const [mediaComment, setMediaComment] = useState("");
+  const [mediaBusy, setMediaBusy] = useState(false);
+
+  /**
+   * The competitions this career can be in, read from the save rather than offered as "League Match".
+   *
+   * Null until it arrives, and the form falls back to the generic labels in the meantime, so the select is
+   * never empty and never blocks a debrief.
+   */
+  const [competitionContext, setCompetitionContext] = useState<CompetitionContext | null>(null);
+
+  /** The debriefs the manager starred, so the memorable ones can be found again. */
+  const [starredIds, setStarredIds] = useState<string[]>([]);
+  const [starFilter, setStarFilter] = useState<"ALL" | "STARRED">("ALL");
+
+  /**
+   * The debrief opened for a closer look, and the newspaper report it produced.
+   *
+   * The article is fetched when the record is opened rather than for every row: reading the paper publishes
+   * anything new on it, and doing that once per screen would be a write in the middle of a read.
+   */
+  const [detail, setDetail] = useState<{
+    eventId: string;
+    article: { headline: string; body: string; quote: string | null } | null;
+    articleLoaded: boolean;
+  } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   // Which card is asking to be deleted, and which is mid-request. Deleting is destructive and
   // irreversible, so it is always two deliberate clicks rather than one.
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  /**
+  const [deletingId, setDeletingId] = useState<string | null>(null);  /**
    * The debrief being corrected, if any. Held here rather than in a separate form so logging and
    * editing share every field, every optional marker and the draft behaviour.
    */
@@ -347,6 +482,9 @@ export function DebriefView({
       setOpponentPoints(saved.opponentPoints);
       setOwnPosition(saved.ownPosition);
       setOwnPoints(saved.ownPoints);
+      setGoalMinutes(saved.goalMinutes ?? []);
+      setConcededMinutes(saved.concededMinutes ?? []);
+      setMatchStats({ ...EMPTY_MATCH_STATS, ...(saved.matchStats ?? {}) });
     }, 0);
     return () => window.clearTimeout(timer);
   }, [careerId]);
@@ -376,6 +514,9 @@ export function DebriefView({
       opponentPoints,
       ownPosition,
       ownPoints,
+      goalMinutes,
+      concededMinutes,
+      matchStats,
     };
     if (!hasDraftContent(draft)) return;
     writeDebriefDraft(careerId, MATCH_DRAFT_SURFACE, draft);
@@ -400,15 +541,58 @@ export function DebriefView({
     opponentPoints,
     ownPosition,
     ownPoints,
+    goalMinutes,
+    concededMinutes,
+    matchStats,
   ]);
 
   // The two figures the rest of the form reasons about. Empty counts as nil.
   const ourScore = ourScoreInput === "" ? 0 : Number(ourScoreInput);
   const theirScore = theirScoreInput === "" ? 0 : Number(theirScoreInput);
 
+  /*
+    One timing box per goal the scoreline already says was scored, so the form never asks when a goal
+    went in if it did not. A match with no goals shows the block not at all.
+  */
+  const goalSlots = Math.min(ourScore, MAX_TIMING_SLOTS);
+  const concededSlots = Math.min(theirScore, MAX_TIMING_SLOTS);
+  const timingCapReached = ourScore > MAX_TIMING_SLOTS || theirScore > MAX_TIMING_SLOTS;
+
+  /** Grows the list as far as the box being typed in, leaving earlier entries alone. */
+  const setMinuteAt = (
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
+    index: number,
+    value: string
+  ): void => {
+    setter((current) => {
+      const next = current.slice();
+      while (next.length <= index) next.push("");
+      next[index] = value;
+      return next;
+    });
+  };
+
+  /*
+    The derived figures. Every one of these is worked out from the manager's own entries, so they are
+    DERIVED and the screen labels them that way; nothing here is read from the save, which carries no
+    match events at all.
+  */
+  const enteredStats: MatchStats = {
+    shots: statNumberOf(matchStats.shots),
+    shotsInsideBox: statNumberOf(matchStats.shotsInsideBox),
+    bigChances: statNumberOf(matchStats.bigChances),
+    possession: statNumberOf(matchStats.possession),
+    passesCompleted: statNumberOf(matchStats.passesCompleted),
+  };
+  const expected = expectedGoals(enteredStats);
+  const finishing = finishingEdge(enteredStats, ourScore);
+  const finishingWord = finishingVerdict(finishing);
+  const outsideBox = shotsOutsideBox(enteredStats);
+  const cleanSheet = keptCleanSheet(theirScore);
+
   // Only our own club is filtered out. The rest are offered in the order the manager has chosen, and
-  // each carries the save's own placing for that club where the save states one. The order is a
-  // global preference, so it is read from the shared store rather than held here as component state.
+  // the order is a global preference, read from the shared store rather than held here as component
+  // state. No placing is shown beside a club: see the note in `@/lib/ui/opponent-list`.
   const opponentSortRaw = useSyncExternalStore(
     subscribeOpponentSort,
     getOpponentSortSnapshot,
@@ -459,6 +643,109 @@ export function DebriefView({
     (evt) => evt.eventType === "MATCH_DEBRIEF" && evt.entityType === "MATCH"
   );
 
+  // The competitions this career can be in, and the stars on its debriefs. Both deferred by a tick because
+  // setState must not run synchronously in an effect body.
+  useEffect(() => {
+    if (!careerId) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void apiFetch(`/api/competitions?careerId=${encodeURIComponent(careerId)}`, { cache: "no-store" })
+        .then(async (response) => {
+          const body = (await response.json()) as { success?: boolean; context?: CompetitionContext };
+          if (!cancelled && body.success && body.context) setCompetitionContext(body.context);
+        })
+        .catch(() => {
+          /* the generic labels stay */
+        });
+      void apiFetch(`/api/debrief-marks?careerId=${encodeURIComponent(careerId)}`, { cache: "no-store" })
+        .then(async (response) => {
+          const body = (await response.json()) as { success?: boolean; eventIds?: string[] };
+          if (!cancelled && body.success) setStarredIds(body.eventIds ?? []);
+        })
+        .catch(() => {
+          /* a missing star is not worth an error on this screen */
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [careerId]);
+
+  /**
+   * Stars or unstars one debrief.
+   *
+   * Optimistic, and put back if the write is refused: a star is an opinion, and waiting on a round trip to
+   * show the star he just pressed would feel like the button was broken.
+   */
+  const toggleDebriefStar = async (eventId: string) => {
+    if (!careerId) return;
+    const next = !starredIds.includes(eventId);
+    setStarredIds((ids) => (next ? [...ids, eventId] : ids.filter((id) => id !== eventId)));
+    try {
+      const response = await apiFetch("/api/debrief-marks", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ careerId, eventId, starred: next }),
+      });
+      if (!response.ok) {
+        setStarredIds((ids) => (next ? ids.filter((id) => id !== eventId) : [...ids, eventId]));
+      }
+    } catch {
+      setStarredIds((ids) => (next ? ids.filter((id) => id !== eventId) : [...ids, eventId]));
+    }
+  };
+
+  /**
+   * Opens one debrief in full, and finds the report the desk wrote about that match.
+   *
+   * The article is matched by id rather than searched for: the news desk keys a match report on
+   * `result-<debrief event id>`, so the link between the record and the story is exact and needs no guesswork
+   * about dates or opponents.
+   */
+  const openDebriefDetail = async (eventId: string) => {
+    setDetail({ eventId, article: null, articleLoaded: false });
+    if (!careerId) return;
+    try {
+      const response = await apiFetch(`/api/news?careerId=${encodeURIComponent(careerId)}`, {
+        cache: "no-store",
+      });
+      const body = (await response.json()) as {
+        paper?: { items?: Array<{ id: string; headline: string; body: string; quote: string | null }> };
+      };
+      const item = (body.paper?.items ?? []).find((entry) => entry.id === `result-${eventId}`) ?? null;
+      setDetail({
+        eventId,
+        article: item ? { headline: item.headline, body: item.body, quote: item.quote } : null,
+        articleLoaded: true,
+      });
+    } catch {
+      setDetail({ eventId, article: null, articleLoaded: true });
+    }
+  };
+
+  const visibleDebriefs =
+    starFilter === "STARRED" ? pastDebriefs.filter((evt) => starredIds.includes(evt.id)) : pastDebriefs;
+
+  /**
+   * The competition list, deduped by name.
+   *
+   * Two things can put the same name in twice: the generic fallback already contains "League Match" and a
+   * draft still holding it would be re-added, and a competition the career no longer offers is preserved so
+   * an old debrief cannot be silently refiled. Deduping here covers both, and a duplicate name would be a
+   * duplicate React key rather than anything a manager could see.
+   */
+  const competitionOptions = useMemo(() => {
+    const base = competitionContext?.options ?? [
+      { name: "League Match", kind: "LEAGUE" as const },
+      { name: "Domestic Cup", kind: "DOMESTIC_CUP" as const },
+      { name: "European Cup", kind: "CONTINENTAL" as const },
+      { name: "Friendly / Pre-season", kind: "OTHER" as const },
+    ];
+    const kept = competition.trim() === "" ? [] : [{ name: competition, kind: "OTHER" as const }];
+    return [...new Map([...base, ...kept].map((option) => [option.name, option])).values()];
+  }, [competitionContext, competition]);
+
   const pastDebriefsPayloads = useMemo(() => {
     return pastDebriefs.map((evt) => {
       try {
@@ -476,6 +763,30 @@ export function DebriefView({
     }
     return map;
   }, [players]);
+
+  /*
+    The overperformance pattern, read from the logged league matches.
+
+    Sorted here rather than trusting the order the event list arrives in: the claim is about the most
+    recent three matches and the list's order is not part of this screen's contract. The match being
+    filled in counts too, so the pattern shows itself the moment it becomes true.
+  */
+  const recentForAlert = [...pastDebriefsPayloads].sort((a, b) =>
+    (b.matchDate ?? "").localeCompare(a.matchDate ?? "")
+  );
+  const overperformanceHistory: AlertInput[] = recentForAlert.map((payload) => ({
+    competition: payload.competition,
+    result: payload.result,
+    matchStats: payload.matchStats ?? null,
+  }));
+  if (ourScoreInput !== "" || theirScoreInput !== "") {
+    overperformanceHistory.unshift({
+      competition,
+      result: ourScore > theirScore ? "WIN" : ourScore < theirScore ? "LOSS" : "DRAW",
+      matchStats: enteredStats,
+    });
+  }
+  const overperformance = overperformanceAlert(overperformanceHistory);
 
   const activeAnomalies = useMemo(() => {
     return evaluateMatchAnomalies(
@@ -550,6 +861,9 @@ export function DebriefView({
     setTheirScoreInput("");
     setOpponentPosition("");
     setOpponentPoints("");
+    setGoalMinutes([]);
+    setConcededMinutes([]);
+    setMatchStats(EMPTY_MATCH_STATS);
     setWeaknessIdentified("");
     setManagerReflection("");
     setDynamicAnswers({});
@@ -600,6 +914,16 @@ export function DebriefView({
     setOpponentPoints(text(stored.leagueSnapshot?.opponentPoints));
     setOwnPosition(text(stored.leagueSnapshot?.ownPosition));
     setOwnPoints(text(stored.leagueSnapshot?.ownPoints));
+    setGoalMinutes((stored.goalMinutes ?? []).map((minute) => String(minute)));
+    setConcededMinutes((stored.concededMinutes ?? []).map((minute) => String(minute)));
+    const storedStats = stored.matchStats ?? {};
+    setMatchStats({
+      shots: text(storedStats.shots),
+      shotsInsideBox: text(storedStats.shotsInsideBox),
+      bigChances: text(storedStats.bigChances),
+      possession: text(storedStats.possession),
+      passesCompleted: text(storedStats.passesCompleted),
+    });
     setMessage("Editing that debrief. Save to apply the changes.");
   };
 
@@ -662,6 +986,12 @@ export function DebriefView({
           standoutPlayerIds,
           standoutPlayerNames,
           contributions,
+          // Sliced to the goals the scoreline says were scored, so a minute left over from a score
+          // that has since been corrected cannot travel with the debrief.
+          goalMinutes: goalMinutes.slice(0, goalSlots),
+          concededMinutes: concededMinutes.slice(0, concededSlots),
+          // Sent as typed and validated server side, in the one place that owns those rules.
+          matchStats,
           weaknessIdentified,
           managerReflection,
           dynamicPrompts,
@@ -674,6 +1004,17 @@ export function DebriefView({
       }
 
       setMessage(editingId === null ? "Match debrief saved." : "Debrief updated.");
+      // The press only follow a match the desk thinks is worth a word, and only sometimes. An edit never
+      // re-asks: the question belongs to the match, not to the form.
+      if (editingId === null && data.media?.asked && typeof data.eventId === "string") {
+        setMediaPrompt({
+          eventId: data.eventId,
+          prompt: data.media.prompt ?? "The media want a word.",
+          subject: data.media.subject ?? "",
+          opponent: opponentLabel,
+        });
+        setMediaComment("");
+      }
       // The debrief is a record now, so the working note goes.
       clearDebriefDraft(careerId, MATCH_DRAFT_SURFACE);
       clearForm();
@@ -716,6 +1057,47 @@ export function DebriefView({
       setMessage((err as Error).message);
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  /**
+   * Answers the press, or refuses.
+   *
+   * Both answers are recorded. A refusal is not the absence of an answer: the paper reports it in the
+   * manager's name, so "he said nothing" has to be something he actually did.
+   */
+  const submitMediaComment = async (refused: boolean) => {
+    if (!careerId || !mediaPrompt) return;
+    setMediaBusy(true);
+    setMessage(null);
+    try {
+      const res = await apiFetch("/api/media-comment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          careerId,
+          debriefEventId: mediaPrompt.eventId,
+          opponent: mediaPrompt.opponent,
+          subject: mediaPrompt.subject,
+          comment: refused ? "" : mediaComment.trim(),
+          refused,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Could not record that comment.");
+      }
+      setMediaPrompt(null);
+      setMediaComment("");
+      setMessage(
+        refused
+          ? "No comment recorded. The paper will say so."
+          : "Comment recorded. It will appear in the match report."
+      );
+    } catch (err) {
+      setMessage((err as Error).message);
+    } finally {
+      setMediaBusy(false);
     }
   };
 
@@ -774,6 +1156,81 @@ export function DebriefView({
         </div>
       )}
 
+          {overperformance && (
+            <div
+              role="status"
+              className="mb-6 flex flex-wrap items-start gap-x-3 gap-y-1 rounded-2xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/40 dark:bg-amber-500/10"
+            >
+              <span className="font-sub text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                {overperformance.title}
+              </span>
+              <p className="font-sans text-xs text-amber-900 dark:text-amber-100">{overperformance.text}</p>
+              <p className="w-full font-sans text-[10px] text-amber-800/80 dark:text-amber-200/70">
+                Worked out from the match figures you logged. It clears itself as soon as a result goes
+                your way.
+              </p>
+            </div>
+          )}
+
+          {/*
+            The press, when they come looking.
+
+            Optional, and it has to look optional: a manager who does not want to answer should be able to
+            dismiss the whole thing in one press without feeling he has lost something. Saying nothing is
+            recorded as a refusal, which the paper then reports in the manager's own name, and that is a
+            different thing from never being asked.
+          */}
+          {mediaPrompt && (
+            <div
+              role="status"
+              className="mb-6 rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-xl backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/90"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-sub text-label font-bold uppercase tracking-[0.16em] text-[#E11D48] dark:text-[#FF8C7A]">
+                  The media
+                </span>
+                <span className="font-sub text-micro uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  Optional
+                </span>
+              </div>
+              <p className="mt-2 max-w-prose font-sans text-sm text-slate-700 dark:text-slate-200">
+                {mediaPrompt.prompt}
+              </p>
+              <label className="mt-3 block">
+                <span className="sr-only">Your comment to the media</span>
+                <textarea
+                  value={mediaComment}
+                  onChange={(event) => setMediaComment(event.target.value)}
+                  rows={3}
+                  maxLength={280}
+                  placeholder="Say what you like. It goes in the paper as a quote."
+                  className="w-full rounded-xl border border-slate-200 bg-white p-3 font-sans text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-100 dark:placeholder:text-slate-600"
+                />
+              </label>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={mediaBusy || mediaComment.trim().length === 0}
+                  onClick={() => void submitMediaComment(false)}
+                  className="inline-flex min-h-10 items-center rounded-xl bg-[#E11D48] px-4 font-sub text-label font-semibold uppercase tracking-[0.12em] text-white transition-colors duration-200 ease-[var(--ease-brand)] hover:bg-[#FF8C7A] disabled:opacity-50 cursor-pointer"
+                >
+                  {mediaBusy ? "Sending..." : "Give the quote"}
+                </button>
+                <button
+                  type="button"
+                  disabled={mediaBusy}
+                  onClick={() => void submitMediaComment(true)}
+                  className="inline-flex min-h-10 items-center rounded-xl border border-slate-200 px-4 font-sub text-label font-semibold uppercase tracking-[0.12em] text-slate-600 transition-colors duration-200 ease-[var(--ease-brand)] hover:border-slate-300 hover:text-slate-900 disabled:opacity-50 cursor-pointer dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:text-slate-100"
+                >
+                  No comment
+                </button>
+                <span className="font-sans text-micro text-slate-400 dark:text-slate-500">
+                  Say nothing and the paper will say you said nothing.
+                </span>
+              </div>
+            </div>
+          )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column (2 Cols): Debrief Entry Form */}
         <form onSubmit={handleSubmit} data-tour="debrief-form" className="lg:col-span-2 bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-6">
@@ -831,14 +1288,11 @@ export function DebriefView({
                 </option>
                 {orderedTeams.map((team) => (
                   <option key={team.teamId} value={String(team.teamId)}>
-                    {teamOptionLabel(team)}
+                    {team.name}
                   </option>
                 ))}
                 <option value="other">Another club (cup or friendly)</option>
               </select>
-              <p className="mt-1.5 font-sans text-[10px] text-slate-500 dark:text-slate-400">
-                Placings come from the save and are shown only for clubs it states one for.
-              </p>
               {opponentTeamId === "other" && (
                 <input
                   type="text"
@@ -881,10 +1335,18 @@ export function DebriefView({
                 onChange={(e) => setCompetition(e.target.value)}
                 className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#E11D48] cursor-pointer font-sub"
               >
-                <option value="League Match">League Match</option>
-                <option value="Domestic Cup">Domestic Cup</option>
-                <option value="European Cup">European Cup</option>
-                <option value="Friendly / Pre-season">Friendly / Pre-season</option>
+                {/*
+                  The career's own competitions, because the save names his division and the country that
+                  division belongs to decides which cups exist. The generic labels are the fallback for a
+                  career whose competition rows the save cannot name, and a value already on the draft that
+                  is in neither list is kept, so editing an old debrief cannot silently change its
+                  competition to something else.
+                */}
+                {competitionOptions.map((option) => (
+                  <option key={option.name} value={option.name}>
+                    {option.name}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -947,6 +1409,164 @@ export function DebriefView({
                 {venueLabel(venue)}
               </span>
             </div>
+          </div>
+
+          {/*
+            When the goals came. Offered only for goals the scoreline already says were scored, so the
+            form never asks about a goal that did not happen, and a goalless match shows nothing here.
+            Entirely optional, and a blank box means the minute was not recorded rather than nil.
+          */}
+          {(goalSlots > 0 || concededSlots > 0) && (
+            <div data-tour="debrief-goal-times" className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-sub text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  When the goals came
+                </span>
+                <span className="font-sub text-[10px] uppercase text-slate-500 dark:text-slate-400">
+                  optional · minutes
+                </span>
+              </div>
+              <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
+                The minute each goal went in, if you have it. A late winner and an early one are the
+                same result on the scoresheet and a very different story.
+              </p>
+
+              {goalSlots > 0 && (
+                <div className="space-y-2">
+                  <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    {clubName || "Your club"}
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {Array.from({ length: goalSlots }, (_, index) => (
+                      <div key={index} className="w-20">
+                        <TableNumberBox
+                          id={`debrief-goal-minute-${index}`}
+                          label={`Goal ${index + 1}`}
+                          ariaLabel={`Minute of goal ${index + 1} for ${clubName || "your club"}`}
+                          value={goalMinutes[index] ?? ""}
+                          onChange={(value) => setMinuteAt(setGoalMinutes, index, value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {concededSlots > 0 && (
+                <div className="space-y-2">
+                  <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    {opponentLabel || "Opponent"}
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {Array.from({ length: concededSlots }, (_, index) => (
+                      <div key={index} className="w-20">
+                        <TableNumberBox
+                          id={`debrief-conceded-minute-${index}`}
+                          label={`Goal ${index + 1}`}
+                          ariaLabel={`Minute of goal ${index + 1} for ${opponentLabel || "the opponent"}`}
+                          value={concededMinutes[index] ?? ""}
+                          onChange={(value) => setMinuteAt(setConcededMinutes, index, value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {timingCapReached && (
+                <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
+                  Timings can be recorded for the first {MAX_TIMING_SLOTS} goals only.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/*
+            What you saw after the match. Entirely optional, and entirely yours: the save holds no match
+            events at all, so this is the only possible source. The four figures under the boxes are
+            worked out from what is entered here plus the scoreline, and nothing else.
+          */}
+          <div data-tour="debrief-match-stats" className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-sub text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Match figures
+              </span>
+              <span className="font-sub text-[10px] uppercase text-slate-500 dark:text-slate-400">
+                optional · yours
+              </span>
+            </div>
+            <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
+              What you can see for yourself after the match. Hover a box to see exactly what to count.
+              The more you fill in, the more the figures below can say.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+              {MATCH_STAT_FIELDS.map((field) => (
+                <label key={field.key} className="block" title={field.hint}>
+                  <span className="block font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    {field.label}
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="–"
+                    value={matchStats[field.key]}
+                    onChange={(event) =>
+                      setMatchStats((current) => ({
+                        ...current,
+                        [field.key]: event.target.value.replace(/\D/g, "").slice(0, 4),
+                      }))
+                    }
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white text-center font-sub text-sm font-bold tabular-nums text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:outline-none focus:border-[#E11D48] focus:ring-2 focus:ring-[#E11D48]/20 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-600"
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <StatReadout
+                label="Expected goals"
+                value={expected === null ? "—" : expected.toFixed(2)}
+                note={
+                  expected === null
+                    ? "Needs inside box and big chances"
+                    : "TouchlineOS model, not a save figure"
+                }
+              />
+              <StatReadout
+                label="Finishing"
+                value={finishing === null ? "—" : `${finishing > 0 ? "+" : ""}${finishing.toFixed(2)}`}
+                note={
+                  finishingWord === null ? "Goals minus expected goals" : `${finishingWord.label} · goals minus expected goals`
+                }
+              />
+              <StatReadout
+                label="Outside box"
+                value={outsideBox === null ? "—" : String(outsideBox)}
+                note="Shots minus shots inside the box"
+              />
+              <StatReadout
+                label="Clean sheet"
+                value={
+                  ourScoreInput === "" && theirScoreInput === ""
+                    ? "—"
+                    : cleanSheet
+                      ? "Yes"
+                      : "No"
+                }
+                note={
+                  ourScoreInput === "" && theirScoreInput === ""
+                    ? "Needs the scoreline"
+                    : "From the scoreline, not a figure to enter"
+                }
+              />
+            </div>
+
+            <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
+              A big chance is usually also a shot from inside the box, so the two terms overlap and
+              expected goals reads a little high. Counting only big chances would understate a side that
+              creates a lot of ordinary box shots, which is the more common manager.
+            </p>
           </div>
 
           {/*
@@ -1338,13 +1958,38 @@ export function DebriefView({
 
         {/* Right Column: Historical Match Debriefs */}
         <div data-tour="debrief-history" className="h-fit bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
-          <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100 border-b border-slate-200 dark:border-slate-800 pb-3">
-            Your debriefs ({pastDebriefs.length})
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+            <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
+              Your debriefs ({pastDebriefs.length})
+            </h2>
+            {/* The star filter, and the anchor the tour points at: it is the one control here that
+                changes what the list shows rather than what the form writes. */}
+            <div data-tour="debrief-starred" className="flex items-center gap-1.5">
+              {(["ALL", "STARRED"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setStarFilter(mode)}
+                  aria-pressed={starFilter === mode}
+                  className={`inline-flex min-h-10 items-center rounded-lg border px-2.5 font-sub text-[10px] font-bold uppercase tracking-wider transition-colors duration-200 ease-[var(--ease-brand)] cursor-pointer ${
+                    starFilter === mode
+                      ? "border-[#E11D48]/40 bg-[#E11D48]/10 text-[#E11D48] dark:text-[#FF8C7A]"
+                      : "border-slate-200 text-slate-500 hover:text-slate-900 dark:border-slate-800 dark:text-slate-400 dark:hover:text-slate-100"
+                  }`}
+                >
+                  {mode === "ALL" ? "All" : `★ Memorable (${starredIds.length})`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <p className="font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+            Open any match for the full record, and keep the ones worth remembering.
+          </p>
 
           <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
-            {pastDebriefs.length > 0 ? (
-              pastDebriefs.map((evt) => {
+            {visibleDebriefs.length > 0 ? (
+              visibleDebriefs.map((evt) => {
                 let payload: DebriefHistory = {};
                 try {
                   payload =
@@ -1381,18 +2026,50 @@ export function DebriefView({
                   <div
                     key={evt.id}
                     className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800/80 space-y-2"
-                  >
-                    <div className="flex items-center justify-between gap-2 text-xs font-sub font-bold uppercase">
-                      <span className="truncate text-slate-900 dark:text-slate-100">
+                  >                    {/*
+                      The club name WRAPS rather than truncating. A fixed `truncate` on the left half
+                      of a `justify-between` row loses to the score pill and the two action buttons
+                      beside it, so a longer club name read as "vs LUTO..." with no way to see the
+                      rest. Allowing the row to wrap means the name is always shown in full and the
+                      controls simply move below it when there is not room for both.
+                    */}
+                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 text-xs font-sub font-bold uppercase">
+                      <span className="min-w-[9rem] flex-1 break-words text-slate-900 dark:text-slate-100">
                         vs {payload.opponent || "Unnamed opponent"}
                       </span>
                       <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => void toggleDebriefStar(evt.id)}
+                          aria-pressed={starredIds.includes(evt.id)}
+                          aria-label={
+                            starredIds.includes(evt.id)
+                              ? `Remove the star from the debrief against ${payload.opponent || "an unnamed opponent"}`
+                              : `Star the debrief against ${payload.opponent || "an unnamed opponent"}`
+                          }
+                          title={starredIds.includes(evt.id) ? "Unstar this match" : "Keep this match as memorable"}
+                          className={`inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg px-2 text-sm transition-colors duration-200 ease-[var(--ease-brand)] cursor-pointer ${
+                            starredIds.includes(evt.id)
+                              ? "text-[#E11D48] hover:bg-[#E11D48]/10 dark:text-[#FF8C7A]"
+                              : "text-slate-300 hover:bg-slate-200 hover:text-slate-600 dark:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                          }`}
+                        >
+                          <span aria-hidden="true">{starredIds.includes(evt.id) ? "★" : "☆"}</span>
+                        </button>
                         <span className={`rounded-md px-2 py-0.5 text-[10px] tabular-nums ${
                           payload.result === "WIN" ? "bg-emerald-500/15 text-emerald-600" :
                           payload.result === "LOSS" ? "bg-rose-500/15 text-rose-600" : "bg-amber-500/15 text-amber-600"
                         }`}>
                           {payload.scoreline || "0-0"} · {resultLabel(payload.result || "DRAW")}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => void openDebriefDetail(evt.id)}
+                          aria-label={`Open the full record of the match against ${payload.opponent || "an unnamed opponent"}`}
+                          className="inline-flex min-h-10 items-center rounded-lg px-2.5 text-[10px] uppercase tracking-wider text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-800 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-100 cursor-pointer"
+                        >
+                          Open
+                        </button>
                         <button
                           type="button"
                           onClick={() => startEditDebrief(evt)}
@@ -1494,7 +2171,9 @@ export function DebriefView({
               })
             ) : (
               <p className="text-xs text-slate-500 dark:text-slate-400 italic">
-                Nothing logged yet. Fill in the form and your match history builds up here.
+                {starFilter === "STARRED"
+                  ? "No match has been kept yet. Star one and it stays here."
+                  : "Nothing logged yet. Fill in the form and your match history builds up here."}
               </p>
             )}
           </div>
@@ -1502,6 +2181,314 @@ export function DebriefView({
       </div>
         </>
       )}
+
+      {detail && (
+        <DebriefDetailModal
+          event={pastDebriefs.find((evt) => evt.id === detail.eventId) ?? null}
+          namesById={playerNamesById}
+          article={detail.article}
+          articleLoaded={detail.articleLoaded}
+          starred={starredIds.includes(detail.eventId)}
+          onToggleStar={() => void toggleDebriefStar(detail.eventId)}
+          onClose={() => setDetail(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Everything the manager recorded about one match, in one place.
+ *
+ * The list row is a summary on purpose: a season of matches read as a wall of prose is worse than a list.
+ * This is where the detail he actually typed lives, including the parts that never fitted a row: the goal
+ * minutes, the shooting figures, his tactical mark, his reflection, and the newspaper report the desk wrote
+ * from it.
+ */
+/**
+ * A minute list from a stored payload, as text.
+ *
+ * Why this is not a straight `.map`: a debrief payload is written by whichever version of the form was
+ * running at the time, and an older or hand-edited row can hold a comma-separated string where the current
+ * shape holds numbers. Reading a detail view is not a place to throw, so anything unrecognisable reads as
+ * "none" instead of taking the screen down with it.
+ */
+function minuteList(value: unknown): string {
+  if (Array.isArray(value)) {
+    const minutes = value.filter((minute) => minute !== null && minute !== undefined && `${minute}`.trim() !== "");
+    return minutes.length > 0 ? minutes.map((minute) => `${minute}'`).join(", ") : "none";
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const minutes = value
+      .split(/[,\s]+/)
+      .map((minute) => minute.trim())
+      .filter((minute) => minute !== "");
+    return minutes.length > 0 ? minutes.map((minute) => (minute.endsWith("'") ? minute : `${minute}'`)).join(", ") : "none";
+  }
+  return "none";
+}
+
+function DebriefDetailModal({
+  event,
+  namesById,
+  article,
+  articleLoaded,
+  starred,
+  onToggleStar,
+  onClose,
+}: {
+  event: ParsedCareerEvent | null;
+  namesById: Record<string, string>;
+  article: { headline: string; body: string; quote: string | null } | null;
+  articleLoaded: boolean;
+  starred: boolean;
+  onToggleStar: () => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKeyDown = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  if (!event) return null;
+
+  let payload: DebriefHistory = {};
+  try {
+    payload = (typeof event.payload === "string" ? JSON.parse(event.payload) : event.payload) || {};
+  } catch {
+    payload = {};
+  }
+
+  const standouts = payload.standoutPlayerNames?.length
+    ? payload.standoutPlayerNames
+    : payload.standoutPlayerName && payload.standoutPlayerName !== "None Selected"
+      ? [payload.standoutPlayerName]
+      : [];
+  const contributions = payload.contributions ?? [];
+  const stats = payload.matchStats ?? null;
+  const rows: Array<{ label: string; value: string }> = [
+    { label: "Match date", value: payload.matchDate ?? "not recorded" },
+    { label: "Competition", value: payload.competition ?? "not recorded" },
+    { label: "Venue", value: payload.venue ? venueLabel(payload.venue) : "not recorded" },
+    {
+      label: "Scoreline",
+      value: `${payload.scoreline ?? "0-0"} (${resultLabel(payload.result ?? "DRAW")})`,
+    },
+    {
+      label: "Tactical adherence",
+      value:
+        typeof payload.tacticalAdherence === "number" ? `${payload.tacticalAdherence} of 5` : "not recorded",
+    },
+    {
+      label: "Goals we timed",
+      value: minuteList(payload.goalMinutes),
+    },
+    {
+      label: "Goals they timed",
+      value: minuteList(payload.concededMinutes),
+    },
+    {
+      label: "Shots",
+      value: stats
+        ? `${stats.shots ?? 0} total, ${stats.shotsInsideBox ?? 0} in the box, ${stats.bigChances ?? 0} big`
+        : "not recorded",
+    },
+    {
+      label: "Possession",
+      value: typeof stats?.possession === "number" ? `${stats.possession}%` : "not recorded",
+    },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 p-4 backdrop-blur-sm animate-overlay-in sm:items-center"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="debrief-detail-title"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-2xl backdrop-blur-xl animate-panel-in dark:border-slate-800 dark:bg-slate-900/95"
+        onClick={(clickEvent) => clickEvent.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <span className="font-sub text-label font-bold uppercase tracking-[0.16em] text-[#E11D48] dark:text-[#FF8C7A]">
+              Match record
+            </span>
+            <h2
+              id="debrief-detail-title"
+              className="mt-1 font-heading text-lg leading-snug text-slate-900 dark:text-slate-50"
+            >
+              vs {payload.opponent || "Unnamed opponent"}
+            </h2>
+            <p className="mt-1 font-sub text-[11px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              {[payload.matchDate, payload.competition].filter(Boolean).join("  ·  ") || "No date recorded"}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onToggleStar}
+              aria-pressed={starred}
+              className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg border px-2.5 font-sub text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                starred
+                  ? "border-[#E11D48]/40 bg-[#E11D48]/10 text-[#E11D48] dark:text-[#FF8C7A]"
+                  : "border-slate-200 text-slate-500 hover:text-slate-900 dark:border-slate-800 dark:text-slate-400 dark:hover:text-slate-100"
+              }`}
+            >
+              <span aria-hidden="true">{starred ? "★" : "☆"}</span>
+              {starred ? "Memorable" : "Keep"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg text-slate-400 transition-colors hover:text-slate-900 cursor-pointer dark:hover:text-slate-100"
+            >
+              <span aria-hidden="true">✕</span>
+            </button>
+          </div>
+        </div>
+
+        <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-2 border-t border-slate-200 pt-4 dark:border-slate-800 sm:grid-cols-2">
+          {rows.map((row) => (
+            <div key={row.label} className="flex items-baseline justify-between gap-3">
+              <dt className="font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                {row.label}
+              </dt>
+              <dd className="font-sans text-xs text-slate-700 tabular-nums dark:text-slate-200">{row.value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        {contributions.length > 0 && (
+          <section className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+            <h3 className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Goals and assists you logged
+            </h3>
+            <ul className="mt-2 space-y-1">
+              {contributions.map((entry) => (
+                <li key={entry.playerId} className="flex items-baseline justify-between gap-3">
+                  <span className="font-sans text-xs text-slate-700 dark:text-slate-200">
+                    {entry.playerName}
+                    {namesById[entry.playerId] && namesById[entry.playerId] !== entry.playerName
+                      ? ` (${namesById[entry.playerId]})`
+                      : ""}
+                  </span>
+                  <span className="font-sans text-xs text-slate-500 tabular-nums dark:text-slate-400">
+                    {[
+                      entry.goals > 0 ? `${entry.goals} ${entry.goals === 1 ? "goal" : "goals"}` : null,
+                      entry.assists > 0 ? `${entry.assists} ${entry.assists === 1 ? "assist" : "assists"}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(", ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {(standouts.length > 0 || payload.weaknessIdentified || payload.managerReflection) && (
+          <section className="mt-4 space-y-2 border-t border-slate-200 pt-4 dark:border-slate-800">
+            {standouts.length > 0 && (
+              <p className="font-sans text-xs text-slate-700 dark:text-slate-200">
+                <span className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Singled out:{" "}
+                </span>
+                {standouts.join(", ")}
+              </p>
+            )}
+            {payload.weaknessIdentified && (
+              <p className="font-sans text-xs text-slate-700 dark:text-slate-200">
+                <span className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Weakness noted:{" "}
+                </span>
+                {payload.weaknessIdentified}
+              </p>
+            )}
+            {payload.managerReflection && (
+              <p className="font-sans text-xs italic leading-relaxed text-slate-600 dark:text-slate-300">
+                {payload.managerReflection}
+              </p>
+            )}
+          </section>
+        )}
+
+        {payload.leagueSnapshot &&
+          (payload.leagueSnapshot.ownPosition || payload.leagueSnapshot.opponentPosition) && (
+            <section className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+              <h3 className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Table at kick-off, as you read it
+              </h3>
+              <p className="mt-1.5 font-sans text-xs text-slate-600 tabular-nums dark:text-slate-300">
+                {describePlacing(
+                  payload.leagueSnapshot.ownPosition,
+                  payload.leagueSnapshot.ownPoints
+                ) ?? "us: not logged"}{"  ·  "}
+                {describePlacing(
+                  payload.leagueSnapshot.opponentPosition,
+                  payload.leagueSnapshot.opponentPoints
+                ) ?? "them: not logged"}
+              </p>
+            </section>
+          )}
+
+        {payload.dynamicPrompts && payload.dynamicPrompts.length > 0 && (
+          <section className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+            <h3 className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Your answers to the prompts
+            </h3>
+            <ul className="mt-2 space-y-1.5">
+              {payload.dynamicPrompts.map((prompt, index) => (
+                <li key={index} className="font-sans text-xs text-slate-700 dark:text-slate-200">
+                  {prompt.question ? (
+                    <span className="block text-[11px] text-slate-400 dark:text-slate-500">
+                      {prompt.question}
+                    </span>
+                  ) : null}
+                  {prompt.answer}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {/* The report the desk wrote about this match, matched by id rather than guessed at. */}
+        <section className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+          <h3 className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            What the paper said
+          </h3>
+          {!articleLoaded ? (
+            <p className="mt-1.5 font-sans text-xs text-slate-400 dark:text-slate-500">
+              Looking for the report…
+            </p>
+          ) : article ? (
+            <div className="mt-2 space-y-1.5">
+              <p className="font-heading text-sm leading-snug text-slate-900 dark:text-slate-50">
+                {article.headline}
+              </p>
+              <p className="font-sans text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                {article.body}
+              </p>
+              {article.quote ? (
+                <p className="border-l-2 border-slate-300 pl-2.5 font-sans text-xs italic text-slate-600 dark:border-slate-600 dark:text-slate-300">
+                  &ldquo;{article.quote}&rdquo;
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-1.5 font-sans text-xs text-slate-400 dark:text-slate-500">
+              No report was written about this match. The desk writes from the debrief, so one appears in the
+              paper once this record is on file.
+            </p>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

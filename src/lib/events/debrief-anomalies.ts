@@ -1,4 +1,5 @@
 import type { MatchContribution } from "./types";
+import type { MatchStats } from "./match-stats";
 
 export interface DebriefHistoryPayload {
   opponent?: string;
@@ -21,6 +22,8 @@ export interface DebriefHistoryPayload {
     ownPoints?: number | null;
   };
   dynamicPrompts?: Array<{ id: string; question: string; answer: string }>;
+  /** Present once the manager has logged any post-match figures. */
+  matchStats?: MatchStats | null;
 }
 
 export interface AnomalyPrompt {

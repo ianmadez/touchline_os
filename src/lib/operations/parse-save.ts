@@ -41,8 +41,25 @@ export async function parseAndSyncSave(rawBody: string): Promise<OperationResult
 
     const careerService = new CareerService();
     if (body.onboarding && typeof body.onboarding === "object") {
-      await careerService.upsertOnboarding(syncResult.careerId, body.onboarding);
-      await careerService.ensureInitialTactics(syncResult.careerId, body.onboarding.favFormations);
+      /**
+       * Anything the manager left blank is filled from the SAVE, before it is stored.
+       *
+       * The wizard no longer pre-fills these, because a default is somebody else's identity: it used to
+       * open on a previous career's manager name, and clicking straight through saved it. The save is
+       * the only thing that knows whose career this is, and by this point the sync has already written
+       * its manager and club onto the career row - so a blank field is filled from exactly the same
+       * values the dashboard is about to display, and they cannot disagree.
+       *
+       * Only a BLANK field is filled. A name the manager typed is his, and is never second-guessed.
+       */
+      const beforeOnboarding = await careerService.hydrate(syncResult.careerId);
+      const onboarding = {
+        ...body.onboarding,
+        managerName:
+          body.onboarding.managerName?.trim() || beforeOnboarding?.managerName || "",
+      };
+      await careerService.upsertOnboarding(syncResult.careerId, onboarding);
+      await careerService.ensureInitialTactics(syncResult.careerId, onboarding.favFormations);
     }
 
     const payload = await careerService.hydrate(syncResult.careerId);

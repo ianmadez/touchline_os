@@ -36,11 +36,14 @@ const SEARCH_PLACEHOLDERS: Record<Exclude<SquadSubTab, "TRANSFERS">, string> = {
 export function SquadView({
   careerId,
   players,
+  inGameDate = null,
   onSelectPlayer,
   currencySymbol = "£",
 }: {
   careerId: string | null;
   players: EnrichedPlayer[];
+  /** The save's own clock, so an injury that has expired reads as fit by itself. */
+  inGameDate?: string | null;
   onSelectPlayer: (player: EnrichedPlayer) => void;
   currencySymbol?: string;
 }) {
@@ -94,7 +97,11 @@ export function SquadView({
             </p>
           )}
           <div data-tour="squad-table">
-            <SquadTable players={visiblePlayers} onSelectPlayer={onSelectPlayer} />
+            <SquadTable
+              players={visiblePlayers}
+              inGameDate={inGameDate}
+              onSelectPlayer={onSelectPlayer}
+            />
           </div>
         </>
       )}

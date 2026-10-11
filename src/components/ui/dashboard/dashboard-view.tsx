@@ -34,6 +34,7 @@ import {
 } from "@/lib/ui/labels";
 import { ModeChips } from "./mode-chips";
 import { formatEventDate, provenanceLabel, summariseEvent } from "@/lib/ui/events";
+import { NewsWindow } from "@/components/ui/news/news-window";
 
 /** Colour by category - what a thread is about. */
 const CATEGORY_COLOURS: Record<string, string> = {
@@ -70,6 +71,8 @@ interface DashboardViewProps {
   onSelectPlayer: (player: EnrichedPlayer) => void;
   /** Opens the thread's evidence view - the one permitted level below the dashboard. */
   onOpenStoryline: (storylineId: string) => void;
+  /** Opens the news desk. Owned by the page, because the Dashboard tab has to be able to close it. */
+  onOpenNews: () => void;
 }
 
 export function DashboardView({
@@ -86,6 +89,7 @@ export function DashboardView({
   onNavigateTab,
   onSelectPlayer,
   onOpenStoryline,
+  onOpenNews,
 }: DashboardViewProps) {
 
   // 1. Unassigned / Flagged Players
@@ -508,8 +512,15 @@ export function DashboardView({
           </div>
         </div>
 
-        {/* Right Column: Activity Spine */}
-        <div data-tour="dashboard-activity" className="h-fit bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
+        {/* Right Column: the paper, then the Activity Spine */}
+        <div className="space-y-6">
+          <NewsWindow
+            careerId={careerId}
+            clubName={clubName}
+            onOpen={onOpenNews}
+          />
+
+          <div data-tour="dashboard-activity" className="h-fit bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
               Recent Activity
@@ -577,6 +588,7 @@ export function DashboardView({
                 Nothing here yet. Sync your save to start the timeline.
               </p>
             )}
+          </div>
           </div>
         </div>
       </div>

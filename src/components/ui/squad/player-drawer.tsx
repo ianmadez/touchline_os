@@ -10,9 +10,16 @@ import {
   rolesForPosition,
 } from "@/lib/tactics/roles";
 import { PlayerFace } from "./player-face";
+import { NationFlag } from "./nation-flag";
 import { AttributeBars } from "./attribute-bars";
 import type { PlayerValuation } from "@/lib/services/value-service";
 import { formatMoney, formatMoneyExact } from "@/lib/ui/format";
+import {
+  INJURY_DURATION_PRESETS,
+  dayFrom,
+  describeTimeOut,
+  isInjured,
+} from "@/lib/squad/injury";
 
 interface PlayerDrawerProps {
   player: EnrichedPlayer | null;
@@ -21,6 +28,8 @@ interface PlayerDrawerProps {
    * estimated from agreed transfer fees in this career and is labelled as an estimate on the card.
    */
   valuation?: PlayerValuation;
+  /** The save's own clock, which every injury return date is measured against. */
+  inGameDate?: string | null;
   onClose: () => void;
   onSaveProfile: (data: {
     eaPlayerId: number;
@@ -30,10 +39,19 @@ interface PlayerDrawerProps {
     userNotes: string;
     /** Manual position override; null clears it. */
     primaryPosition: string | null;
+    /** Return date, or null when he is fit again. */
+    injuryUntil: string | null;
+    injuryNote: string | null;
   }) => void;
 }
 
-export function PlayerDrawer({ player, valuation, onClose, onSaveProfile }: PlayerDrawerProps) {
+export function PlayerDrawer({
+  player,
+  valuation,
+  inGameDate = null,
+  onClose,
+  onSaveProfile,
+}: PlayerDrawerProps) {
   const [isFlipped, setIsFlipped] = useState(false);
   const [assignedRole, setAssignedRole] = useState(player?.userProfile?.assignedRole || "");
   const [trustLevel, setTrustLevel] = useState<"HIGH" | "MEDIUM" | "LOW">(
@@ -52,6 +70,10 @@ export function PlayerDrawer({ player, valuation, onClose, onSaveProfile }: Play
   const [positionOverride, setPositionOverride] = useState<string>(
     player?.userProfile?.positionOverride || ""
   );
+  const [injuryUntil, setInjuryUntil] = useState<string | null>(
+    player?.userProfile?.injury.until ?? null
+  );
+  const [injuryNote, setInjuryNote] = useState<string>(player?.userProfile?.injury.note ?? "");
 
   // This drawer is keyed by player id in `page.tsx`, so selecting a different player remounts the
   // component and every field below re-initialises from props. A sync effect here would be
@@ -65,6 +87,27 @@ export function PlayerDrawer({ player, valuation, onClose, onSaveProfile }: Play
   const { group, primary, other } = rolesForPosition(effectivePosition);
   const selectedRoleHint = TACTICAL_ROLES.find((role) => role.label === assignedRole)?.hint ?? null;
 
+  //
+  // Availability is a comparison against the save's own clock, not a stored flag, so a past return
+  // date reads as fit without anyone clearing it. The switch below only writes the date.
+  //
+  const isOut = isInjured(
+    { until: injuryUntil, note: injuryNote || null, reportedOn: null },
+    inGameDate
+  );
+  const timeOut = isOut ? describeTimeOut(injuryUntil, inGameDate) : null;
+
+  /** Flipping it on lands on two weeks: the shortest absence that is really a report, and short enough to change. */
+  const toggleAvailability = () => {
+    if (isOut) {
+      setInjuryUntil(null);
+      setInjuryNote("");
+      return;
+    }
+    const anchor = inGameDate ?? new Date().toISOString().slice(0, 10);
+    setInjuryUntil(dayFrom(anchor, 14));
+  };
+
   const handleSave = () => {
     onSaveProfile({
       eaPlayerId: player.eaPlayerId,
@@ -73,6 +116,8 @@ export function PlayerDrawer({ player, valuation, onClose, onSaveProfile }: Play
       importanceMarker,
       userNotes,
       primaryPosition: positionOverride || null,
+      injuryUntil,
+      injuryNote: injuryNote.trim() || null,
     });
     onClose();
   };
@@ -147,6 +192,33 @@ export function PlayerDrawer({ player, valuation, onClose, onSaveProfile }: Play
                         {(player.primaryPosition || UNKNOWN_POSITION) === UNKNOWN_POSITION
                           ? "UNMAPPED - SET ON REVERSE"
                           : player.primaryPosition}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center border-b border-slate-800/80 pb-2 text-xs">
+                      <span className="text-slate-400">Nationality</span>
+                      <span className="flex items-center gap-2">
+                        <NationFlag nationId={player.nationalityId} name={player.nationality} height={13} />
+                        {player.nationality ? (
+                          <span className="font-bold text-slate-100">{player.nationality}</span>
+                        ) : (
+                          /*
+                           * Two different silences, and they must not read as one. A save that carries
+                           * no nationality at all says so; a save that carries a code our country table
+                           * does not name says THAT instead of claiming the save is empty, which would be
+                           * a false statement about the manager's own file. The flag still renders for the
+                           * latter, because the code is real and the CDN serves it.
+                           */
+                          <span
+                            className="text-slate-500"
+                            title={
+                              player.nationalityId === null
+                                ? "Your save records no nationality for this player."
+                                : `Your save records nationality code ${player.nationalityId}, which this build's country list does not name.`
+                            }
+                          >
+                            {player.nationalityId === null ? "Not in this save" : "Recorded, not named here"}
+                          </span>
+                        )}
                       </span>
                     </div>
                     <div className="flex justify-between border-b border-slate-800/80 pb-2 text-xs">
@@ -268,6 +340,118 @@ export function PlayerDrawer({ player, valuation, onClose, onSaveProfile }: Play
                           </option>
                         ))}
                       </select>
+                    </div>
+
+                    {/*
+                      Availability, as a switch rather than two date fields.
+
+                      The save's own `injury` column read 0 for every player on the reference
+                      career, so there is nothing to read and nothing to derive: the manager is the
+                      only source, exactly as he is for the transfer budget. He flips this and picks
+                      a duration, and the return date is worked out from the save's clock.
+
+                      It is a switch and not a status dropdown because availability is binary in the
+                      only place it matters: a player can be picked, or he cannot. How long is a
+                      second question, asked only once the first one is answered.
+                    */}
+                    <div>
+                      <label className="mb-1 block font-sub text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                        Availability
+                        {inGameDate && (
+                          <span className="ml-2 font-normal text-slate-500 dark:text-slate-400">
+                            save date {inGameDate}
+                          </span>
+                        )}
+                      </label>
+
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={isOut}
+                        onClick={toggleAvailability}
+                        className={`flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors active:scale-[0.98] ${
+                          isOut
+                            ? "border-rose-300 bg-rose-50 dark:border-rose-500/50 dark:bg-rose-500/10"
+                            : "border-emerald-300 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/10"
+                        }`}
+                      >
+                        <span className="min-w-0">
+                          <span
+                            className={`block font-sub text-[11px] font-bold uppercase tracking-wider ${
+                              isOut
+                                ? "text-rose-700 dark:text-rose-300"
+                                : "text-emerald-700 dark:text-emerald-300"
+                            }`}
+                          >
+                            {isOut ? "Out injured" : "Fit to play"}
+                          </span>
+                          <span className="block truncate text-[10px] text-slate-600 dark:text-slate-400">
+                            {isOut
+                              ? [timeOut, injuryUntil ? `back ${injuryUntil}` : null]
+                                  .filter(Boolean)
+                                  .join(", ")
+                              : "Available to be picked"}
+                          </span>
+                        </span>
+                        <span
+                          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                            isOut ? "bg-rose-500" : "bg-emerald-500/40"
+                          }`}
+                        >
+                          <span
+                            className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                              isOut ? "translate-x-[1.15rem]" : "translate-x-0.5"
+                            }`}
+                          />
+                        </span>
+                      </button>
+
+                      {isOut && (
+                        <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-white p-2.5 dark:border-slate-800 dark:bg-slate-900">
+                          <span className="block font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                            How long is he out?
+                          </span>
+
+                          {inGameDate ? (
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {INJURY_DURATION_PRESETS.map((preset) => {
+                                const until = dayFrom(inGameDate, preset.days);
+                                const isPicked = until !== null && until === injuryUntil;
+                                return (
+                                  <button
+                                    key={preset.key}
+                                    type="button"
+                                    onClick={() => until && setInjuryUntil(until)}
+                                    className={`cursor-pointer rounded-lg border px-1 py-1.5 text-[10px] font-sub transition-colors ${
+                                      isPicked
+                                        ? "border-amber-500 bg-amber-500/15 font-bold text-amber-700 dark:text-amber-400"
+                                        : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300"
+                                    }`}
+                                  >
+                                    {preset.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            /* No save clock to count from, so the date is asked for plainly. */
+                            <input
+                              type="date"
+                              value={injuryUntil ?? ""}
+                              onChange={(e) => setInjuryUntil(e.target.value || null)}
+                              className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs text-slate-900 focus:border-amber-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                            />
+                          )}
+
+                          <input
+                            type="text"
+                            placeholder="What is it? Hamstring, knock in training..."
+                            value={injuryNote}
+                            onChange={(e) => setInjuryNote(e.target.value)}
+                            className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs text-slate-900 focus:border-amber-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                          />
+                        </div>
+                      )}
                     </div>
 
                     <div>

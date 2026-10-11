@@ -3,10 +3,13 @@
 import React, { useState } from "react";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import { UNKNOWN_POSITION } from "@/lib/parser/interface";
+import { describeTimeOut, isInjured } from "@/lib/squad/injury";
 import { PlayerFace } from "./player-face";
 
 interface SquadTableProps {
   players: EnrichedPlayer[];
+  /** The save's own clock: every return date is a comparison against it. */
+  inGameDate?: string | null;
   onSelectPlayer: (player: EnrichedPlayer) => void;
 }
 
@@ -77,7 +80,7 @@ function roleRank(role: string | null | undefined): number {
   return POSITION_GROUP_RANK[role] ?? POSITION_GROUP_RANK[baseCode] ?? 5;
 }
 
-export function SquadTable({ players, onSelectPlayer }: SquadTableProps) {
+export function SquadTable({ players, inGameDate = null, onSelectPlayer }: SquadTableProps) {
   const [filterRole, setFilterRole] = useState<string>("ALL");
   const [sortField, setSortField] = useState<SortableField>("overallRating");
   const [sortAsc, setSortAsc] = useState<boolean>(false);
@@ -97,6 +100,7 @@ export function SquadTable({ players, onSelectPlayer }: SquadTableProps) {
   };
 
   const filteredPlayers = players.filter((p) => {
+    if (filterRole === "INJURED") return isInjured(p.userProfile?.injury, inGameDate);
     if (filterRole === "YOUTH") return p.isYouthProspect;
     if (filterRole === "UNTOUCHABLE") return p.userProfile?.importanceMarker === "UNTOUCHABLE";
     if (filterRole === "SURPLUS") return p.userProfile?.importanceMarker === "SURPLUS";
@@ -154,7 +158,7 @@ export function SquadTable({ players, onSelectPlayer }: SquadTableProps) {
       {/* Table Filter Controls */}
       <div className="p-4 border-b border-slate-200 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          {["ALL", "YOUTH", "UNTOUCHABLE", "SURPLUS"].map((f) => (
+          {["ALL", "INJURED", "YOUTH", "UNTOUCHABLE", "SURPLUS"].map((f) => (
             <button
               key={f}
               onClick={() => setFilterRole(f)}
@@ -209,6 +213,13 @@ export function SquadTable({ players, onSelectPlayer }: SquadTableProps) {
               >
                 Age {renderSortIndicator("age")}
               </th>
+              {/*
+                Fitness sits with the facts about the player, not with the manager's own labels, so
+                it reads left of Assigned Role. Most of the column says the same short word, which is
+                deliberate: a squad list is scanned for the players who are NOT available, and a
+                column of quiet Fit chips makes the two loud ones find themselves.
+              */}
+              <th className="py-3 px-3 text-center">Fitness</th>
               <th
                 onClick={() => handleSort("assignedRole")}
                 className="py-3 px-4 cursor-pointer hover:text-amber-500 transition-colors group"
@@ -267,6 +278,32 @@ export function SquadTable({ players, onSelectPlayer }: SquadTableProps) {
                 </td>
                 <td className="py-3 px-3 text-center text-slate-700 dark:text-slate-300 font-sub">
                   {player.age ?? "-"}
+                </td>
+                <td className="py-3 px-3 text-center">
+                  {(() => {
+                    const injury = player.userProfile?.injury;
+                    const out = isInjured(injury, inGameDate);
+                    if (!out) {
+                      return (
+                        <span className="inline-flex items-center gap-1.5 font-sub text-[10px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          Fit
+                        </span>
+                      );
+                    }
+                    const timeOut = describeTimeOut(injury?.until ?? null, inGameDate);
+                    return (
+                      <span
+                        title={[injury?.note, injury?.until ? `Back ${injury.until}` : null]
+                          .filter(Boolean)
+                          .join(". ")}
+                        className="inline-flex max-w-[9rem] items-center gap-1.5 rounded-md border border-rose-300 bg-rose-50 px-2 py-0.5 font-sub text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-300"
+                      >
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" />
+                        <span className="truncate">{timeOut ? `Out ${timeOut}` : "Out"}</span>
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="py-3 px-4 text-xs font-sub text-slate-700 dark:text-slate-300">
                   {player.userProfile?.assignedRole || (

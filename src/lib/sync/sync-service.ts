@@ -102,8 +102,13 @@ export interface SyncResult {
  *      layout pick prefers whichever read keeps its field offsets inside the block. Any career synced
  *      from an FC27 save can therefore hold row counts and field lists from the older reader, so the
  *      whole transaction has to re-run rather than report NO_CHANGE.
+ * 14 - nationality. `players.nationality` was decoded all along and thrown away, so no player table
+ *      carried it and no screen could show it. It is now persisted on `players`, `player_snapshots`,
+ *      `youth_prospects` and `world_players`, resolved to a country name through a reference table.
+ *      Nothing about that is visible to the change detector, which compares against the save file, so
+ *      without this bump every existing career would report NO_CHANGE and stay with no nationality.
  */
-export const SYNC_PIPELINE_VERSION = "13";
+export const SYNC_PIPELINE_VERSION = "14";
 
 export class SyncService {
   private parser = createSaveParser();
@@ -152,6 +157,8 @@ export class SyncService {
         skillMoves: player.skillMoves,
         internationalRep: player.internationalRep,
         heightCm: player.heightCm,
+        nationalityId: player.nationalityId,
+        nationality: player.nationality,
         valueLow: band?.low ?? null,
         valueMid: band?.mid ?? null,
         valueHigh: band?.high ?? null,
@@ -276,6 +283,8 @@ export class SyncService {
             name: league.name,
             level: league.level,
             countryId: league.countryId,
+            countryName: league.countryName,
+            isWomenCompetition: league.isWomenCompetition,
             updatedAt: new Date().toISOString(),
           })
           .onConflictDoUpdate({
@@ -284,6 +293,8 @@ export class SyncService {
               name: league.name,
               level: league.level,
               countryId: league.countryId,
+              countryName: league.countryName,
+              isWomenCompetition: league.isWomenCompetition,
               updatedAt: new Date().toISOString(),
             },
           })
@@ -377,6 +388,8 @@ export class SyncService {
               potentialRating: entry.potential ?? 60,
               age: entry.age,
               birthdate: entry.birthdate,
+              nationalityId: entry.nationalityId,
+              nationality: entry.nationality,
               jersey: entry.jersey,
               contractValidUntil: entry.contractValidUntil,
               form: entry.form,
@@ -399,6 +412,12 @@ export class SyncService {
                 potentialRating: Number(p.potential) || 60,
                 age: p.age ? Number(p.age) : null,
                 birthdate: p.birthdate ? Number(p.birthdate) : null,
+                // The fallback reads bare `players` rows, which do carry the nationality code - it is
+                // the reference table lookups that are missing on this path, so no country name is
+                // available. The code is still the save's own, so it is kept; the name stays null
+                // rather than being guessed here.
+                nationalityId: p.nationality ? Number(p.nationality) : null,
+                nationality: null,
                 // This fallback path reads bare `players` rows, which carry none of the fields that
                 // come from teamplayerlinks / career_playercontract, and no position could be mapped.
                 jersey: null,
@@ -450,6 +469,8 @@ export class SyncService {
           potentialRating: player.potentialRating,
           age: player.age,
           birthdate: player.birthdate,
+          nationalityId: player.nationalityId,
+          nationality: player.nationality,
           jersey: player.jersey,
           contractValidUntil: player.contractValidUntil,
           form: player.form,
@@ -561,6 +582,8 @@ export class SyncService {
             potentialRating: player.potentialRating,
             age: player.age,
             birthdate: player.birthdate,
+            nationalityId: player.nationalityId,
+            nationality: player.nationality,
             jersey: player.jersey,
             contractValidUntil: player.contractValidUntil,
             form: player.form,
@@ -594,6 +617,8 @@ export class SyncService {
               injury: player.injury,
               positionCode: player.positionCode,
               nameSource: player.nameSource,
+              nationalityId: player.nationalityId,
+              nationality: player.nationality,
               hasHighQualityHead: player.hasHighQualityHead,
               headAssetId: player.headAssetId,
               avatarPomId: player.avatarPomId,
@@ -626,6 +651,8 @@ export class SyncService {
             primaryPosition: prospect.primaryPosition,
             age: prospect.age,
             birthdate: prospect.birthdate,
+            nationalityId: prospect.nationalityId,
+            nationality: prospect.nationality,
             overallRating: prospect.overallRating,
             potentialRating: prospect.potentialRating,
             // Ranges, not settled values - see `YouthProspectRow` for why.

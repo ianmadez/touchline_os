@@ -81,7 +81,7 @@ const MIN_READ_MS = 900;
  * `reconcileTourRevision`, which takes this value rather than deriving one, because "worth reshowing"
  * is an editorial call and cannot be computed.
  */
-const TOUR_REVISION = "2026-10-10-restart";
+const TOUR_REVISION = "2026-10-12-tier3";
 
 /**
  * The fewest steps worth showing. A tour that survived filtering down to its tab button alone would
@@ -205,7 +205,12 @@ const TOURS: Record<string, TourStep[]> = {
     {
       anchor: "debrief-history",
       title: "Your debriefs",
-      body: "Every match you have logged so far. Open one to edit it in place, or delete it and write it again.",
+      body: "Every match you have logged so far. Open one to read the whole record back, or delete it and write it again.",
+    },
+    {
+      anchor: "debrief-starred",
+      title: "Keep the memorable ones",
+      body: "Star a match worth remembering and switch this to Memorable to see only those. The star is your opinion of the match, so it never touches the record itself.",
     },
     REPLAY_STEP,
   ],
@@ -295,6 +300,16 @@ const TOURS: Record<string, TourStep[]> = {
       anchor: "finance-contract",
       title: "Contract commitment",
       body: "What you are already on the hook for over the seasons to come, worked out from your squad's own contract end dates. Worth a look before you promise anybody anything.",
+    },
+    {
+      anchor: "finance-ledger",
+      title: "Who came and who went",
+      body: "Every move this club is on one side of, with the fee and the club at the other end. The save only carries a fee where a contract was pre-signed, so anything older is yours to add, and every line says which it is.",
+    },
+    {
+      anchor: "finance-rules",
+      title: "The rules you are playing under",
+      body: "The real regulations for your division, checked against your own figures. Where the save cannot supply the input - a loss figure, a turnover - the rule says so instead of pretending to a verdict.",
     },
     REPLAY_STEP,
   ],
@@ -396,6 +411,11 @@ const TOURS: Record<string, TourStep[]> = {
       anchor: "vault-save-half",
       title: "What the save says",
       body: "Straight from your own file, including seasons that finished before you installed TouchlineOS. Nothing here is estimated.",
+    },
+    {
+      anchor: "vault-h2h",
+      title: "Every meeting with every club",
+      body: "Head-to-head across the whole career, filterable by competition. It is built from your debriefs, because the save records no fixtures of its own, and it says so on the screen.",
     },
   ],
   "SQUAD::SCOUTING": [

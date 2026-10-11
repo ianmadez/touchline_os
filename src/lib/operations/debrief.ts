@@ -1,7 +1,13 @@
 import { CareerService } from "../services/career-service";
 import { SeasonService } from "../services/season-service";
 import { EventService } from "../services/event-service";
+import { CompetitionService } from "../services/competition-service";
+import { mediaAskFor } from "../news/media";
+import { db } from "../db/client";
+import { careerEvents, debriefMarks } from "../db/schema";
+import { and, eq } from "drizzle-orm";
 import { MatchContribution } from "../events/types";
+import { normaliseMatchStats, type MatchStats } from "../events/match-stats";
 import { at, failed, ok, type OperationResult } from "./types";
 
 export interface MatchDebriefPayload {
@@ -34,6 +40,23 @@ export interface MatchDebriefPayload {
    * what the manager said in answer to a prompt. Omitting the field here silently dropped them.
    */
   dynamicPrompts?: Array<{ id?: string; question?: string; answer?: string }>;
+  /**
+   * When our goals went in, in match minutes, and when theirs did.
+   *
+   * Optional, and sparse by design: a goal the manager does not time is simply absent, never stored as
+   * zero. These are what let a report say a match was won late rather than only that it was won.
+   */
+  goalMinutes?: number[] | null;
+  concededMinutes?: number[] | null;
+  /**
+   * What the manager observed after the match: shots, shots inside the box, big chances, possession and
+   * passes completed.
+   *
+   * Stored as entered and nothing else. Expected goals and the finishing figure are worked out on read,
+   * from the shared model in `events/match-stats`, so a tweak to a weight cannot leave a stored figure
+   * contradicting the one the screen now shows.
+   */
+  matchStats?: MatchStats | null;
   /**
    * Where the two clubs stood in the league when they met.
    *
@@ -70,6 +93,34 @@ interface NormalisedDebrief {
   standoutPlayerNames: string[];
   contributions: MatchContribution[];
   dynamicPrompts: Array<{ id: string; question: string; answer: string }>;
+  goalMinutes: number[];
+  concededMinutes: number[];
+  matchStats: MatchStats | null;
+}
+
+/**
+ * The longest a match can run, including stoppage.
+ *
+ * A minute outside this is not a football time, so it is discarded rather than clamped: clamping a
+ * typed 900 into the 130th minute would invent a goal time the manager never gave.
+ */
+const MAX_MATCH_MINUTE = 130;
+
+/**
+ * Match minutes, cleaned.
+ *
+ * Blanks and rubbish are dropped, duplicates collapse, and the list comes back ascending, because a
+ * set of goal times is read in the order the goals happened whatever order they were typed in.
+ */
+function minutesOf(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  const minutes = new Set<number>();
+  for (const entry of value) {
+    const minute = Math.trunc(Number(entry));
+    if (!Number.isFinite(minute) || minute < 1 || minute > MAX_MATCH_MINUTE) continue;
+    minutes.add(minute);
+  }
+  return [...minutes].sort((a, b) => a - b);
 }
 
 /**
@@ -108,7 +159,10 @@ function normaliseDebrief(body: MatchDebriefPayload): NormalisedDebrief {
       answer: prompt.answer.trim(),
     }))
     .filter((prompt) => prompt.question.length > 0 && prompt.answer.length > 0);
-  return { standoutPlayerIds, standoutPlayerNames, contributions, dynamicPrompts };
+  const goalMinutes = minutesOf(body.goalMinutes);
+  const concededMinutes = minutesOf(body.concededMinutes);
+  const matchStats = normaliseMatchStats(body.matchStats);
+  return { standoutPlayerIds, standoutPlayerNames, contributions, dynamicPrompts, goalMinutes, concededMinutes, matchStats };
 }
 
 /**
@@ -137,6 +191,9 @@ function composeDebriefPayload(body: MatchDebriefPayload, normalised: Normalised
     weaknessIdentified: body.weaknessIdentified || "",
     managerReflection: body.managerReflection || "",
     dynamicPrompts: normalised.dynamicPrompts,
+    goalMinutes: normalised.goalMinutes,
+    concededMinutes: normalised.concededMinutes,
+    matchStats: normalised.matchStats,
     result: body.homeScore > body.awayScore ? "WIN" : body.homeScore < body.awayScore ? "LOSS" : "DRAW",
     matchDate: asMatchDate(body.matchDate),
     opponentTeamId: asInt(body.opponentTeamId),
@@ -149,6 +206,71 @@ function composeDebriefPayload(body: MatchDebriefPayload, normalised: Normalised
       ownPoints: asInt(body.leagueSnapshot?.ownPoints),
     },
   });
+}
+
+/**
+ * The debriefs the manager starred.
+ *
+ * Returned as a plain list of event ids, because that is all the screen needs: the debriefs themselves come
+ * from the career hydrate, and a star is a fact about one of them.
+ */
+export async function readDebriefMarks(careerId: string | null): Promise<OperationResult<unknown>> {
+  if (!careerId) return at(400, { success: false, error: "careerId is required." });
+
+  try {
+    const rows = await db
+      .select({ eventId: debriefMarks.eventId })
+      .from(debriefMarks)
+      .where(eq(debriefMarks.careerId, careerId));
+    return ok({ success: true, eventIds: rows.map((row) => row.eventId) });
+  } catch (error) {
+    console.error("[api/debrief-marks] read failed:", error);
+    return failed(500, (error as Error).message ?? "Could not read your starred debriefs.");
+  }
+}
+
+/**
+ * Stars or unstars one debrief.
+ *
+ * A row IS the star, so starring inserts and unstarring deletes. The event id is checked against the spine
+ * first: a star that pointed at nothing would show as a memorable match with no match behind it.
+ */
+export async function setDebriefStar(rawBody: string): Promise<OperationResult<unknown>> {
+  let body: { careerId?: string; eventId?: string; starred?: boolean };
+  try {
+    body = JSON.parse(rawBody) as typeof body;
+  } catch {
+    return at(400, { success: false, error: "Request body must be valid JSON." });
+  }
+
+  const { careerId, eventId, starred } = body;
+  if (!careerId || !eventId || typeof starred !== "boolean") {
+    return at(400, { success: false, error: "careerId, eventId and starred are required." });
+  }
+
+  try {
+    if (starred) {
+      const found = await db
+        .select({ id: careerEvents.id })
+        .from(careerEvents)
+        .where(and(eq(careerEvents.id, eventId), eq(careerEvents.careerId, careerId)));
+      if (found.length === 0) {
+        return at(404, { success: false, error: "That debrief no longer exists." });
+      }
+      await db
+        .insert(debriefMarks)
+        .values({ id: `${careerId}_${eventId}`, careerId, eventId, createdAt: new Date().toISOString() })
+        .onConflictDoNothing();
+    } else {
+      await db
+        .delete(debriefMarks)
+        .where(and(eq(debriefMarks.careerId, careerId), eq(debriefMarks.eventId, eventId)));
+    }
+    return ok({ success: true, eventId, starred });
+  } catch (error) {
+    console.error("[api/debrief-marks] write failed:", error);
+    return failed(500, (error as Error).message ?? "Could not change that star.");
+  }
 }
 
 /**
@@ -178,7 +300,8 @@ export async function logMatchDebrief(rawBody: string): Promise<OperationResult<
     }
 
     const eventId = `evt_debrief_${crypto.randomUUID()}`;
-    const payloadJson = composeDebriefPayload(body, normaliseDebrief(body));
+    const normalised = normaliseDebrief(body);
+    const payloadJson = composeDebriefPayload(body, normalised);
 
     await new EventService().appendEvent({
       id: eventId,
@@ -197,9 +320,36 @@ export async function logMatchDebrief(rawBody: string): Promise<OperationResult<
     const careerService = new CareerService();
     const updatedPayload = await careerService.hydrate(body.careerId);
 
+    // Whether the press room comes looking, worked out here rather than in the screen: the trigger is a
+    // property of the match, and the screen has no business deciding what is newsworthy. The prompt is
+    // only offered when the answer is yes, and both the answer and the reason are returned so the screen
+    // has nothing to guess.
+    //
+    // The context is what makes the QUESTION worth asking. A reporter in a room asks about the scorers, the
+    // competition and the minute it turned, so all three are passed in: without them the prompt can only
+    // ever be a generic one, which is how the first version ended up reading like a notification.
+    const pressContext = await new CompetitionService().getContext(body.careerId);
+    const media = mediaAskFor(eventId, {
+      opponent: body.opponent,
+      ourScore: body.homeScore,
+      theirScore: body.awayScore,
+      goalMinutes: normalised.goalMinutes,
+      concededMinutes: normalised.concededMinutes,
+      competition: typeof body.competition === "string" ? body.competition : null,
+      venue: typeof body.venue === "string" ? body.venue : null,
+      scorers: (body.contributions ?? [])
+        .filter((entry) => (entry.goals ?? 0) > 0)
+        .sort((left, right) => (right.goals ?? 0) - (left.goals ?? 0))
+        .map((entry) => entry.playerName),
+      clubName: updatedPayload?.clubName ?? undefined,
+      countryId: pressContext?.countryId ?? null,
+    });
+
     return ok({
       success: true,
       message: "Match debrief logged successfully.",
+      eventId,
+      media,
       ...updatedPayload,
     });
   } catch (error) {

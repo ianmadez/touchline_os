@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/icons";
 import { ShortlistPanel } from "@/components/ui/squad/scouting-board";
 import { AttributeBars } from "@/components/ui/squad/attribute-bars";
+import { NationFlag } from "@/components/ui/squad/nation-flag";
 
 import { apiFetch } from "@/lib/platform/api-client";
 /**
@@ -779,6 +780,14 @@ function DossierPanel({
           {dossier.heightCm !== null && (
             <span className="font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 tabular-nums">
               {dossier.heightCm} cm
+            </span>
+          )}
+          {dossier.nationality && (
+            <span className="flex items-center gap-1.5">
+              <NationFlag nationId={dossier.nationalityId} name={dossier.nationality} height={11} />
+              <span className="font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                {dossier.nationality}
+              </span>
             </span>
           )}
         </div>

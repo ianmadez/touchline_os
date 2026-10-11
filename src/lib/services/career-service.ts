@@ -133,9 +133,6 @@ export interface CareerHydrationPayload extends CareerSummary {
 export interface LeagueTeamSummary {
   teamId: number;
   name: string;
-  /** Null when the save states no position for this club. Never guessed. */
-  tablePosition: number | null;
-  previousYearPosition: number | null;
   /** The save's opaque result code string, e.g. "22111". */
   form: string | null;
   isOwnClub: boolean;
@@ -246,16 +243,13 @@ export class CareerService {
         .map((row) => ({
           teamId: row.teamId,
           name: row.name,
-          tablePosition: row.tablePosition,
-          previousYearPosition: row.previousYearPosition,
           form: row.form,
           isOwnClub: row.isOwnClub,
         }))
+        // By name only. The save also stores a placing per club, but it is not a table the app can
+        // stand behind: see the note at the top of `@/lib/ui/opponent-list`.
         .sort((a, b) => {
           if (a.isOwnClub !== b.isOwnClub) return a.isOwnClub ? -1 : 1;
-          const aPos = a.tablePosition ?? Number.MAX_SAFE_INTEGER;
-          const bPos = b.tablePosition ?? Number.MAX_SAFE_INTEGER;
-          if (aPos !== bPos) return aPos - bPos;
           return a.name.localeCompare(b.name);
         }),
       onboarding: onboardingRow

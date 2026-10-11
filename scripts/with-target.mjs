@@ -11,7 +11,7 @@
  *
  * The parser's reference data is NOT staged any more: it is committed in `public/parse-resources/`,
  * so a fresh clone builds a complete browser app with nothing else present. This script only checks
- * that those two files are there, and fails the build if they are not - a missing one used to be a
+ * that those three files are there, and fails the build if they are not - a missing one used to be a
  * silent degradation to unresolved player names, which is exactly the sort of quiet breakage a
  * release build should refuse.
  *
@@ -47,14 +47,14 @@ function stageBrowserAssets() {
   console.log(wasm ? "staged sql-wasm.wasm" : "sql-wasm.wasm not found in node_modules/sql.js");
 
   const referenceData = path.join(publicDir, "parse-resources");
-  const missing = ["fifa_ng_db-meta.xml", "playernames_fc26.csv"].filter(
+  const missing = ["fifa_ng_db-meta.xml", "playernames_fc26.csv", "nations_fc26.csv"].filter(
     (file) => !fs.existsSync(path.join(referenceData, file))
   );
   if (missing.length > 0) {
     console.error(
       `Refusing to build the browser target: public/parse-resources is missing ${missing.join(", ")}. ` +
-        "Without them every table and field decodes as unknown and every player renders as #<id>. " +
-        "See public/parse-resources/README.md."
+        "Without them every table and field decodes as unknown, every player renders as #<id>, and " +
+        "no player has a nationality. See public/parse-resources/README.md."
     );
     process.exit(1);
   }

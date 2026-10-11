@@ -615,7 +615,10 @@ export function reconcileTourRevision(revision: string): void {
 
 const OPPONENT_SORT_KEY = "touchline.opponent.sort.v1";
 
-/** A to Z, because that is what a fixture list is read as. */
+/**
+ * A to Z, because a division can only be listed reliably by name: the save's own placings are stale
+ * for some clubs and points are zeroed, so a table order cannot be taken from it faithfully.
+ */
 export const OPPONENT_SORT_DEFAULT: OpponentSortOrder = "A-Z";
 
 function isOpponentSortOrder(value: unknown): value is OpponentSortOrder {

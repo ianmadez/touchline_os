@@ -30,7 +30,19 @@ import { deleteTargetBlock, readTargetBlocks, saveTargetBlock } from "../operati
 import { readSeasonDossier } from "../operations/season-dossier";
 import { readSeasonState, recordSeason } from "../operations/season";
 import { patchSettings, readSettings } from "../operations/settings";
-import { readYouthAcademy } from "../operations/youth";
+import { readTrophyCabinet, recordTrophyWin, removeTrophyWin } from "../operations/trophies";
+import {
+  dismissNewsItem,
+  markNewsRead,
+  readNews,
+  recordMediaComment,
+  saveNewsItem,
+} from "../operations/news";
+import { readCompetitions } from "../operations/competitions";
+import { readHeadToHead } from "../operations/head-to-head";
+import { addTransferEntry, nameTransferCounterparty, readTransferLedger, removeTransferEntry } from "../operations/transfer-ledger";
+import { readFinanceRules } from "../operations/finance-rules";
+import { readDebriefMarks, setDebriefStar } from "../operations/debrief";import { readYouthAcademy } from "../operations/youth";
 import type { OperationResult } from "../operations/types";
 import type { ApiFetch } from "./api-client";
 
@@ -210,6 +222,62 @@ async function dispatch(call: Call): Promise<OperationResult<unknown>> {
 
     case "GET /api/youth":
       return readYouthAcademy(params.get("careerId"));
+
+    case "GET /api/news":
+      return readNews(params.get("careerId"));
+    case "PUT /api/news": {
+      const parsed = body(call);
+      return parsed.failure ?? saveNewsItem(call.raw ?? "");
+    }
+    case "POST /api/news": {
+      const parsed = body(call);
+      return parsed.failure ?? markNewsRead(call.raw ?? "");
+    }
+    case "DELETE /api/news":
+      return dismissNewsItem(params.get("careerId"), params.get("id"));
+
+    case "POST /api/media-comment": {
+      const parsed = body(call);
+      return parsed.failure ?? recordMediaComment(call.raw ?? "");
+    }
+
+    case "GET /api/competitions":
+      return readCompetitions(params.get("careerId"));
+
+    case "GET /api/h2h":
+      return readHeadToHead(params.get("careerId"));
+
+    case "GET /api/transfer-ledger":
+      return readTransferLedger(params.get("careerId"));
+    case "POST /api/transfer-ledger": {
+      const parsed = body(call);
+      return parsed.failure ?? addTransferEntry(call.raw ?? "");
+    }
+    case "PUT /api/transfer-ledger": {
+      const parsed = body(call);
+      return parsed.failure ?? nameTransferCounterparty(call.raw ?? "");
+    }
+    case "DELETE /api/transfer-ledger":
+      return removeTransferEntry(params.get("careerId"), params.get("id"));
+
+    case "GET /api/finance-rules":
+      return readFinanceRules(params.get("careerId"));
+
+    case "GET /api/debrief-marks":
+      return readDebriefMarks(params.get("careerId"));
+    case "PUT /api/debrief-marks": {
+      const parsed = body(call);
+      return parsed.failure ?? setDebriefStar(call.raw ?? "");
+    }
+
+    case "GET /api/trophies":
+      return readTrophyCabinet(params.get("careerId"));
+    case "PUT /api/trophies": {
+      const parsed = body(call);
+      return parsed.failure ?? recordTrophyWin(call.raw ?? "");
+    }
+    case "DELETE /api/trophies":
+      return removeTrophyWin(params);
 
     default:
       // Loud rather than silent: a URL that reaches here is a call the browser build cannot answer,

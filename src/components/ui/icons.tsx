@@ -181,6 +181,32 @@ export function IconPlus(props: IconProps) {
   );
 }
 
+/**
+ * An arrow into a tray — a player arriving at the club.
+ *
+ * The ledger's direction used to be the words SIGNED and SOLD on every row, which meant a list of deals read
+ * as a wall of text. A pair of opposed arrows carries the same thing at a glance and leaves the words to the
+ * part that differs from row to row, which is WHO the deal was with.
+ */
+export function IconArrowIn(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 3v11M8 10l4 4 4-4" />
+      <path d="M4 18v1a2 2 0 002 2h12a2 2 0 002-2v-1" />
+    </Svg>
+  );
+}
+
+/** An arrow out of a tray — a player leaving the club. The mirror of `IconArrowIn`. */
+export function IconArrowOut(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 14V3M8 7l4-4 4 4" />
+      <path d="M4 18v1a2 2 0 002 2h12a2 2 0 002-2v-1" />
+    </Svg>
+  );
+}
+
 /** A bin — destructive affordance. */
 export function IconTrash(props: IconProps) {
   return (

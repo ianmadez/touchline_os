@@ -20,6 +20,7 @@ const EVENT_LABELS: Record<string, string> = {
   FINANCE_CHANGED: "Budget change",
   SQUAD_SIZE_CHANGED: "Squad size change",
   MATCH_DEBRIEF: "Match debrief",
+  MEDIA_COMMENT: "Media comment",
   SEASON_ENDED: "Season finished",
   STORYLINE_OPENED: "Storyline opened",
   STORYLINE_RESOLVED: "Storyline resolved",

@@ -22,6 +22,12 @@ const inFlight = new Map<number, Promise<string | null>>();
  *
  * A newgen and a CDN miss both come back as no bytes, and both mean the same thing here: render the
  * initials disc. `fetchSprite` refuses a newgen before it makes a request at all.
+ *
+ * The cache write is BEST EFFORT, and that ordering is deliberate. It used to be awaited before the
+ * bytes were returned, so a browser that refuses the write - a private window, a full quota, an
+ * implementation without `createWritable` - threw the bytes away and the player kept his initials
+ * even though the sprite had been fetched successfully. A cache is an optimisation; it must never be
+ * able to cost the thing it is caching.
  */
 async function fetchAndCache(eaPlayerId: number): Promise<Uint8Array<ArrayBuffer> | null> {
   const sprite = await fetchSprite(eaPlayerId);
@@ -30,7 +36,11 @@ async function fetchAndCache(eaPlayerId: number): Promise<Uint8Array<ArrayBuffer
   // `Uint8Array.from` narrows to `Uint8Array<ArrayBuffer>`, which both the cache write and the Blob
   // require: a bare `Uint8Array` is `Uint8Array<ArrayBufferLike>` and neither accepts that.
   const bytes = Uint8Array.from(sprite.bytes);
-  await writeCachedFace(eaPlayerId, bytes);
+  try {
+    await writeCachedFace(eaPlayerId, bytes);
+  } catch {
+    // Nothing to report to the caller: the face is in hand either way.
+  }
   return bytes;
 }
 
@@ -61,6 +71,13 @@ async function resolveFace(eaPlayerId: number): Promise<string | null> {
 /**
  * A blob URL for one player's face, or null when there is no face to show.
  *
+ * NULL IS THE ONLY FAILURE MODE, and nothing may reject out of here. That is not defensive habit: the
+ * component that calls this sets its state in a `.then`, so an exception anywhere on this path left
+ * the promise rejected with nobody listening - an unhandled rejection in the console and a player
+ * stuck on initials forever, with nothing on screen to explain it. A count of the squad table and a
+ * count of initials should never disagree without a reason in the log, so a failure that is not "no
+ * face exists" is reported before it is swallowed.
+ *
  * Concurrent callers share a single lookup. A squad table and the player drawer can render the same
  * player in the same tick, and without this both would miss the cache and both would fetch the same
  * sprite. The entry is dropped as soon as it settles, so a later visit goes back to the cache instead
@@ -75,7 +92,12 @@ export async function faceImageUrl(eaPlayerId: number): Promise<string | null> {
   const pending = inFlight.get(eaPlayerId);
   if (pending) return pending;
 
-  const promise = resolveFace(eaPlayerId).finally(() => inFlight.delete(eaPlayerId));
+  const promise = resolveFace(eaPlayerId)
+    .catch((error: unknown) => {
+      console.warn(`[face] ${eaPlayerId} could not be resolved:`, error);
+      return null;
+    })
+    .finally(() => inFlight.delete(eaPlayerId));
   inFlight.set(eaPlayerId, promise);
   return promise;
 }

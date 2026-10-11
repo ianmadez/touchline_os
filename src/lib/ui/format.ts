@@ -12,15 +12,19 @@ function compact(value: number): string {
 }
 
 export function formatMoney(value: number, symbol = "£"): string {
-  const absolute = Math.abs(value);
-  if (absolute >= 1_000_000) return `${symbol}${compact(value / 1_000_000)}M`;
-  if (absolute >= 1_000) return `${symbol}${Math.round(value / 1_000)}k`;
-  return `${symbol}${Math.round(value)}`;
+  // The sign goes BEFORE the symbol: "-£1.3M" reads as a negative amount, where "£-1.3M" reads as a
+  // typo. It matters here because a net spend is routinely negative.
+  const sign = value < 0 ? "-" : "";
+  const amount = Math.abs(value);
+  if (amount >= 1_000_000) return `${sign}${symbol}${compact(amount / 1_000_000)}M`;
+  if (amount >= 1_000) return `${sign}${symbol}${Math.round(amount / 1_000)}k`;
+  return `${sign}${symbol}${Math.round(amount)}`;
 }
 
 /** The full, unrounded figure - for a tooltip where precision is wanted on demand. */
 export function formatMoneyExact(value: number, symbol = "£"): string {
-  return `${symbol}${Math.round(value).toLocaleString()}`;
+  const sign = value < 0 ? "-" : "";
+  return `${sign}${symbol}${Math.round(Math.abs(value)).toLocaleString()}`;
 }
 
 /**

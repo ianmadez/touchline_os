@@ -1,35 +1,28 @@
 /**
- * Ordering and labelling for the club pickers.
+ * Ordering for the club pickers.
  *
  * Two pickers offer the manager's own division: the single Match Debrief and the Group Debrief. They
  * have to offer the same clubs in the same order, so both call this file rather than each keeping its
  * own rule and slowly disagreeing.
  *
- * A placing is only ever the save's own `currenttableposition`. It is sparse: some clubs carry no
- * position at all and a few share one. A club the save says nothing about therefore shows no number,
- * and the placing sort settles those clubs by name rather than inventing an order for them.
+ * A league position is deliberately not offered here, and not shown beside a club name either.
+ *
+ * The save does carry a placing per club on `leagueteamlinks`, but it is not a real table. Measured on
+ * one career of 24 clubs it produced only 19 distinct places: 4th, 8th, 15th, 18th and 20th each held
+ * by two clubs, while 12th, 16th, 17th, 19th and 23rd were never used. The other columns that would
+ * let a table be recomputed, points and results, are zeroed by the save for the manager's division.
+ * The placing is therefore a stale value the game refreshes only for some clubs, and printing it would
+ * be a guess dressed as a fact. The list is ordered by name instead.
  */
 import type { LeagueTeamSummary } from "@/lib/services/career-service";
-import { ordinal } from "@/lib/ui/format";
 
 /** How the opponent list is ordered. `A-Z` is the default. */
-export type OpponentSortOrder = "A-Z" | "Z-A" | "POSITION";
+export type OpponentSortOrder = "A-Z" | "Z-A";
 
 export const OPPONENT_SORT_ORDERS: ReadonlyArray<{ id: OpponentSortOrder; label: string }> = [
   { id: "A-Z", label: "A to Z" },
   { id: "Z-A", label: "Z to A" },
-  { id: "POSITION", label: "League position" },
 ];
-
-/**
- * The save's placing for a club, or null when it states none.
- *
- * 0 is the value the save writes while a season is still running, so it counts as no placing. A club
- * is never given a number it did not come with.
- */
-export function placingOf(team: LeagueTeamSummary): number | null {
-  return team.tablePosition !== null && team.tablePosition > 0 ? team.tablePosition : null;
-}
 
 /**
  * The division in the requested order.
@@ -42,19 +35,7 @@ export function orderTeams(
   order: OpponentSortOrder
 ): LeagueTeamSummary[] {
   return teams.slice().sort((a, b) => {
-    if (order === "POSITION") {
-      const aPlacing = placingOf(a) ?? Number.MAX_SAFE_INTEGER;
-      const bPlacing = placingOf(b) ?? Number.MAX_SAFE_INTEGER;
-      if (aPlacing !== bPlacing) return aPlacing - bPlacing;
-      return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
-    }
     const compared = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
     return order === "Z-A" ? -compared : compared;
   });
-}
-
-/** "Wigan Athletic 12th", or just the club name when the save states no placing. */
-export function teamOptionLabel(team: LeagueTeamSummary): string {
-  const placing = placingOf(team);
-  return placing === null ? team.name : `${team.name} ${ordinal(placing)}`;
 }

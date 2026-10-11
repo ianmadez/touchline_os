@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/icons";
 
 import { apiFetch } from "@/lib/platform/api-client";
+import { FinanceRulesPanel, TransferLedgerPanel } from "./money-panels";
 /**
  * The Finances screen.
  *
@@ -269,6 +270,10 @@ export function FinanceView({ careerId }: { careerId: string | null }) {
           </>
         )}
       </section>
+
+      <TransferLedgerPanel careerId={careerId} symbol={symbol} />
+
+      <FinanceRulesPanel careerId={careerId} symbol={symbol} />
 
       <div className="space-y-2 rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90">
         <ProvenanceRow

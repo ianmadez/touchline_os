@@ -223,6 +223,9 @@ export interface ScoutDossier {
   potentialRating: number | null;
   age: number | null;
   heightCm: number | null;
+  /** The save's own nationality code, and the country name our reference table gives it. */
+  nationalityId: number | null;
+  nationality: string | null;
   weakFoot: number | null;
   skillMoves: number | null;
   preferredFoot: number | null;
@@ -707,6 +710,8 @@ export class ScoutingSearchService {
       potentialRating: row.potentialRating,
       age: row.age,
       heightCm: row.heightCm,
+      nationalityId: row.nationalityId,
+      nationality: row.nationality,
       weakFoot: row.weakFoot,
       skillMoves: row.skillMoves,
       preferredFoot: row.preferredFoot,

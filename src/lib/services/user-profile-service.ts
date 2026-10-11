@@ -11,6 +11,17 @@ export interface SetPlayerProfileInput {
   userNotes?: string;
   /** Manual position override. `null` clears it; `undefined` leaves it untouched. */
   primaryPosition?: string | null;
+  /**
+   * The day the player is expected back. `null` clears the injury, `undefined` leaves it alone.
+   *
+   * Reported rather than derived, and the date is what makes it expire on its own: the save's own `injury`
+   * column reads 0 for every player, so there is nothing to read and nothing honest to infer.
+   */
+  injuryUntil?: string | null;
+  /** What the injury is, in the manager's words. */
+  injuryNote?: string | null;
+  /** The save's own in-game date when he filed it, which is the report's dateline. */
+  injuryReportedOn?: string | null;
 }
 
 /**
@@ -58,6 +69,10 @@ export class UserProfileService {
           userNotes: input.userNotes !== undefined ? input.userNotes : existing.userNotes,
           primaryPosition:
             input.primaryPosition !== undefined ? input.primaryPosition : existing.primaryPosition,
+          injuryUntil: input.injuryUntil !== undefined ? input.injuryUntil : existing.injuryUntil,
+          injuryNote: input.injuryNote !== undefined ? input.injuryNote : existing.injuryNote,
+          injuryReportedOn:
+            input.injuryReportedOn !== undefined ? input.injuryReportedOn : existing.injuryReportedOn,
           updatedAt: new Date().toISOString(),
         })
         .where(eq(playerUserProfiles.id, existing.id));
@@ -72,6 +87,9 @@ export class UserProfileService {
         trustSource: managerOwnsTrust ? "USER" : null,
         userNotes: input.userNotes,
         primaryPosition: input.primaryPosition,
+        injuryUntil: input.injuryUntil ?? null,
+        injuryNote: input.injuryNote ?? null,
+        injuryReportedOn: input.injuryReportedOn ?? null,
         provenance: "USER",
       });
     }
