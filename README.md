@@ -4,12 +4,24 @@ A local-first companion app for EA SPORTS FC Career Mode. It automatically reads
 
 ## Compatibility
 
+Every title below is read by the same parser. What differs between them is the **datasheet**: the game's own `fifa_ng_db-meta.xml`, which maps the four-character ids inside a save (`zgrE`, `biWl`) to real table and field names. A save is identified from its own table directory and read with the datasheet that explains it, so adding a title means shipping its datasheet rather than writing a new parser. Datasheet provenance and licensing are recorded in [`public/parse-resources/README.md`](public/parse-resources/README.md).
+
+`Status` distinguishes two different claims, and they are not interchangeable. **Verified** means a career the game itself wrote has been read end to end. **Reader verified** means the layout and the datasheet have been exercised against a save built to that game's format, which proves the reader and not the game. No real FIFA 17 to 21 save has been tested here yet.
+
 | Game Version | Save Parsing | Browser Support | Status |
 |---|---|---|---|
-| Older FIFA Games | FIFA 17 onwards, credit to [sammygriffiths](https://github.com/sammygriffiths/fifa-career-save-parser) | | |
-| EA FC 25 | Native (classic16) | Chrome / Edge / Brave / Firefox | Full Support |
-| EA FC 26 | Native (classic16) | Chrome / Edge / Brave / Firefox | Full Support |
-| EA FC 27 | Native (compact9) | Chrome / Edge / Brave / Firefox | Upcoming Support |
+| FIFA 17 | Own datasheet, classic 16-byte descriptors | Chrome / Edge / Brave / Firefox | Reader verified. Transfer ledger unavailable, FIFA 17 records no agreed transfers. |
+| FIFA 18 | Own datasheet, classic 16-byte descriptors | Chrome / Edge / Brave / Firefox | Reader verified. No real save tested yet. |
+| FIFA 19 | Own datasheet, classic 16-byte descriptors | Chrome / Edge / Brave / Firefox | Reader verified. No real save tested yet. |
+| FIFA 20 | Own datasheet, classic 16-byte descriptors | Chrome / Edge / Brave / Firefox | Reader verified. No real save tested yet. |
+| FIFA 21 | Own datasheet, classic 16-byte descriptors | Chrome / Edge / Brave / Firefox | Reader verified. No real save tested yet. |
+| EA SPORTS FC 25 | FC datasheet, classic 16-byte descriptors | Chrome / Edge / Brave / Firefox | Verified |
+| EA SPORTS FC 26 | FC datasheet, classic 16-byte descriptors | Chrome / Edge / Brave / Firefox | Verified |
+| EA SPORTS FC 27 | FC datasheet, compact 9-byte descriptors | Chrome / Edge / Brave / Firefox | Verified |
+
+The browser build reads exactly the same formats in all four browsers, because it runs the same parser and fetches the datasheets it needs. The one difference between browsers is not the format but **acquiring the file**: Chrome, Edge and Brave can remember the save you picked, while Firefox and Safari cannot keep a file handle at all, so those browsers ask again on each visit unless you run the optional local bridge. See `docs/post-deploy-checklist.md`.
+
+FIFA 16 and earlier are deliberately **not** supported. Their career saves are not `fifa_ng_db` databases, so there is no datasheet to ship and no folder to scan: reading them would mean reverse engineering a bespoke serialisation, and no public research to build on. Credits for the FIFA 17 to 21 datasheets: [sammygriffiths/fifa-career-save-parser](https://github.com/sammygriffiths/fifa-career-save-parser) (ISC).
 
 <img width="1917" height="935" alt="image" src="https://github.com/user-attachments/assets/055151fc-34f9-4c72-acd9-53feb5e822e8" />
 
@@ -127,7 +139,7 @@ SQLite (Drizzle ORM)              Deterministic Evaluators
 - **Frontend:** Next.js / React, Tailwind
 - **Backend:** local Node service, Next API routes
 - **Database:** SQLite via Drizzle ORM
-- **Save parsing:** a dedicated EA SPORTS FC save-format decoder, verified against the format's own schema metadata. FC 25 and FC 26 saves use the classic 16-byte descriptor layout, and FC 27 saves use the compact 9-byte layout.
+- **Save parsing:** a dedicated EA football save-format decoder, driven by each game's own `fifa_ng_db-meta.xml` datasheet. FIFA 17 to FC 26 saves use the classic 16-byte descriptor layout and FC 27 saves use the compact 9-byte layout; the game is identified from the save's own table directory before any field is decoded, so a save cannot be read with the wrong game's schema. `npm run meta:index` regenerates the identification index from the datasheets.
 
 ---
 

@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { SaveCandidate } from "@/lib/parser/interface";
+import { SUPPORT_LINE } from "@/lib/ui/compatibility";
 import type { BridgeState, SaveSourceMode } from "@/lib/platform/types";
 import { saveEmptyLabel, saveRefreshLabel, saveScanningLabel } from "@/lib/ui/save-source-copy";
 import { FORMATIONS_REGISTRY, FormationDefinition } from "@/lib/tactics/formations";
@@ -19,6 +20,11 @@ const SAVE_FOLDERS = [
   { game: "EA SPORTS FC 27", path: "%LOCALAPPDATA%\\EA SPORTS FC 27\\settings" },
   { game: "EA SPORTS FC 26", path: "%LOCALAPPDATA%\\EA SPORTS FC 26\\settings" },
   { game: "EA SPORTS FC 25", path: "%LOCALAPPDATA%\\EA SPORTS FC 25\\settings" },
+  { game: "FIFA 21", path: "%USERPROFILE%\\Documents\\FIFA 21" },
+  { game: "FIFA 20", path: "%USERPROFILE%\\Documents\\FIFA 20" },
+  { game: "FIFA 19", path: "%USERPROFILE%\\Documents\\FIFA 19" },
+  { game: "FIFA 18", path: "%USERPROFILE%\\Documents\\FIFA 18" },
+  { game: "FIFA 17", path: "%USERPROFILE%\\Documents\\FIFA 17" },
 ];
 
 /**
@@ -337,20 +343,19 @@ export function OnboardingWizard({
                   savesUnavailableReason
                 ) : saveSourceMode === "picker" ? (
                   <>
-                    Upload your local EA FC save file (ManagerCareer... or Career202X...). Fully
-                    compatible with FC 25, FC 26, and working on FC 27 compatibility.
+                    Upload your local save file (ManagerCareer..., Career202X..., or an older FIFA one).{" "}
+                    {SUPPORT_LINE}
                   </>
                 ) : saveSourceMode === "bridge" ? (
                   <>
                     TouchlineOS is reading your save from the local bridge you set up, so there is
-                    nothing to pick. Fully compatible with FC 25, FC 26, and working on FC 27
-                    compatibility.
+                    nothing to pick. {SUPPORT_LINE}
                   </>
                 ) : (
                   <>
-                    TouchlineOS reads manager careers from your EA SPORTS FC settings folders and from{" "}
-                    <code className="font-mono text-slate-900 dark:text-slate-100">data/saves/</code>.
-                    Fully compatible with FC 25, FC 26, and working on FC 27 compatibility.
+                    TouchlineOS reads manager careers from your EA football settings folders and from{" "}
+                    <code className="font-mono text-slate-900 dark:text-slate-100">data/saves/</code>.{" "}
+                    {SUPPORT_LINE}
                   </>
                 )}
               </p>

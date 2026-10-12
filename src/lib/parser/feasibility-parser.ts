@@ -163,11 +163,27 @@ export const DECODED_TABLES = [
   ...HISTORY_TABLES,
 ];
 
-const DATE_SOURCES: [string, string][] = [
-  ["persistent_events", "eventdate"],
-  ["career_playermatchratinghistory", "date"],
-  ["career_presignedcontract", "signeddate"],
-  ["career_playercontract", "last_status_change_date"],
+/**
+ * Tables whose newest row dates the save, and the field name(s) that carry it.
+ *
+ * A LIST OF NAMES, NOT ONE NAME, because EA renamed this field and changed its id: FC-era saves
+ * record `career_playercontract.last_status_change_date` (id `EBrh`) and FIFA 18 records
+ * `career_playercontract.contract_status_change_date` (id `nzON`). With one name hardcoded, a FIFA 18
+ * save yielded NO date at all, and the in-game date fell back to `2025 + seasonCount` on 31 December,
+ * which is a guess that then becomes the reference for every player's age. The fallback is silent, so
+ * the only symptom is a career whose year and ages are quietly wrong.
+ *
+ * Only the contract table needs this: the other three names are the same in every datasheet that has
+ * the table. Order matters, so the name the app has always used is tried first.
+ */
+const DATE_SOURCES: { table: string; fields: readonly string[] }[] = [
+  { table: "persistent_events", fields: ["eventdate"] },
+  { table: "career_playermatchratinghistory", fields: ["date"] },
+  { table: "career_presignedcontract", fields: ["signeddate"] },
+  {
+    table: "career_playercontract",
+    fields: ["last_status_change_date", "contract_status_change_date"],
+  },
 ];
 
 export class ByteReader {
@@ -543,6 +559,54 @@ export function inspectDatabaseBlocks(save: Uint8Array): DatabaseBlock[] {
 /** The blocks alone, for callers that do not care how their directories read. */
 export function unpackDatabases(save: Uint8Array): Uint8Array[] {
   return inspectDatabaseBlocks(save).map((block) => block.bytes);
+}
+
+/**
+ * The header arrangement a block's directory should be read with.
+ *
+ * Deliberately the same choice `readTableHeaders` makes, then the same fallback: a scored directory
+ * first, and `directoryShape` when nothing scores because the offsets point into record data. Reading
+ * a block's directory with a different arrangement from the one the reader uses would identify a save
+ * against ids that appear nowhere in the file.
+ */
+function directoryVariant(block: Uint8Array): (typeof DB_HEADER_VARIANTS)[number] {
+  for (const variant of DB_HEADER_VARIANTS) {
+    if (scoreDbHeaderVariant(block, variant) > 0) return variant;
+  }
+  for (const variant of DB_HEADER_VARIANTS) {
+    if (directoryShape(block, variant).shaped) return variant;
+  }
+  return DB_HEADER_VARIANTS[0];
+}
+
+/**
+ * Every table id a save declares, read WITHOUT any datasheet.
+ *
+ * This is what identifies which game wrote a save. A datasheet turns `zgrE` into
+ * `career_managerhistory`, but reading the four-character ids out of the directory needs no datasheet
+ * at all, so the list can be produced before one has been chosen - which is the order the choice has
+ * to happen in.
+ *
+ * Only real saves are read this way, so it stays cheap: the directory is a run of 8-byte entries and
+ * nothing else in the file is touched, in particular no record is decoded and no table is located.
+ * The ids are unioned across every block, because a career save carries more than one database and the
+ * game is identified by the whole set.
+ */
+export function listSaveTableIds(save: Uint8Array): string[] {
+  const ids = new Set<string>();
+  for (const block of inspectDatabaseBlocks(save)) {
+    const variant = directoryVariant(block.bytes);
+    const declared = readUInt32LE(block.bytes, variant.countAt);
+    if (declared <= 0 || declared > MAX_TABLE_COUNT) continue;
+    for (let index = 0; index < declared; index++) {
+      const at = variant.dirAt + index * 8;
+      if (at + 8 > block.bytes.length) break;
+      const id = block.bytes.subarray(at, at + 4);
+      if (!isPrintableId(id)) continue;
+      ids.add(latin1Text(id));
+    }
+  }
+  return [...ids];
 }
 
 interface FieldDescriptor {
@@ -2094,6 +2158,8 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     nameTableSource: string | null;
     nationTableCsv: string | null;
     nationTableSource: string | null;
+    /** The game the caller identified, or null to infer it from the save's own layout. */
+    gameVersion: GameVersion | null;
     rowLimit: number;
     allTables: boolean;
     sampleRows: number;
@@ -2114,6 +2180,9 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       nameTableSource: options.nameTableSource ?? null,
       nationTableCsv: options.nationTableCsv ?? null,
       nationTableSource: options.nationTableSource ?? null,
+      // Null means "work it out from the layout". See the report's own comment for why the datasheet
+      // wins when the caller supplies one.
+      gameVersion: options.gameVersion ?? null,
       rowLimit: options.rowLimit ?? 60,
       allTables: options.allTables ?? false,
       sampleRows: options.sampleRows ?? 3,
@@ -2590,10 +2659,12 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     // derivation, so it must be computed BEFORE the squad sample is built. It used to be derived
     // afterwards, which forced age to fall back to a season-number guess.
     let latestDate = 0;
-    for (const [table, field] of DATE_SOURCES) {
+    for (const { table, fields } of DATE_SOURCES) {
       for (const row of (extractedTables[table] as Row[]) ?? []) {
-        const value = num(row, field);
-        if (value !== null && value > latestDate) latestDate = value;
+        for (const field of fields) {
+          const value = num(row, field);
+          if (value !== null && value > latestDate) latestDate = value;
+        }
       }
     }
 
@@ -3040,15 +3111,22 @@ export class FeasibilitySaveParser implements CareerDataProvider {
     }
 
     const estimatedDate = latestDate > 0 ? asDate(latestDate) : null;
-    // Which title wrote this save, from the two signals that actually differ between titles: FC27
-    // moved its tables to the compact 9-byte descriptor, FC26 CmMgr saves are FBCHUNKS containers,
-    // and an FC25 save is a bare t3db stream. Never inferred from a filename.
+    // Which title wrote this save.
+    //
+    // Two signals, and the DATASHEET the caller loaded comes first. A save read with the FIFA 18
+    // datasheet is a FIFA 18 save, whatever its layout says, because the layout only separates
+    // GENERATIONS: FIFA 17 through FC 27 all write a bare t3db stream with 16-byte descriptors, so
+    // structure alone cannot tell an FC 25 career from a FIFA 18 one. The fallback below is still a
+    // real signal in its own right - FC27 moved its tables to the compact 9-byte descriptor, and FC26
+    // CmMgr saves are FBCHUNKS containers - and it is what runs when no datasheet was identified.
+    // Never inferred from a filename.
     const gameVersion: GameVersion =
-      descriptorLayoutUsage.compact9 > 0 || descriptorLayoutUsage.fc27Long16 > 0
+      this.options.gameVersion ??
+      (descriptorLayoutUsage.compact9 > 0 || descriptorLayoutUsage.fc27Long16 > 0
         ? "FC27"
         : fingerprint.hasFbChunksTag
         ? "FC26"
-        : "FC25";
+        : "FC25");
     fingerprint.descriptorLayout =
       descriptorLayoutUsage.fc27Long16 > 0
         ? "fc27Long16"

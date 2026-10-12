@@ -14,10 +14,19 @@ import fs from "fs";
 import path from "path";
 import {
   FeasibilitySaveParser,
+  listSaveTableIds,
   parseNameTable,
   parseNationTable,
 } from "../parser/feasibility-parser";
-import type { ParseOptions } from "../parser/interface";
+import {
+  META_INDEX_FILE,
+  gameMetaFor,
+  identifyGame,
+  type GameIdentification,
+  type MetaIndex,
+  type MetaSource,
+} from "../parser/game-versions";
+import type { GameVersion, ParseOptions } from "../parser/interface";
 
 export interface ParseResourcePaths {
   /** Explicit override, as the spike script's `--meta` / `--name-table` flags pass. */
@@ -104,4 +113,67 @@ export function createSaveParser(
     ...rest,
     ...loadParseResources({ metaPath, nameTablePath, nationTablePath }),
   });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Which game wrote a save
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * This machine's datasheets and their index, read from the committed reference folder.
+ *
+ * The index is tiny and the datasheets are not, which is why only the index is read up front and a
+ * datasheet is read once the game has been identified. A build that read all six datasheets to work
+ * out which one it needed would spend three megabytes of XML to answer a question ten kilobytes of
+ * table ids can answer.
+ */
+export const nodeMetaSource: MetaSource = {
+  index(): MetaIndex | null {
+    const file = path.join(REFERENCE_DATA_DIR, META_INDEX_FILE);
+    try {
+      if (!fs.existsSync(file)) return null;
+      return JSON.parse(fs.readFileSync(file, "utf8")) as MetaIndex;
+    } catch {
+      return null;
+    }
+  },
+  meta(id: GameVersion): string | null {
+    const file = path.join(REFERENCE_DATA_DIR, gameMetaFor(id).metaFile);
+    try {
+      if (!fs.existsSync(file)) return null;
+      return fs.readFileSync(file, "utf8");
+    } catch {
+      return null;
+    }
+  },
+};
+
+/**
+ * Builds the parser a save needs, by identifying which game wrote it first.
+ *
+ * THIS IS THE ENTRY POINT FOR READING A SAVE, rather than `createSaveParser`, because the datasheet
+ * cannot be chosen until the save has been looked at, and the save is only available here. Every
+ * caller that holds save bytes should use this: a caller that builds a parser without them gets the
+ * default datasheet, which is right for the FC-era games and wrong for anything added since.
+ */
+export async function createSaveParserForSave(
+  bytes: Uint8Array,
+  options: Omit<
+    ParseOptions,
+    "metaXml" | "metaSource" | "nameTableCsv" | "nameTableSource" | "nationTableCsv" | "nationTableSource" | "gameVersion"
+  > &
+    ParseResourcePaths = {}
+): Promise<{ parser: FeasibilitySaveParser; identification: GameIdentification }> {
+  const resources = loadParseResources(options);
+  const identification = await identifyGame(listSaveTableIds(bytes), nodeMetaSource);
+
+  return {
+    parser: new FeasibilitySaveParser({
+      ...options,
+      ...resources,
+      metaXml: identification.metaXml ?? resources.metaXml,
+      gameVersion: identification.descriptor.id,
+    }),
+    identification,
+  };
 }

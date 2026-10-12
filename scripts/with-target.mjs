@@ -47,18 +47,33 @@ function stageBrowserAssets() {
   console.log(wasm ? "staged sql-wasm.wasm" : "sql-wasm.wasm not found in node_modules/sql.js");
 
   const referenceData = path.join(publicDir, "parse-resources");
-  const missing = ["fifa_ng_db-meta.xml", "playernames_fc26.csv", "nations_fc26.csv"].filter(
-    (file) => !fs.existsSync(path.join(referenceData, file))
-  );
+  // The index and the older datasheets are listed here too. A build that shipped without them would
+  // not fail loudly, it would fall back: no index means every save is read with the FC datasheet, so a
+  // FIFA 18 career would decode from the wrong bit offsets and look like a career with odd numbers
+  // rather than like a broken build. This check is the only thing that catches that before a user does.
+  const required = [
+    "fifa_ng_db-meta.xml",
+    "playernames_fc26.csv",
+    "nations_fc26.csv",
+    "meta-index.json",
+    "fifa_ng_db-meta-fifa17.xml",
+    "fifa_ng_db-meta-fifa18.xml",
+    "fifa_ng_db-meta-fifa19.xml",
+    "fifa_ng_db-meta-fifa20.xml",
+    "fifa_ng_db-meta-fifa21.xml",
+  ];
+  const missing = required.filter((file) => !fs.existsSync(path.join(referenceData, file)));
   if (missing.length > 0) {
     console.error(
       `Refusing to build the browser target: public/parse-resources is missing ${missing.join(", ")}. ` +
-        "Without them every table and field decodes as unknown, every player renders as #<id>, and " +
-        "no player has a nationality. See public/parse-resources/README.md."
+        "Without the FC datasheet, name table or nation table every table and field decodes as unknown, " +
+        "every player renders as #<id>, and no player has a nationality. Without meta-index.json or an " +
+        "older datasheet, saves from those games are read with the wrong game's schema. See " +
+        "public/parse-resources/README.md."
     );
     process.exit(1);
   }
-  console.log("reference data present in public/parse-resources");
+  console.log(`reference data present in public/parse-resources (${required.length} files)`);
 }
 
 if (target === "browser") stageBrowserAssets();

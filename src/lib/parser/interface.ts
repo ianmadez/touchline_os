@@ -22,8 +22,22 @@ export interface SaveFact {
 
 export type SaveSlotKind = "manager-career" | "player-career" | "career" | "database" | "unknown";
 
-/** Which EA SPORTS FC title wrote a save, inferred from its container and descriptor layout. */
-export type GameVersion = "FC25" | "FC26" | "FC27";
+/**
+ * Which EA football game wrote a save.
+ *
+ * Two eras share one container format, so these are grouped by generation in `game-versions.ts`:
+ * FIFA 17 to FC 27 all write the same `fifa_ng_db` block with 16-byte descriptors and differ only in
+ * schema, which is why supporting a title means shipping its datasheet.
+ */
+export type GameVersion =
+  | "FC25"
+  | "FC26"
+  | "FC27"
+  | "FIFA17"
+  | "FIFA18"
+  | "FIFA19"
+  | "FIFA20"
+  | "FIFA21";
 
 export interface SaveCandidate {
   id: string;
@@ -550,6 +564,15 @@ export interface ParseOptions {
   nationTableCsv?: string | null;
   /** Where that nation table came from, carried through to the report. */
   nationTableSource?: string | null;
+  /**
+   * The game the caller identified, from the datasheet it loaded for this save.
+   *
+   * This wins over the layout inference, and it has to: the layout only separates GENERATIONS. FIFA 17
+   * through FC 27 all write a bare t3db stream with 16-byte descriptors, so a FIFA 18 career save and
+   * an FC 25 career save are structurally identical, and the datasheet is the only thing that knows
+   * which one it is reading.
+   */
+  gameVersion?: GameVersion | null;
   rowLimit?: number;
   allTables?: boolean;
   sampleRows?: number;

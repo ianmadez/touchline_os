@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { SUPPORT_LINE } from "@/lib/ui/compatibility";
 
 export function Footer() {
   return (
@@ -22,7 +23,7 @@ export function Footer() {
           <span>•</span>
           <span
             className="cursor-help"
-            title="TouchlineOS reads EA SPORTS FC 25 and EA SPORTS FC 26 career saves today. EA SPORTS FC 27 support is in progress and will arrive as a free update."
+            title={SUPPORT_LINE}
           >
             FC 25 and FC 26 saves
           </span>

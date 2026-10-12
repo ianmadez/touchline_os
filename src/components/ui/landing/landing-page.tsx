@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import Image from "next/image";
 import { SaveCandidate } from "@/lib/parser/interface";
+import { SUPPORT_LINE, folderList, supportDetail } from "@/lib/ui/compatibility";
 import type { BridgeState, SaveSourceMode } from "@/lib/platform/types";
 import {
   saveEmptyLabel,
@@ -75,16 +76,15 @@ export function LandingPage({
 
   const faqs = [
     {
-      q: "Which EA SPORTS FC games does TouchlineOS support?",
-      a: "EA SPORTS FC 25 and EA SPORTS FC 26 Manager Career saves are fully supported today. EA SPORTS FC 27 support is in progress and will arrive as a free update.",
-    },
-    {
+      q: "Which EA football games does TouchlineOS support?",
+      a: `${SUPPORT_LINE} ${supportDetail()}`,
+    },    {
       q: "Does TouchlineOS work on PlayStation or Xbox, or PC only?",
-      a: "TouchlineOS parses save files directly from local storage, making save file auto-detection seamless on PC (EA App, Steam, Epic Games). It supports EA SPORTS FC 25 and EA SPORTS FC 26 saves today, with EA SPORTS FC 27 support in progress. Console players can still manually log match debriefs and manage tactical notebooks.",
+      a: `TouchlineOS parses save files directly from local storage, making save file auto-detection seamless on PC (EA App, Steam, Epic Games). ${SUPPORT_LINE} Console players can still manually log match debriefs and manage tactical notebooks.`,
     },
     {
-      q: "Where do I find my EA SPORTS FC save file on my computer?",
-      a: "TouchlineOS auto-detects your save folder on launch. It checks the places EA Sports writes careers to: a settings folder inside your Documents (in the title's own folder, including OneDrive Documents) and the AppData location for your installed title. It looks for EA SPORTS FC 25, EA SPORTS FC 26 and EA SPORTS FC 27 folders, then lists every career save it finds.",
+      q: "Where do I find my save file on my computer?",
+      a: `TouchlineOS auto-detects your save folder on launch. It checks the places EA writes careers to: a settings folder inside your Documents (in the title's own folder, including OneDrive Documents) and the AppData location for your installed title. It looks for ${folderList} folders, then lists every career save it finds. Older FIFA titles keep their careers directly in "Documents/<game name>", and TouchlineOS looks there too.`,
     },
     {
       q: "Do I have to pick my save file every time I visit?",

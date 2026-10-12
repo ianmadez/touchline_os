@@ -11,6 +11,7 @@
  */
 import fs from "fs";
 import path from "path";
+import { GAME_METAS } from "../parser/game-versions";
 import { sha1Hex } from "../parser/sha";
 import { classifySlot, looksLikeSaveFile } from "../parser/save-naming";
 import type { SaveCandidate, SaveSearchLocation } from "../parser/interface";
@@ -18,6 +19,17 @@ import type { SaveSource } from "./types";
 
 const MAX_SCAN_DEPTH = 3;
 const MAX_DIR_ENTRIES = 5000;
+
+/**
+ * The folders older FIFA titles write careers into, taken from the supported-games registry.
+ *
+ * Derived rather than listed, so a game can never be readable by the parser while being unfindable by
+ * the scan. FC-era titles are handled separately above: they nest their careers inside `settings`, and
+ * their folders live in more than one place.
+ */
+const FIFA_SAVE_FOLDERS: string[] = GAME_METAS.filter((meta) => meta.id.startsWith("FIFA")).flatMap(
+  (meta) => (meta.saveFolder ? [meta.saveFolder] : [])
+);
 
 export function searchLocations(): SaveSearchLocation[] {
   const env = process.env;
@@ -40,6 +52,18 @@ export function searchLocations(): SaveSearchLocation[] {
     [path.join(roaming, "EA Sports", "FC 25"), "FC 25 · AppData/Roaming/EA Sports"],
     [path.join(roaming, "EA Sports", "FC 26"), "FC 26 · AppData/Roaming/EA Sports"],
   ];
+
+  // Older FIFA titles keep their careers in the game's own folder under Documents, with NO `settings`
+  // subfolder: FIFA 17 to 21 write `Documents\FIFA 18\Career20180108121239`. FIFA 16 and earlier are
+  // deliberately absent, because their saves are not `fifa_ng_db` databases at all and offering their
+  // folder would offer a file this parser cannot read.
+  for (const folder of FIFA_SAVE_FOLDERS) {
+    candidates.push([path.join(home, "Documents", folder), `${folder} · Documents`]);
+    candidates.push([
+      path.join(home, "OneDrive", "Documents", folder),
+      `${folder} · OneDrive Documents`,
+    ]);
+  }
 
   for (const key of ["OneDrive", "OneDriveCommercial", "OneDriveConsumer"]) {
     const root = env[key];

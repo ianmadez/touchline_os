@@ -14,6 +14,7 @@ import {
   WAGE_FORMATS,
 } from "@/lib/settings-vocabulary";
 import { PLAYSTYLE_DEFINITIONS, PLAYSTYLES } from "@/lib/playstyles";
+import { SUPPORT_LINE, supportDetail } from "@/lib/ui/compatibility";
 import { ThemeMode } from "@/lib/session";
 import {
   countUnseen,
@@ -482,7 +483,7 @@ export function SettingsView({
 
           <Section
             title="Supported saves"
-            description="EA SPORTS FC 25 and EA SPORTS FC 26 Manager Career saves are fully supported. EA SPORTS FC 27 support is in progress."
+            description={`${SUPPORT_LINE} ${supportDetail()}`}
           >
             <p className="font-sans text-xs text-slate-600 dark:text-slate-400">
               Your save is read on this device. Nothing is uploaded to a server, and there is no cloud

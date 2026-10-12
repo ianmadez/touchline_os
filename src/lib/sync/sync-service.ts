@@ -25,7 +25,7 @@ import {
   type WorldPlayerEntry,
 } from "../parser/interface";
 import { assetStore } from "../platform/asset-store";
-import { createSaveParser } from "../platform/parse-resources";
+import { createSaveParserForSave } from "../platform/parse-resources";
 import { saveSource } from "../platform/save-source";
 import { SeasonService } from "../services/season-service";
 import { WorldValueModelService } from "../services/world-value-model";
@@ -123,7 +123,18 @@ export interface SyncResult {
 export const SYNC_PIPELINE_VERSION = "16";
 
 export class SyncService {
-  private parser = createSaveParser();
+  /**
+   * The parser is built PER SAVE, not held as a field.
+   *
+   * Which datasheet a save has to be read with cannot be known until the save has been looked at, and
+   * the bytes only arrive in `syncCandidate`. A parser held here would have to commit to one datasheet
+   * for every save the app ever opens, which is what the app used to do and what made a FIFA 18 career
+   * unreadable: it was decoded with the FC 26 datasheet, so the tables it named confidently were named
+   * wrongly. `createSaveParserForSave` identifies the game from the save's own table directory first.
+   */
+  private async parserFor(bytes: Uint8Array) {
+    return createSaveParserForSave(bytes);
+  }
 
   /**
    * Builds the insertable world pool, value bands included.
@@ -190,9 +201,16 @@ export class SyncService {
   }
 
   async syncCandidate(save: SaveCandidate): Promise<SyncResult> {
-    // 1. Read the bytes, then parse the container - both before the DB transaction
+    // 1. Read the bytes, then identify the game and parse - all before the DB transaction
     const bytes = await saveSource.readBytes(save);
-    const rawData = await this.parser.parse(save, bytes);
+    const { parser, identification } = await this.parserFor(bytes);
+    const rawData = await parser.parse(save, bytes);
+    // What was read, and what could not be. Reported through the same channel as any other parser
+    // warning, so "this save came from a game whose datasheet has no transfer deals" reaches the
+    // manager rather than sitting in a log nobody opens.
+    if (identification.warnings.length > 0) {
+      rawData.warnings.push(...identification.warnings);
+    }
     
     // 2. Compute a deterministic payload hash (raw container + pipeline version)
     //    so real save edits create a new snapshot, while pipeline upgrades re-derive.
