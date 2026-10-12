@@ -1573,6 +1573,13 @@ function copyOffences(text: string): string[] {
   if (/\bdebrief\b|\bsave's own record\b|\bthe app\b/i.test(text)) offences.push("app voice");
   if (CALENDAR_WORDS.test(text)) offences.push(`calendar word ${CALENDAR_WORDS.exec(text)?.[0]}`);
   if (text.includes("\u2014")) offences.push("em dash");
+  // A sentence starting with a lowercase word. The finance line produced this: "two players are inside the last
+  // year of their deals" was a correctly assembled phrase that happened to follow a full stop. Initials such as
+  // "S. Sessegnon" do not trip it, because the letter after the stop is a capital.
+  if (/[.!?]\s+[a-z]/.test(text)) {
+    const at = text.search(/[.!?]\s+[a-z]/);
+    offences.push(`lowercase sentence start [${text.slice(Math.max(0, at - 40), at + 30)}]`);
+  }
   return offences;
 }
 
@@ -1700,9 +1707,42 @@ check(
   defeatRow?.report.slice(0, 120)
 );
 
+const STORY_KINDS = [
+  "MATCH",
+  "FORM",
+  "TABLE",
+  "FINANCE",
+  "CONTRACT",
+  "SQUAD",
+  "PLAYER",
+  "TEAMNEWS",
+  "OPINION",
+  "TRANSFER",
+  "TROPHY",
+  "MILESTONE",
+];
+
 check(
-  "every story carries the kind the closing paragraph needs",
-  buildNews(input()).every((item) => item.kind === "MATCH" || item.kind === "STANDING")
+  "every story carries a topic",
+  buildNews(input()).every((item) => STORY_KINDS.includes(item.kind))
+);
+
+/* Step 7.3: topic compatibility. A table position and a season phase are about where the club stands in a
+ * league, so they may close a match, a form or a table story and nothing else. The sample in the bug report
+ * was a finance story closed on "in the middle stretch". */
+const TABLE_OR_PHASE_WORDING =
+  /\b(?:standings|opening weeks|middle stretch|closing weeks|business end|early in the campaign)\b/i;
+
+check(
+  "and no money, contract, squad, player or team-news story is closed with table or phase wording",
+  buildNews(input())
+    .filter((item) => ["FINANCE", "CONTRACT", "SQUAD", "PLAYER", "TEAMNEWS"].includes(item.kind))
+    .every((item) => !TABLE_OR_PHASE_WORDING.test(item.article.at(-1) ?? "")),
+  buildNews(input())
+    .filter((item) => ["FINANCE", "CONTRACT", "SQUAD", "PLAYER", "TEAMNEWS"].includes(item.kind))
+    .map((item) => `${item.kind}: ${item.article.at(-1) ?? ""}`)
+    .find((text) => TABLE_OR_PHASE_WORDING.test(text))
+    ?.slice(0, 90)
 );
 
 check(
@@ -1935,7 +1975,48 @@ check(
 );
 check("and a wage bill inside it is a different one", storyOf({}, "wage-control-"));
 check("a recorded budget is a story", storyOf({ recordBuy: null, recordSale: null }, "war-chest-"));
-check("and a record fee is too", storyOf({ transferBudget: null }, "record-fee-"));
+check(
+  "a record fee is a story once something behind it has moved",
+  storyOf({ transferBudgetSource: "USER" }, "record-fee-")
+);
+check(
+  "but a static record with no peg behind it is not a story at all",
+  !storyOf(
+    {
+      transferBudgetSource: "SAVE",
+      wageBudgetSource: "SAVE",
+      nextSeasonLiabilityToTurnover: null,
+      wageTurnoverLevel: "OK",
+    },
+    "record-fee-"
+  )
+);
+check(
+  "and when more has come in than gone out, the story says what that means for the next arrival",
+  (() => {
+    const record = buildNews(
+      input({
+        finance: financeFixture({
+          transferBudgetSource: "USER",
+          recordBuy: 1_000_000,
+          recordSale: 9_000_000,
+          transferBudget: 2_000_000,
+        }),
+      })
+    ).find((item) => item.id.startsWith("record-fee-"));
+    return Boolean(record && /largest fee .*received/i.test(record.body) && /departure/i.test(record.body));
+  })()
+);
+check(
+  "and the fees are described as this manager's rather than the club's history",
+  (() => {
+    const record = buildNews(
+      input({ finance: financeFixture({ transferBudgetSource: "USER" }) })
+    ).find((item) => item.id.startsWith("record-fee-"));
+    const text = [record?.headline, record?.body].join(" ");
+    return Boolean(record) && !/this club has ever|club's history|all-time/i.test(text) && /since .* arrived|under /i.test(text);
+  })()
+);
 check(
   "and the club with no budget on the record gets the story about that",
   storyOf({ transferBudget: null, transferBudgetSource: null }, "sell-to-buy-")
@@ -2187,6 +2268,147 @@ check(
     .map((item) => item.article.at(-1) ?? "")
     .find((closing) => /treatment room/i.test(closing) && /have brought|wider picture/i.test(closing))
     ?.slice(0, 90)
+);
+
+// ---------------------------------------------------------------------------------------------
+// Step 7.1, 7.2 and the restate check: is a closing sentence ABOUT the story it closes?
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nevery closing sentence is bound to the story above it");
+
+const MANAGER_NAMES = ["A. Manager", "Manager"];
+const CLUB = "Kingsbridge Athletic";
+
+/** The names a story can be recognised by. */
+function nameTokens(item: { playerNames: string[] }): string[] {
+  const tokens = [CLUB, ...MANAGER_NAMES];
+  for (const name of item.playerNames) {
+    tokens.push(name);
+    const last = name.split(/\s+/).slice(-1)[0];
+    if (last && last.length > 2) tokens.push(last.replace(/\./g, ""));
+  }
+  return [...new Set(tokens.filter((token) => token.length > 2))];
+}
+
+/**
+ * Figures the story itself printed, which the brief allows as an anchor.
+ *
+ * Read from the card and the app's own note, so a figure in a closing sentence is by definition one the story
+ * already used - which is what makes "five points from the last five" a weaker anchor than "five points from
+ * the last five, and a defeat at Rovers".
+ */
+function figureTokens(item: { body: string; evidence: string[] }): string[] {
+  const text = [item.body, ...item.evidence].join(" ");
+  const found =
+    text.match(/(?:\d[\d.,]*\s?(?:(?:points|games|matches|goals|bn|k|m|%)\b)?)/gi) ?? [];
+  return [...new Set(found.map((figure) => figure.trim()))];
+}
+
+/** The tokens that DISTINGUISH one story from another: names of people, and figures with a unit. */
+function specificTokens(item: { playerNames: string[]; body: string; evidence: string[] }): string[] {
+  const names = item.playerNames.flatMap((name) => {
+    const last = name.split(/\s+/).slice(-1)[0];
+    return last && last.length > 2 ? [name, last.replace(/\./g, "")] : [name];
+  });
+  // Only money and percentages distinguish one story from another. "5 matches" is a shape any story can have,
+  // so matching it under a different story proves nothing.
+  const money = figureTokens(item).filter((figure) => /(?:k|m|bn|%)$/i.test(figure.trim()));
+  return [...new Set([...names, ...money])];
+}
+
+function contains(sentence: string, token: string): boolean {
+  const hay = sentence.toLowerCase();
+  const needle = token.toLowerCase();
+  for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + 1)) {
+    const before = at > 0 ? hay[at - 1] : "";
+    const after = hay[at + needle.length] ?? "";
+    // A token must stand on its own. Without this, "5 m" matches inside "5 matches" and a story looks like it
+    // has borrowed another story's figure when it has not.
+    if (!/[\p{L}\d]/u.test(before) && !/[\p{L}\d]/u.test(after)) return true;
+  }
+  return false;
+}
+
+function anchored(sentence: string, tokens: string[]): boolean {
+  return tokens.some((token) => contains(sentence, token));
+}
+
+const pronounLeads = (sentence: string) =>
+  /^(?:it|its|this|that|these|those|they|them|their|he|his|him|she|her)\b/i.test(sentence.trim());
+
+/** Every sentence of the closing paragraph, with the sentence before it. */
+function closingSentences(item: { article: string[] }) {
+  const closing = item.article.at(-1) ?? "";
+  const parts = closing.split(/(?<=[.!?])\s+/).map((part) => part.trim()).filter(Boolean);
+  return parts.map((sentence, index) => ({
+    sentence,
+    previous: index > 0 ? parts[index - 1] : (item.article.at(-2) ?? ""),
+  }));
+}
+
+const fullDesk = buildNews(input());
+
+const unanchored = fullDesk.flatMap((item) => {
+  const names = nameTokens(item);
+  const figures = figureTokens(item);
+  return closingSentences(item)
+    .filter(({ sentence, previous }) => {
+      if (anchored(sentence, [...names, ...figures])) return false;
+      // A pronoun whose referent is in the sentence before it is a valid anchor, and so is a sentence whose
+      // predecessor named something: that is the exemption the brief allows.
+      if (pronounLeads(sentence) && anchored(previous, [...names, ...figures])) return false;
+      return true;
+    })
+    .map(({ sentence }) => `${item.id}: ${sentence}`);
+});
+
+check(
+  "every sentence of every closing is bound to something in its own story",
+  unanchored.length === 0,
+  unanchored.slice(0, 3).join(" | ")
+);
+
+/* The swap test. A closing sentence attached to a DIFFERENT story must not pass the anchor test against that
+ * story's distinguishing tokens: if it does, it is generic enough to sit under anything. */
+const swapFailures: string[] = [];
+for (const item of fullDesk) {
+  // "Unrelated" means sharing no player. Two stories about the same man are allowed to be about the same man.
+  const others = fullDesk.filter(
+    (other) => other.id !== item.id && !other.playerNames.some((name) => item.playerNames.includes(name))
+  );
+  for (const { sentence } of closingSentences(item)) {
+    for (const other of others) {
+      if (anchored(sentence, specificTokens(other))) {
+        swapFailures.push(`${item.id} -> ${other.id}: ${sentence}`);
+      }
+    }
+  }
+}
+
+check(
+  "and no closing sentence fits an unrelated story",
+  swapFailures.length === 0,
+  swapFailures.slice(0, 3).join(" | ")
+);
+
+/* The restate check. A closing sentence that repeats a figure from the card without comparing it, drawing a
+ * consequence from it or contrasting it is padding, and the reader has already read it. */
+const RESTATE_MARKER =
+  /\b(?:than|against|next|by the end|after|before|since|still|needs?|has to|unlike|compared|improve|worse|better|double|half|twice)\b/i;
+const restatements = fullDesk.flatMap((item) => {
+  const cardFigures = figureTokens({ body: item.body, evidence: [] });
+  return closingSentences(item)
+    .filter(
+      ({ sentence }) =>
+        anchored(sentence, cardFigures) && !anchored(sentence, nameTokens(item)) && !RESTATE_MARKER.test(sentence)
+    )
+    .map(({ sentence }) => `${item.id}: ${sentence}`);
+});
+
+check(
+  "and none of them repeats a figure from the card without adding to it",
+  restatements.length === 0,
+  restatements.slice(0, 3).join(" | ")
 );
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
