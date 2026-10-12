@@ -9,10 +9,11 @@
  * which games are supported is derived from the registry here, so adding a game cannot leave a screen
  * behind.
  *
- * THE THREE LEVELS ARE NOT INTERCHANGEABLE, and the wording keeps them apart. `real` is a claim about
+ * THE FOUR LEVELS ARE NOT INTERCHANGEABLE, and the wording keeps them apart. `real` is a claim about
  * the GAME, backed by a save it wrote. `synthetic` is a claim about the READER, backed by a save built
- * to that game's layout and read through that game's datasheet. Saying "supported" for both would be
- * the same class of overstatement as the "browsers drop the User-Agent header" note that cost a week.
+ * to that game's layout and read through that game's datasheet. `partial` is a claim about neither: the
+ * save opens and some of what it holds is missing. Saying "supported" for all of them would be the
+ * same class of overstatement as the "browsers drop the User-Agent header" note that cost a week.
  */
 import { GAME_METAS, type SupportLevel } from "../parser/game-versions";
 
@@ -28,7 +29,19 @@ export function supportedGameLabels(): string[] {
  * to 21 are supported and FIFA 22 to 24 are not, so "FIFA 17 to FC 27" would claim four titles that
  * have no datasheet here.
  */
-export const SUPPORTED_RANGE = "FIFA 17 to FIFA 21, and EA SPORTS FC 25 to FC 27";
+export const SUPPORTED_RANGE = `FIFA 17 to FIFA 21, and EA SPORTS FC 25 to FC 27${partialSuffix()}`;
+
+/**
+ * The caveat that rides along with the range, derived from the registry.
+ *
+ * A game can be readable and not finished, and saying only "supported" for it is the kind of claim this
+ * project keeps having to walk back. The suffix is built from the `partial` entries so the wording
+ * cannot survive a game being fixed, and it disappears on its own once none are left.
+ */
+function partialSuffix(): string {
+  const partial = gamesAtLevel("partial").map((label) => label.replace("EA SPORTS ", ""));
+  return partial.length === 0 ? "" : ` (${partial.join(", ")} Partly Supported)`;
+}
 
 /** The one-line claim, for a footer tooltip or a badge. */
 export const SUPPORT_LINE = `TouchlineOS reads career saves from ${SUPPORTED_RANGE}.`;
@@ -48,6 +61,7 @@ export const folderList = (() => {
 const LEVEL_WORDS: Record<SupportLevel, string> = {
   real: "read from a career the game wrote",
   synthetic: "tested against a save built to that game's layout",
+  partial: "read, but not everything on it works yet",
   unproven: "not yet tested",
 };
 
@@ -66,6 +80,7 @@ export function gamesAtLevel(level: SupportLevel): string[] {
 export function supportDetail(): string {
   const verified = gamesAtLevel("real");
   const synthetic = gamesAtLevel("synthetic");
+  const partial = GAME_METAS.filter((meta) => meta.support === "partial");
   const parts: string[] = [];
   if (verified.length > 0) {
     parts.push(`${verified.join(", ")} have been read from careers the games themselves wrote.`);
@@ -76,6 +91,9 @@ export function supportDetail(): string {
         `been tested against saves built to those games' layouts rather than against a save the game ` +
         `produced.`
     );
+  }
+  for (const meta of partial) {
+    parts.push(`${meta.label} is ${describeSupport("partial")}: ${meta.caveat ?? ""}`.trim());
   }
   return parts.join(" ");
 }

@@ -39,10 +39,12 @@ export interface MissingCapability {
  * `real` means a save produced by that game has been read end to end and the values checked.
  * `synthetic` means the format and the schema have been exercised against a save built to that game's
  * layout, which proves the reader and the datasheet but NOT that the game writes what we expect.
+ * `partial` means the save is read, and NOT everything on it works yet: FC 27 is read with the FC 26
+ * datasheet because no FC 27 one exists, so a field that datasheet does not declare decodes as unknown.
  * `unproven` means neither. The distinction exists because "we support FIFA 18" is a claim about a
  * game, and only the first state is evidence for it.
  */
-export type SupportLevel = "real" | "synthetic" | "unproven";
+export type SupportLevel = "real" | "synthetic" | "partial" | "unproven";
 
 export interface GameMetaDescriptor {
   id: GameVersion;
@@ -59,6 +61,11 @@ export interface GameMetaDescriptor {
    */
   saveFolder: string | null;
   support: SupportLevel;
+  /**
+   * Why support is not complete, in the manager's words. Required reading for a `partial` entry, and
+   * the only thing that distinguishes "we read it" from "we read it and it works".
+   */
+  caveat?: string;
   missing: MissingCapability[];
 }
 
@@ -97,9 +104,17 @@ export const GAME_METAS: GameMetaDescriptor[] = [
     label: "EA SPORTS FC 27",
     metaFile: FC_META,
     saveFolder: "FC 27",
-    support: "real",
-    // FC 27 packs its descriptors differently, which the parser handles by layout rather than by
-    // datasheet, so the same meta reads it.
+    // PARTIAL, and it must stay that way until an FC 27 datasheet exists. FC 27's save is newer than
+    // the FC 26 datasheet it has to be read with: that save stores 110 player fields where the
+    // datasheet declares 137, so the fields it does not declare decode as unknown. Its career block
+    // also packs its descriptors differently, which the parser handles by locating descriptor runs
+    // rather than by reading the directory, and a table that cannot be located is skipped with a
+    // warning. So an FC 27 career opens, and some of what it holds is missing.
+    support: "partial",
+    caveat:
+      "generated before an FC 27 database description exists, so it is read with the FC 26 one. " +
+      "Fields the FC 26 description does not declare come back as unknown, which means some values " +
+      "on an FC 27 career will be missing.",
     missing: [],
   },
   {

@@ -6,7 +6,7 @@ A local-first companion app for EA SPORTS FC Career Mode. It automatically reads
 
 Every title below is read by the same parser. What differs between them is the **datasheet**: the game's own `fifa_ng_db-meta.xml`, which maps the four-character ids inside a save (`zgrE`, `biWl`) to real table and field names. A save is identified from its own table directory and read with the datasheet that explains it, so adding a title means shipping its datasheet rather than writing a new parser. Datasheet provenance and licensing are recorded in [`public/parse-resources/README.md`](public/parse-resources/README.md).
 
-`Status` distinguishes two different claims, and they are not interchangeable. **Verified** means a career the game itself wrote has been read end to end. **Reader verified** means the layout and the datasheet have been exercised against a save built to that game's format, which proves the reader and not the game. No real FIFA 17 to 21 save has been tested here yet.
+`Status` distinguishes claims that are not interchangeable. **Verified** means a career the game itself wrote has been read end to end. **Reader verified** means the layout and the datasheet have been exercised against a save built to that game's format, which proves the reader and not the game. **Partly supported** means the save is read and not everything on it works yet. No real FIFA 17 to 21 save has been tested here yet.
 
 | Game Version | Save Parsing | Browser Support | Status |
 |---|---|---|---|
@@ -17,7 +17,7 @@ Every title below is read by the same parser. What differs between them is the *
 | FIFA 21 | Own datasheet, classic 16-byte descriptors | Chrome / Edge / Brave / Firefox | Reader verified. No real save tested yet. |
 | EA SPORTS FC 25 | FC datasheet, classic 16-byte descriptors | Chrome / Edge / Brave / Firefox | Verified |
 | EA SPORTS FC 26 | FC datasheet, classic 16-byte descriptors | Chrome / Edge / Brave / Firefox | Verified |
-| EA SPORTS FC 27 | FC datasheet, compact 9-byte descriptors | Chrome / Edge / Brave / Firefox | Verified |
+| EA SPORTS FC 27 | FC 26 datasheet, compact 9-byte descriptors | Chrome / Edge / Brave / Firefox | **Partly supported.** No FC 27 database description exists, so it is read with the FC 26 one: fields that description does not declare come back as unknown, and its career block is decoded by locating descriptor runs rather than by reading the directory, so a table that cannot be located is skipped with a warning. Open it, and expect parts of the career to be missing. |
 
 The browser build reads exactly the same formats in all four browsers, because it runs the same parser and fetches the datasheets it needs. The one difference between browsers is not the format but **acquiring the file**: Chrome, Edge and Brave can remember the save you picked, while Firefox and Safari cannot keep a file handle at all, so those browsers ask again on each visit unless you run the optional local bridge. See `docs/post-deploy-checklist.md`.
 

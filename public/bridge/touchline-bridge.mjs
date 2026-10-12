@@ -9,6 +9,91 @@ import path2 from "node:path";
 import fs from "fs";
 import path from "path";
 
+// src/lib/parser/game-versions.ts
+var FC_META = "fifa_ng_db-meta.xml";
+var GAME_METAS = [
+  {
+    id: "FC26",
+    label: "EA SPORTS FC 26",
+    metaFile: FC_META,
+    saveFolder: "FC 26",
+    support: "real",
+    missing: []
+  },
+  {
+    id: "FC25",
+    label: "EA SPORTS FC 25",
+    metaFile: FC_META,
+    saveFolder: "FC 25",
+    support: "real",
+    // FC 25 saves are read with the FC 26 datasheet, which is what this app has always done: the
+    // career tables the desk reads are shared, and the differences sit in tables nothing here touches.
+    missing: []
+  },
+  {
+    id: "FC27",
+    label: "EA SPORTS FC 27",
+    metaFile: FC_META,
+    saveFolder: "FC 27",
+    // PARTIAL, and it must stay that way until an FC 27 datasheet exists. FC 27's save is newer than
+    // the FC 26 datasheet it has to be read with: that save stores 110 player fields where the
+    // datasheet declares 137, so the fields it does not declare decode as unknown. Its career block
+    // also packs its descriptors differently, which the parser handles by locating descriptor runs
+    // rather than by reading the directory, and a table that cannot be located is skipped with a
+    // warning. So an FC 27 career opens, and some of what it holds is missing.
+    support: "partial",
+    caveat: "generated before an FC 27 database description exists, so it is read with the FC 26 one. Fields the FC 26 description does not declare come back as unknown, which means some values on an FC 27 career will be missing.",
+    missing: []
+  },
+  {
+    id: "FIFA21",
+    label: "FIFA 21",
+    metaFile: "fifa_ng_db-meta-fifa21.xml",
+    saveFolder: "FIFA 21",
+    support: "synthetic",
+    missing: []
+  },
+  {
+    id: "FIFA20",
+    label: "FIFA 20",
+    metaFile: "fifa_ng_db-meta-fifa20.xml",
+    saveFolder: "FIFA 20",
+    support: "synthetic",
+    missing: []
+  },
+  {
+    id: "FIFA19",
+    label: "FIFA 19",
+    metaFile: "fifa_ng_db-meta-fifa19.xml",
+    saveFolder: "FIFA 19",
+    support: "synthetic",
+    missing: []
+  },
+  {
+    id: "FIFA18",
+    label: "FIFA 18",
+    metaFile: "fifa_ng_db-meta-fifa18.xml",
+    saveFolder: "FIFA 18",
+    support: "synthetic",
+    missing: []
+  },
+  {
+    id: "FIFA17",
+    label: "FIFA 17",
+    metaFile: "fifa_ng_db-meta-fifa17.xml",
+    saveFolder: "FIFA 17",
+    support: "synthetic",
+    missing: [
+      {
+        table: "career_presignedcontract",
+        feature: "Transfer ledger",
+        consequence: "FIFA 17 does not record agreed transfers, so the ledger can only show deals you enter yourself, and the value estimate has no comparable fees to work from."
+      }
+    ]
+  }
+];
+var DEFAULT_GAME_META = GAME_METAS[0];
+
 // src/lib/parser/bytes.ts
 var utf8Encoder = new TextEncoder();
 function utf8Bytes(text) {
@@ -177,6 +262,9 @@ function looksLikeSaveFile(fileName) {
 // src/lib/platform/save-source.ts
 var MAX_SCAN_DEPTH = 3;
 var MAX_DIR_ENTRIES = 5e3;
+var FIFA_SAVE_FOLDERS = GAME_METAS.filter((meta) => meta.id.startsWith("FIFA")).flatMap(
+  (meta) => meta.saveFolder ? [meta.saveFolder] : []
+);
 function searchLocations() {
   const env = process.env;
   const home = env.USERPROFILE || env.HOME || "";
@@ -197,6 +285,13 @@ function searchLocations() {
     [path.join(roaming, "EA Sports", "FC 25"), "FC 25 \xB7 AppData/Roaming/EA Sports"],
     [path.join(roaming, "EA Sports", "FC 26"), "FC 26 \xB7 AppData/Roaming/EA Sports"]
   ];
+  for (const folder of FIFA_SAVE_FOLDERS) {
+    candidates.push([path.join(home, "Documents", folder), `${folder} \xB7 Documents`]);
+    candidates.push([
+      path.join(home, "OneDrive", "Documents", folder),
+      `${folder} \xB7 OneDrive Documents`
+    ]);
+  }
   for (const key of ["OneDrive", "OneDriveCommercial", "OneDriveConsumer"]) {
     const root = env[key];
     if (!root) continue;
@@ -238,7 +333,7 @@ function walk(dir, depth, out) {
   return out;
 }
 var lastScan = [];
-async function detectSaves(saveDirectory) {
+async function detectSaves(saveDirectory, allowPicker) {
   const locations = saveDirectory ? [
     {
       path: path.resolve(saveDirectory),
