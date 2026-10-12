@@ -21,6 +21,8 @@ import { TacticsService } from "./tactics-service";
 import { TargetBlockService } from "./target-block-service";
 import { TrophyService } from "./trophy-service";
 import { YouthService } from "./youth-service";
+import { FinanceService } from "./finance-service";
+import { ADVISORY_THRESHOLDS } from "../realism";
 import {
   buildNews,
   foldName,
@@ -244,6 +246,53 @@ export class NewsService {
         ? { matchday: playedThisSeason, expectedGames: 2 * (leagueSize - 1) }
         : null;
 
+    /**
+     * The club's money, and the only story source in the desk that rests on an ESTIMATE.
+     *
+     * Read defensively: a career with no finance report at all simply gets no finance stories rather than a
+     * guessed one. The wage-to-turnover level is worked out HERE from the ratio and the thresholds this
+     * career's realism mode sets, rather than parsed back out of an advisory sentence - the advisory is
+     * prose, and prose is the wrong thing to branch on.
+     */
+    let finance: NewsInput["finance"] = null;
+    try {
+      const report = await new FinanceService().getReport(careerId);
+      if (report) {
+        const thresholds = ADVISORY_THRESHOLDS[report.realismMode];
+        const ratio = report.wageToTurnover;
+        finance = {
+          currency: report.currency,
+          wageFormat: report.wageFormat,
+          tier: report.tier,
+          squadWeeklyWage: report.squadWeeklyWage,
+          squadAnnualWage: report.squadAnnualWage,
+          estimatedTierRevenue: report.estimatedTierRevenue,
+          wageToTurnover: ratio,
+          wageTurnoverWarning: thresholds.wageTurnoverWarning,
+          wageTurnoverCritical: thresholds.wageTurnoverCritical,
+          wageTurnoverLevel:
+            ratio === null
+              ? null
+              : ratio >= thresholds.wageTurnoverCritical
+                ? "CRITICAL"
+                : ratio >= thresholds.wageTurnoverWarning
+                  ? "WARNING"
+                  : "OK",
+          transferBudget: report.transferBudget,
+          transferBudgetSource: report.transferBudgetSource,
+          wageBudget: report.wageBudget,
+          wageBudgetSource: report.wageBudgetSource,
+          recordBuy: report.recordBuy,
+          recordSale: report.recordSale,
+          nextSeasonLiabilityToTurnover: report.nextSeasonLiabilityToTurnover,
+          realismMode: report.realismMode,
+        };
+      }
+    } catch {
+      // No finance report is a normal state for a career the manager has not filled in, not a failure.
+      finance = null;
+    }
+
     const input: NewsInput = {
       clubName: career.clubName,
       managerName: career.managerName,
@@ -257,6 +306,18 @@ export class NewsService {
       inGameYear: career.currentSeason,
       inGameDate: career.inGameDate,
       progress,
+      finance,
+      /**
+       * Matches in charge, straight off the save's own per-season record.
+       *
+       * Summed rather than counted from the debriefs, because the debriefs are only what the manager has
+       * typed up and stop at forty. Null rather than zero when the save carries no rows at all, so a career
+       * the app has only just met does not claim the manager has never worked.
+       */
+      gamesInCharge:
+        seasons.length > 0
+          ? seasons.reduce((total, season) => total + (season.gamesPlayed ?? 0), 0)
+          : null,
       matches,
       squad: players,
       developments,

@@ -35,10 +35,12 @@ export function realismModeOf(level: RealismLevel | string | null | undefined): 
     case "STRICT_REALISM":
     case "REALISTIC":
       return "STRICT";
+    case "NORMAL":
     case "BALANCED":
     case "CASUAL":
       return "RELAXED";
     case "CHAOS":
+    case "OFF":
       return "OFF";
     default:
       return "RELAXED";

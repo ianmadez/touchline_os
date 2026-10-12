@@ -1881,6 +1881,221 @@ check(
   )
 );
 
+// ---------------------------------------------------------------------------------------------
+// Part H: the club's money, and the voice it has to be written in
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nthe money is talked about, and hedged");
+
+/** A finance report, as the service would hand it over. */
+function financeFixture(overrides: Partial<NonNullable<NewsInput["finance"]>> = {}): NonNullable<NewsInput["finance"]> {
+  return {
+    currency: "GBP",
+    wageFormat: "WEEKLY",
+    tier: 2,
+    squadWeeklyWage: 316_072,
+    squadAnnualWage: 316_072 * 52,
+    estimatedTierRevenue: 40_000_000,
+    wageToTurnover: (316_072 * 52) / 40_000_000,
+    wageTurnoverWarning: 0.65,
+    wageTurnoverCritical: 0.85,
+    wageTurnoverLevel: "OK",
+    transferBudget: 6_000_000,
+    transferBudgetSource: "SAVE",
+    wageBudget: 300_000,
+    wageBudgetSource: "SAVE",
+    recordBuy: 4_500_000,
+    recordSale: 2_000_000,
+    nextSeasonLiabilityToTurnover: null,
+    realismMode: "STRICT",
+    ...overrides,
+  };
+}
+
+/* Each finance story gets its own fixture, so the assertions test the story rather than the category cap.
+ * Four of them can be true at once on a real career, and the cap of three stories per category is what
+ * decides which print - so testing them all through one fixture would be testing the cap, not the copy. */
+const storyOf = (finance: Partial<NonNullable<NewsInput["finance"]>>, prefix: string) =>
+  has(buildNews(input({ finance: financeFixture(finance) })), prefix);
+
+check(
+  "a wage bill past its threshold is a story",
+  storyOf({ wageTurnoverLevel: "CRITICAL", wageToTurnover: 0.95 }, "wage-pressure-")
+);
+check("and a wage bill inside it is a different one", storyOf({}, "wage-control-"));
+check("a recorded budget is a story", storyOf({ recordBuy: null, recordSale: null }, "war-chest-"));
+check("and a record fee is too", storyOf({ transferBudget: null }, "record-fee-"));
+check(
+  "and the club with no budget on the record gets the story about that",
+  storyOf({ transferBudget: null, transferBudgetSource: null }, "sell-to-buy-")
+);
+check(
+  "and a commitment for next season is its own story when it is larger",
+  storyOf({ nextSeasonLiabilityToTurnover: 0.9, wageToTurnover: 0.41 }, "commitments-")
+);
+check(
+  "but not when next season is cheaper than this one",
+  !storyOf({ nextSeasonLiabilityToTurnover: 0.3, wageToTurnover: 0.41 }, "commitments-")
+);
+check(
+  "no finance story is invented for a caller with no finance report",
+  !buildNews(input()).some((item) => item.category === "FINANCE")
+);
+check(
+  "and every finance story hedges rather than asserting",
+  buildNews(input({ finance: financeFixture() }))
+    .filter((item) => item.category === "FINANCE")
+    .every((item) => /understood|the word is|it is thought|suggested|usually means|worth noting/i.test(item.body)),
+  buildNews(input({ finance: financeFixture() }))
+    .filter((item) => item.category === "FINANCE")
+    .map((item) => `${item.id}: ${item.body.slice(0, 50)}`)
+    .join(" | ")
+);
+check(
+  "the exact figures are on the record under the story rather than in the prose",
+  buildNews(input({ finance: financeFixture({ wageTurnoverLevel: "CRITICAL", wageToTurnover: 0.95 }) }))
+    .filter((item) => item.category === "FINANCE")
+    .every((item) => item.evidence.some((line) => /\u00a3|threshold|DERIVED_ESTIMATE/.test(line)))
+);
+
+// ---------------------------------------------------------------------------------------------
+// Part I: columns, and how many of them one edition may carry
+// ---------------------------------------------------------------------------------------------
+
+console.log("\ncolumns, and how many of them an edition can carry");
+
+const OPINION_CATEGORIES = ["OPINION", "TALKING POINT"];
+const isColumn = (item: { category: string }) => OPINION_CATEGORIES.includes(item.category);
+
+const paper = buildNews(input());
+const columns = paper.filter(isColumn);
+
+check("an edition carries columns", columns.length > 0, `${columns.length} of ${paper.length}`);
+check(
+  "every column is signed, because a column without a name reads as a system note",
+  columns.every((item) => item.byline !== null)
+);
+check("and every column states the line it was written in", columns.every((item) => item.stance !== null));
+check(
+  "and the outlet that filed it is a paper that actually writes that way",
+  columns.every((item) => item.byline?.stance === item.stance)
+);
+
+const leaning = (items: typeof paper) =>
+  items.filter((item) => item.stance === "HOSTILE" || item.stance === "SENSATIONAL");
+const evenHanded = (items: typeof paper) =>
+  items.filter((item) => item.stance === "STRAIGHT" || item.stance === "LOYAL");
+
+check(
+  "no edition runs more than one leaning column",
+  leaning(paper).length <= 1,
+  `${leaning(paper).length} leaning`
+);
+check(
+  "and never a leaning one without a straight or loyal one beside it",
+  leaning(paper).length === 0 || evenHanded(paper).length > 0
+);
+
+/* Three straight defeats, from the newest match backwards, which is what the desk reads as a bad run. */
+const LOSSES = [
+  match({ eventId: "l1", result: "LOSS", goalsFor: 0, goalsAgainst: 2 }),
+  match({ eventId: "l2", result: "LOSS", goalsFor: 1, goalsAgainst: 3 }),
+  match({ eventId: "l3", result: "LOSS", goalsFor: 0, goalsAgainst: 1 }),
+  ...MATCHES.slice(0, 2),
+];
+const badRunPaper = buildNews(input({ matches: LOSSES }));
+check(
+  "after three straight defeats the paper is allowed a second leaning column",
+  leaning(badRunPaper).length >= 1 && leaning(badRunPaper).length <= 2,
+  `${leaning(badRunPaper).length} leaning`
+);
+check(
+  "and a hostile column is only filed when the run justifies it",
+  leaning(badRunPaper).every((item) => item.stance === "HOSTILE" || item.stance === "SENSATIONAL") &&
+    badRunPaper.some((item) => item.stance === "HOSTILE") === true
+);
+
+// ---------------------------------------------------------------------------------------------
+// Part J: the stories that only print when the facts earn them
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nand the stories that only print when the facts earn them");
+
+const hatTrick = buildNews(
+  input({
+    matches: [
+      match({ eventId: "ht-1", result: "WIN", goalsFor: 3, goalsAgainst: 0, scorers: ["Jordan Pike", "Jordan Pike", "Jordan Pike"], goalMinutes: [12, 44, 78] }),
+      ...MATCHES.slice(1),
+    ],
+  })
+);
+check("three goals by one player is its own story", has(hatTrick, "haul-"));
+check(
+  "and it says how many, in the words football uses",
+  /hat-trick|twice|times/.test(
+    hatTrick.find((item) => item.id.startsWith("haul-"))?.body ?? ""
+  )
+);
+
+const lateGoalPaper = buildNews(
+  input({
+    matches: [
+      match({ eventId: "lw-1", result: "WIN", goalsFor: 1, goalsAgainst: 0, scorers: ["Jordan Pike"], goalMinutes: [89], concededMinutes: [] }),
+      ...MATCHES.slice(1),
+    ],
+  })
+);
+check("a winner in the last five minutes is its own story", has(lateGoalPaper, "late-winner-"));
+
+const threwItAway = buildNews(
+  input({
+    matches: [
+      match({ eventId: "ta-1", result: "DRAW", goalsFor: 1, goalsAgainst: 1, scorers: ["Jordan Pike"], goalMinutes: [20], concededMinutes: [80] }),
+      ...MATCHES.slice(1),
+    ],
+  })
+);
+check("a lead given away is its own story", has(threwItAway, "thrown-away-"));
+check("but a lead held is not", !has(buildNews(input()), "thrown-away-"));
+
+/* Isolated on purpose: this is a CONCERN story, and the fairness pass gives a paper with no good news only
+ * ONE critical story - the most significant one. So the fixture keeps enough around it for the paper to have
+ * two good stories (the trophy and the academy), which is what lets a second criticism print. Without that
+ * the assertion would be testing the fairness pass rather than the story. */
+const drought = buildNews(
+  input({
+    matches: [
+      match({ eventId: "d1", result: "LOSS", goalsFor: 0, goalsAgainst: 1 }),
+      match({ eventId: "d2", result: "LOSS", goalsFor: 0, goalsAgainst: 2 }),
+      match({ eventId: "d3", result: "DRAW", goalsFor: 0, goalsAgainst: 0 }),
+    ],
+    squad: [],
+    developments: [],
+    injuries: [],
+    seasons: [],
+    block: null,
+  })
+);
+check(
+  "a run of matches without a goal is its own story",
+  has(drought, "drought-"),
+  drought.map((item) => item.id).join(", ")
+);
+check("and a side that is scoring gets none", !has(buildNews(input()), "drought-"));
+
+check(
+  "a round number of matches in charge is a milestone",
+  has(buildNews(input({ gamesInCharge: 500 })), "milestone-500")
+);
+check(
+  "and a number that is not round is not",
+  !buildNews(input({ gamesInCharge: 501 })).some((item) => item.id.startsWith("milestone-"))
+);
+check(
+  "and a career with no season record claims no milestone at all",
+  !buildNews(input({ gamesInCharge: null })).some((item) => item.id.startsWith("milestone-"))
+);
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) {
   console.log("\nfailures:");

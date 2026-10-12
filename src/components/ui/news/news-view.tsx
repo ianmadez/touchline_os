@@ -197,6 +197,7 @@ export function NewsView({
               <LeadPlate
                 item={lead}
                 clubName={clubName}
+                badgeUrl={badgeUrl}
                 className="h-36 w-full sm:h-40 sm:w-40 md:h-40 md:w-40"
               />
               <div className="min-w-0 flex-1">

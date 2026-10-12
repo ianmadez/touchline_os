@@ -47,7 +47,7 @@ import { momentOf, phasePhrase, seasonPhase, type SeasonProgress } from "./momen
  * stories exactly as they were. The number is here, beside the copy it describes, because "the desk was
  * rewritten" is an editorial call that cannot be computed from the code.
  */
-export const NEWS_COPY_VERSION = 6;
+export const NEWS_COPY_VERSION = 7;
 
 /** How a story's subject colours the card. Not a red/green light: a paper has good and bad news. */
 export type NewsTone = "GOOD" | "NEUTRAL" | "CONCERN";
@@ -219,6 +219,41 @@ export interface NewsDevelopment {
   on: string | null;
 }
 
+/**
+ * The club's money, as the desk is allowed to talk about it.
+ *
+ * BANDS AND FLAGS, not raw estimates. A paper may say a wage bill is heavy against the club's level; it may
+ * not print the ratio, because the ratio is the app's own estimate and belongs in the story's evidence with
+ * the rest of the app's reasoning. Every figure here is either a SAVE fact or a figure the manager stated,
+ * and `null` always means "not recorded" rather than zero - the save writes 0 for both budgets on a career it
+ * has not filled in, and a club with no recorded transfer budget is not a club with no money.
+ */
+export interface NewsFinance {
+  /** The save's currency code, e.g. "GBP". Used for the symbol on a rounded band. */
+  currency: string;
+  /** Whether the wage figures are weekly or annual, so the copy can say "a week" or "a year". */
+  wageFormat: "WEEKLY" | "ANNUAL";
+  tier: number | null;
+  squadWeeklyWage: number;
+  squadAnnualWage: number;
+  estimatedTierRevenue: number;
+  /** Annual wage bill over the tier revenue estimate. Null when there is no wage bill at all. */
+  wageToTurnover: number | null;
+  /** The threshold this career's realism mode judges the wage bill against, for the evidence line. */
+  wageTurnoverWarning: number;
+  wageTurnoverCritical: number;
+  wageTurnoverLevel: "OK" | "WARNING" | "CRITICAL" | null;
+  transferBudget: number | null;
+  transferBudgetSource: "SAVE" | "USER" | null;
+  wageBudget: number | null;
+  wageBudgetSource: "SAVE" | "USER" | null;
+  recordBuy: number | null;
+  recordSale: number | null;
+  /** Next season's committed wages over the estimate, which is what a board actually asks about. */
+  nextSeasonLiabilityToTurnover: number | null;
+  realismMode: "STRICT" | "RELAXED" | "OFF";
+}
+
 export interface NewsInput {
   clubName: string;
   managerName: string;
@@ -289,6 +324,23 @@ export interface NewsInput {
    * guessing at it, which is what it used to do.
    */
   progress?: SeasonProgress | null;
+  /**
+   * The club's money, when the caller has a finance report to hand.
+   *
+   * Optional, and absent means the finance stories simply do not run - which is the honest outcome for a
+   * caller that cannot say what the club earns. Nothing here is guessed from a league position or a transfer
+   * budget, because a fabricated figure is the one thing a story about money can never recover from.
+   */
+  finance?: NewsFinance | null;
+  /**
+   * Matches in charge, from the save's own per-season record.
+   *
+   * A REAL CAREER TOTAL, not a count of what the manager has typed up. `season_history` mirrors
+   * `career_managerhistory`, which keeps games played per season across all competitions, so summing it is
+   * the only honest way to say how long a manager has been here. A season still in progress may not have a row
+   * yet, which is why the copy says what the number counts rather than implying it includes today.
+   */
+  gamesInCharge?: number | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -526,6 +578,37 @@ function venueWord(match: NewsMatch): string {
     default:
       return "";
   }
+}
+
+/** The symbol for a currency code, or the code itself when it is not one we know. */
+function currencySymbol(currency: string): string {
+  const code = currency.trim().toUpperCase();
+  if (code === "GBP") return "\u00a3";
+  if (code === "EUR") return "\u20ac";
+  if (code === "USD") return "$";
+  return `${code} `;
+}
+
+/**
+ * A sum of money as a paper writes it, rounded to the band a reporter would actually say.
+ *
+ * Exact change is not how money is reported. "£12,400,000" is a spreadsheet reading and "about £12m" is a
+ * sentence, and the difference matters more here than anywhere else in the desk, because a story about money
+ * that reads like a ledger is a story nobody finishes. The exact figure stays in the story's own evidence,
+ * with the rest of the app's reasoning.
+ */
+function moneyBand(amount: number, currency: string): string {
+  const symbol = currencySymbol(currency);
+  const abs = Math.abs(amount);
+  if (abs >= 1_000_000_000) {
+    return `${symbol}${(amount / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}bn`;
+  }
+  if (abs >= 1_000_000) {
+    const millions = amount / 1_000_000;
+    return `${symbol}${millions >= 10 ? Math.round(millions) : millions.toFixed(1).replace(/\.0$/, "")}m`;
+  }
+  if (abs >= 1_000) return `${symbol}${Math.round(amount / 1_000)}k`;
+  return `${symbol}${Math.round(amount)}`;
 }
 
 /**
@@ -1262,8 +1345,8 @@ function matchReportBody(
     }
     if (last.competition) {
       earned.push(
-        `It is a ${last.competition} result, which means it counts the same as every other one and reads better than most of them.`,
-        `In the ${last.competition}, the points on offer here were worth exactly as much as the points on offer anywhere else.`
+        `The ${last.competition} points count the same as any others, and these read better than most.`,
+        `However the season is filed, this counts the same as any other ${last.competition} result.`
       );
     }
     const earnedParagraph = earned.length > 0 ? pick(earned, last.eventId, "article-earned") : null;
@@ -2261,6 +2344,228 @@ function matchReportBody(
     });
   }
 
+  // ---- 18. The club's money ------------------------------------------------------------------
+  /**
+   * Finance, and the voice all of it has to be written in.
+   *
+   * Every story here rests on a figure the app DERIVED or the manager TYPED, and on nothing the save reported
+   * except the two budgets and the record fees. That is why every sentence about a wage bill or a budget is
+   * speculative in form - "understood to be", "the word is", "it is thought" - and why the exact numbers stay
+   * in the evidence. A newspaper states a transfer interest as fact precisely once, and then nobody believes
+   * it again.
+   *
+   * The wage bill is the one financial fact with a threshold attached to it, and that threshold comes from the
+   * career's own realism mode rather than from a number invented here. See `ADVISORY_THRESHOLDS`.
+   */
+  const finance = input.finance ?? null;
+  if (finance) {
+    const wageLine =
+      finance.wageFormat === "WEEKLY"
+        ? `${moneyBand(finance.squadWeeklyWage, finance.currency)} a week`
+        : `${moneyBand(finance.squadAnnualWage, finance.currency)} a year`;
+    const turnover = `${moneyBand(finance.estimatedTierRevenue, finance.currency)} a year`;
+
+    // 18a. A wage bill past the threshold its own realism mode sets. Two weights, because "over" and "well
+    // over" are different stories and the second one is the board's rather than the manager's.
+    if (finance.wageTurnoverLevel === "CRITICAL" || finance.wageTurnoverLevel === "WARNING") {
+      const critical = finance.wageTurnoverLevel === "CRITICAL";
+      items.push({
+        id: `wage-pressure-${input.seasonNumber}`,
+        kind: "STANDING",
+        category: "FINANCE",
+        tone: "CONCERN",
+        headline: pick(
+          [
+            `${input.clubName} Wage Bill Comes Under the Microscope`,
+            `The Wages Are the Story at ${input.clubName}`,
+            critical
+              ? `${input.clubName} Wage Bill Is a Board Question Now`
+              : `Wages Worth Watching at ${input.clubName}`,
+            `A Squad Costing More Than the Club Earns`,
+          ],
+          `wage${input.seasonNumber}${finance.wageTurnoverLevel}`,
+          "headline"
+        ),
+        body: `The squad is understood to cost ${wageLine}, against a turnover this level of the game supports only up to a point. ${critical ? "That is past the point where a board starts asking who sanctioned it, and the manager will not need telling." : "It is not a crisis, and it is the kind of number that becomes one quietly over a season."} Nobody at the club has said anything about it, which is how these are handled until they cannot be.`,
+        evidence: [
+          `Squad wage ${wageLine} (from the squad's own contract rows)`,
+          `Assumed turnover ${turnover} (DERIVED_ESTIMATE)`,
+          `Wage to turnover ${(finance.wageToTurnover ?? 0).toFixed(2)}, against a ${critical ? finance.wageTurnoverCritical : finance.wageTurnoverWarning} threshold at ${finance.realismMode} realism`,
+        ],
+        playerNames: [],
+        publishedOn: at,
+        weight: 72,
+        quote: null,
+      });
+    }
+
+    // 18b. The same number on the other side of the line, and worth printing when it is good news: a club
+    // that can carry its wage bill is a club that can do something in the market.
+    if (finance.wageTurnoverLevel === "OK" && finance.squadAnnualWage > 0) {
+      items.push({
+        id: `wage-control-${input.seasonNumber}`,
+        kind: "STANDING",
+        category: "FINANCE",
+        tone: "GOOD",
+        headline: pick(
+          [
+            `Wages in Hand at ${input.clubName}`,
+            `A Wage Bill the Club Can Carry`,
+            `${input.clubName} Living Within Their Means`,
+            `The Value of a Sensible Wage Bill`,
+          ],
+          `wages-ok${input.seasonNumber}`,
+          "headline"
+        ),
+        body: `The squad is understood to cost ${wageLine}, against a turnover of about ${turnover} at this level of the game. That is a wage bill a club can carry, and in a division where several cannot say the same it is worth noting. It is also what gives a manager room to move when he needs it.`,
+        evidence: [
+          `Squad wage ${wageLine}`,
+          `Assumed turnover ${turnover} (DERIVED_ESTIMATE)`,
+          `Inside the ${finance.wageTurnoverWarning} threshold at ${finance.realismMode} realism`,
+        ],
+        playerNames: [],
+        publishedOn: at,
+        weight: 52,
+        quote: null,
+      });
+    }
+
+    // 18c. What there is to spend. The source is stated in the evidence rather than in the prose, because
+    // whether a number came from the save or from the manager is the app's business and not the reporter's.
+    if (finance.transferBudget !== null) {
+      const budget = moneyBand(finance.transferBudget, finance.currency);
+      items.push({
+        id: `war-chest-${input.seasonNumber}-${finance.transferBudget}`,
+        kind: "STANDING",
+        category: "FINANCE",
+        tone: "NEUTRAL",
+        headline: pick(
+          [
+            `${budget} to Spend at ${input.clubName}`,
+            `What ${input.clubName} Have to Work With`,
+            `A Budget of ${budget}, and What It Buys`,
+            `The Money on the Table at ${input.clubName}`,
+          ],
+          `budget${input.seasonNumber}${finance.transferBudget}`,
+          "headline"
+        ),
+        body: `The money available is understood to be ${budget}. At this level of the game that is a starting player and very little besides, which is the sort of budget that has to be spent well or not at all. Whether it is spent is a different question from whether it is there, and the answer to the second one is now on the record.`,
+        evidence: [
+          `Transfer budget ${budget} (${finance.transferBudgetSource === "USER" ? "stated by the manager" : "from the save"})`,
+          `Wage budget ${finance.wageBudget !== null ? moneyBand(finance.wageBudget, finance.currency) : "not recorded"}`,
+          `Assumed turnover ${turnover} (DERIVED_ESTIMATE)`,
+        ],
+        playerNames: [],
+        publishedOn: at,
+        weight: 50,
+        quote: null,
+      });
+    }
+
+    // 18d. The commitment that has already been made for next season, which is the shape of a board question.
+    if (
+      finance.nextSeasonLiabilityToTurnover !== null &&
+      finance.wageToTurnover !== null &&
+      finance.nextSeasonLiabilityToTurnover > finance.wageToTurnover
+    ) {
+      items.push({
+        id: `commitments-${input.seasonNumber}`,
+        kind: "STANDING",
+        category: "FINANCE",
+        /**
+         * Neutral rather than critical, and the copy says why: this is arithmetic about next season, not a
+         * complaint about this one. Filing it as CONCERN put it into the fairness pool, where a paper with
+         * two good stories and no bad ones would drop it in favour of a criticism - which is exactly
+         * backwards, because this is the sort of thing a board wants written down.
+         */
+        tone: "NEUTRAL",
+        headline: pick(
+          [
+            `${input.clubName} Have Already Spent Next Season's Money`,
+            `The Commitments Waiting at ${input.clubName}`,
+            `A Wage Bill That Grows Before It Shrinks`,
+            `Next Season Is Already Expensive`,
+          ],
+          `commit${input.seasonNumber}`,
+          "headline"
+        ),
+        body: `The contracts already agreed are understood to commit the club to more next season than it is carrying now, against the same turnover. It is not a crisis and it is the sort of arithmetic that decides a summer: the room a manager thought he had is already partly spent, on players he has. Nobody signs anything in a window that has not opened, which is the only reason this stays quiet.`,
+        evidence: [
+          `Next season's committed wage is a larger share of turnover than this season's`,
+          `This season ${(finance.wageToTurnover * 100).toFixed(0)}% of ${turnover} (DERIVED_ESTIMATE)`,
+          `Next season ${(finance.nextSeasonLiabilityToTurnover * 100).toFixed(0)}% of the same estimate`,
+        ],
+        playerNames: [],
+        publishedOn: at,
+        weight: 62,
+        quote: null,
+      });
+    }
+
+    // 18e. A record fee, in either direction. The save carries one per season and it is a real fact rather
+    // than an estimate, which makes it the most quotable thing the desk has about money.
+    if (finance.recordBuy !== null || finance.recordSale !== null) {
+      const bought = finance.recordBuy !== null ? moneyBand(finance.recordBuy, finance.currency) : null;
+      const sold = finance.recordSale !== null ? moneyBand(finance.recordSale, finance.currency) : null;
+      items.push({
+        id: `record-fee-${input.seasonNumber}-${finance.recordBuy ?? 0}-${finance.recordSale ?? 0}`,
+        kind: "STANDING",
+        category: "FINANCE",
+        tone: "NEUTRAL",
+        headline: pick(
+          [
+            bought && sold ? `Bought for ${bought}, Sold for ${sold}` : bought ? `The ${bought} Man` : `Sold for ${sold}`,
+            `The Biggest Deal on the Books at ${input.clubName}`,
+            `What ${input.clubName} Pay for Their Best`,
+            `One Fee That Says What a Club Is`,
+          ],
+          `record${input.seasonNumber}`,
+          "headline"
+        ),
+        body: `${bought ? `The largest fee this club is understood to have paid is ${bought}` : "No fee paid is understood to be on the record for this club"}${bought && sold ? `, and the largest it is understood to have received is ${sold}` : sold ? `, and the largest it is understood to have received is ${sold}` : ""}. Both figures are the save's own. A single deal says less about a club than a habit does, and it is the only one of the two that anybody outside the boardroom ever sees.`,
+        evidence: [
+          bought ? `Record paid ${bought} (from the save)` : "No record fee paid is recorded",
+          sold ? `Record received ${sold} (from the save)` : "No record fee received is recorded",
+        ],
+        playerNames: [],
+        publishedOn: at,
+        weight: 56,
+        quote: null,
+      });
+    }
+
+    // 18f. The club with no stated budget, which is its own story rather than an absence of one. A save that
+    // writes 0 for a budget has not said the club has nothing; it has said nothing at all.
+    if (finance.transferBudget === null && (finance.recordBuy !== null || finance.recordSale !== null)) {
+      items.push({
+        id: `sell-to-buy-${input.seasonNumber}`,
+        kind: "STANDING",
+        category: "FINANCE",
+        tone: "NEUTRAL",
+        headline: pick(
+          [
+            `No Budget on the Record at ${input.clubName}`,
+            `${input.clubName} Must Sell Before They Buy`,
+            `Quiet Window Expected at ${input.clubName}`,
+            `The Money Has to Come from Somewhere`,
+          ],
+          `sellbuy${input.seasonNumber}`,
+          "headline"
+        ),
+        body: `No transfer budget is recorded for this club, which usually means one of two things: the board has not set one, or there is nothing to set. History on the record suggests the money would come from a sale, and that is the version of the window a manager does not control. The manager has not said either way, which is itself an answer.`,
+        evidence: [
+          `No transfer budget recorded (a save of 0 reads as unknown, not as zero)`,
+          finance.recordSale !== null ? `Record received ${moneyBand(finance.recordSale, finance.currency)} (from the save)` : "",
+          finance.recordBuy !== null ? `Record paid ${moneyBand(finance.recordBuy, finance.currency)} (from the save)` : "",
+        ].filter(Boolean),
+        playerNames: [],
+        publishedOn: at,
+        weight: 48,
+        quote: null,
+      });
+    }
+  }
+
   // ---- 19. A player on the way up ------------------------------------------------------------
   // The save knows a rating moved. A newspaper knows a coach is pleased, and says so. What it must not do
   // is report the number: nobody in the ground can see it. So the story is about FORM and DIRECTION, which
@@ -2849,7 +3154,563 @@ function matchReportBody(
     });
   }
 
-  return finalise(rank(items, input.matches.map((match) => match.eventId)), input);
+  // ---- 26. The individual match, where the facts earn a second look ----------------------------------
+  /**
+   * The things about one match that the report does not say.
+   *
+   * Every one of these is guarded by a fact rather than by a mood: three goals in one match, every goal by
+   * one man, a winner in the last five minutes, a lead given away, a run of matches without scoring. They are
+   * separate stories rather than frames inside the report because each of them is a story a paper would run
+   * on its own, and because the one-match ration in `rank` is what stops them all printing at once.
+   */
+  if (last) {
+    const haulTally = scorerTally(last.scorers);
+    const haul = haulTally[0];
+    const haulAgainst = opponentWord(last);
+
+    // 26a. A hat-trick or better. The rarest thing on the table and the one no paper ignores.
+    if (haul && haul.goals >= 3) {
+      items.push({
+        id: `haul-${foldName(haul.name)}-${last.eventId}`,
+        kind: "MATCH",
+        category: "PLAYER FOCUS",
+        tone: "GOOD",
+        headline: pick(
+          [
+            `${haul.name} Takes the Match Ball`,
+            `A Hat-Trick for ${haul.name}`,
+            `${goalTallyWord(haul.goals)}: ${haul.name} Sees Off ${haulAgainst}`,
+            `${haul.name} Will Not Forget This One`,
+          ],
+          `haul${foldName(haul.name)}${last.eventId}`,
+          "headline"
+        ),
+        body: `${haul.name} scored ${goalTallyWord(haul.goals)} in a match that finished ${scoreOf(last)}. ${haulTally.length === 1 ? `Nobody else scored for ${input.clubName} at all, which makes it his match rather than his side's.` : `${namesList(haulTally.slice(1).map((entry) => entry.name))} got the others, which will not bother him much.`}`,
+        evidence: [
+          `${haul.name} ${haul.goals} ${plural(haul.goals, "goal")}`,
+          `${last.scorers.length} scorer entries logged for ${input.clubName}`,
+          `Final score ${scoreOf(last)}`,
+        ],
+        playerNames: [haul.name],
+        publishedOn: last.matchDate,
+        weight: 86,
+        quote: null,
+      });
+    } else if (haul && haul.goals >= 2 && last.goalsFor === haul.goals && last.goalsAgainst > 0) {
+      // 26b. Every goal by one player, in a match the side did not win. A different story from a hat-trick:
+      // this one is about carrying a team rather than about a rout.
+      items.push({
+        id: `carried-${foldName(haul.name)}-${last.eventId}`,
+        kind: "MATCH",
+        category: "PLAYER FOCUS",
+        tone: "NEUTRAL",
+        headline: pick(
+          [
+            `${haul.name} Scored the Lot and It Still Was Not Enough`,
+            `All of ${input.clubName}'s Goals, One Man`,
+            `${haul.name} Does It Alone Against ${haulAgainst}`,
+          ],
+          `carried${foldName(haul.name)}${last.eventId}`,
+          "headline"
+        ),
+        body: `Every goal ${input.clubName} scored came from ${haul.name}, and the match finished ${scoreOf(last)}. A player doing that will be pleased with himself and the manager will be quietly uneasy about it, because a side that scores only through one man has one man to lose.`,
+        evidence: [
+          `${haul.name} ${haul.goals} of ${input.clubName}'s ${last.goalsFor}`,
+          `Final score ${scoreOf(last)}`,
+        ],
+        playerNames: [haul.name],
+        publishedOn: last.matchDate,
+        weight: 68,
+        quote: null,
+      });
+    }
+
+    const decided = decidingGoalMinute(last);
+    // 26c. A winner in the last five minutes. `decidingGoalMinute` only returns anything at a margin of one,
+    // so this cannot fire on a match that was already settled.
+    if (decided !== null && decided >= 85 && last.result === "WIN") {
+      items.push({
+        id: `late-winner-${last.eventId}`,
+        kind: "MATCH",
+        category: "THIS JUST IN",
+        tone: "GOOD",
+        headline: pick(
+          [
+            `${decided} Minutes: ${input.clubName} Win It at the Death`,
+            `A Late Winner Against ${haulAgainst}`,
+            `${input.clubName} Leave It as Late as It Goes`,
+            `One Moment, ${decided} Minutes In`,
+          ],
+          `late${last.eventId}`,
+          "headline"
+        ),
+        body: `The goal that won it came on ${decided} minutes, which is late enough that ${haulAgainst} will feel they had it. A match like that is remembered for the moment rather than for the ninety minutes, and ${input.clubName} will not mind which part of it is remembered.`,
+        evidence: [
+          `Winning goal on ${decided} minutes`,
+          `Final score ${scoreOf(last)}`,
+          `Won by a single goal`,
+        ],
+        playerNames: [],
+        publishedOn: last.matchDate,
+        weight: 82,
+        quote: null,
+      });
+    }
+
+    // 26d. The lead given away. Not a defeat story, and not a draw story either: a thing that happened to a
+    // side that was in front and then was not.
+    if (last.result !== "WIN" && ledAtAnyPoint(last)) {
+      items.push({
+        id: `thrown-away-${last.eventId}`,
+        kind: "MATCH",
+        category: "THE VERDICT",
+        tone: "CONCERN",
+        headline: pick(
+          [
+            `Two Points Dropped: ${input.clubName} Lead and Lose It`,
+            `${input.clubName} Let It Slip Against ${haulAgainst}`,
+            `The Lead Did Not Last`,
+            `A Point That Should Have Been Three`,
+          ],
+          `thrown${last.eventId}`,
+          "headline"
+        ),
+        body: `${input.clubName} were in front in this one and finished it ${scoreOf(last)}, which is a different sentence from a defeat and a worse one than a draw. Led, level, and the manager left to explain the space between the two. It is the sort of thing that shows up in a table at the end of a season.`,
+        evidence: [
+          `Led during the match and did not win it`,
+          `Final score ${scoreOf(last)}`,
+          `Goal minutes logged: ${last.goalMinutes.join(", ") || "none"}`,
+        ],
+        playerNames: [],
+        publishedOn: last.matchDate,
+        weight: 76,
+        quote: null,
+      });
+    }
+  }
+
+  // 26e. A side that has stopped scoring. The mirror of the leak, and it needs its own run of evidence.
+  /**
+   * The CURRENT scoreless run, counted from the newest match backwards.
+   *
+   * A streak rather than the whole window, deliberately. Requiring every match in the window to be scoreless
+   * meant the story could only ever run in a career with no good news anywhere near it, which is exactly the
+   * career whose paper drops critical stories to keep its balance. A drought is a run, and a run has an end.
+   */
+  const scorelessRun = (() => {
+    let count = 0;
+    for (const match of recent) {
+      if (match.goalsFor === 0) count += 1;
+      else break;
+    }
+    return count;
+  })();
+  if (scorelessRun >= 3) {
+    items.push({
+      id: `drought-${recent[0].eventId}`,
+      kind: "MATCH",
+      category: "THE VERDICT",
+      tone: "CONCERN",
+      headline: pick(
+        [
+          `${scorelessRun} Matches Without a Goal`,
+          `Where Have the Goals Gone at ${input.clubName}`,
+          `A Blank Run for ${input.clubName}`,
+          `No Goals in ${scorelessRun}: the Question Nobody Can Answer`,
+        ],
+        `drought${recent[0].eventId}`,
+        "headline"
+      ),
+      body: `Nothing has gone in for ${scorelessRun} ${plural(scorelessRun, "match", "matches")}. That is not bad luck and it is not a defensive problem: it is a team that has stopped finding a way to score, and every match it continues is one more the manager has to explain.`,
+      evidence: [
+        `${scorelessRun} matches without a goal`,
+        `Goals for 0 across the run`,
+        `Goals against ${sum(recent.slice(0, scorelessRun).map((match) => match.goalsAgainst))} in the same matches`,
+      ],
+      playerNames: [],
+      publishedOn: recent[0].matchDate,
+      weight: 80,
+      quote: null,
+    });
+  }
+
+  // ---- 27. A round number in a career ---------------------------------------------------------------
+  /**
+   * The manager's own milestone, counted from the save's season record rather than from the debriefs.
+   *
+   * Round numbers are the only ones worth a story, and the copy says what the number counts - matches in the
+   * seasons the save has closed - because a season in progress may not have a row yet. Claiming "500 matches"
+   * when the save has recorded 450 would be the sort of thing the reader could catch, and the point of this
+   * desk is that he cannot.
+   */
+  const careerMatches = input.gamesInCharge ?? null;
+  if (careerMatches !== null && careerMatches >= 50 && careerMatches % 50 === 0) {
+    items.push({
+      id: `milestone-${careerMatches}`,
+      kind: "STANDING",
+      category: "TOP STORY",
+      tone: "GOOD",
+      headline: pick(
+        [
+          `${careerMatches} Matches In: ${input.managerName} Reaches a Round Number`,
+          `${input.managerName} and the ${careerMatches}-Match Mark`,
+          `A Milestone for ${input.managerName}`,
+          `${careerMatches} Games in Charge at ${input.clubName}`,
+        ],
+        `milestone${careerMatches}`,
+        "headline"
+      ),
+      body: `${input.managerName} has now taken charge of ${careerMatches} matches, on the save's own record of the seasons it has closed. It is the kind of number that only exists to be noticed once and then never mentioned again, and it is worth noticing: managers who get that far are the minority.`,
+      evidence: [
+        `${careerMatches} matches in charge (summed from the save's per-season record)`,
+        `Season ${input.seasonNumber} of the manager's time here`,
+        `A season in progress may not be counted yet`,
+      ],
+      playerNames: [],
+      publishedOn: at,
+      weight: 84,
+      quote: null,
+    });
+  }
+
+  // ---- 25. Opinion ----------------------------------------------------------------------------
+  /**
+   * Columns, and the only place in the paper where the voice is deliberately leaning.
+   *
+   * The same facts filed by a fanzine and by a hostile tabloid are two different pieces, and neither of them
+   * is dishonest: a paper's line on a manager is part of what the paper is, and a reader knows which one he
+   * opened. What makes that fair rather than a pile-on is the rationing in `rank` - one hostile column an
+   * edition, two only after a genuinely bad run, and never a hostile one unless a straight or a loyal paper
+   * is on the page beside it.
+   *
+   * Every column is guarded by the fact it is about, exactly like everything else here. The stance only
+   * decides which paper runs it, and the byline is taken back off that paper in `finalise`, so the stored
+   * story always carries the voice it was actually written in.
+   */
+  const straightLosses = (() => {
+    let count = 0;
+    for (const match of recent) {
+      if (match.result === "LOSS") count += 1;
+      else break;
+    }
+    return count;
+  })();
+  const badRun = straightLosses >= 3;
+
+  // 25a. The manager himself, which is the column every paper has an opinion about.
+  if (recent.length >= 3) {
+    items.push({
+      id: `opinion-manager-${input.seasonNumber}-${recent[0].eventId}`,
+      kind: "STANDING",
+      category: "TALKING POINT",
+      tone: badRun ? "CONCERN" : "NEUTRAL",
+      stance: badRun ? "HOSTILE" : "STRAIGHT",
+      headline: pick(
+        badRun
+          ? [
+              `The Case Against ${input.managerName} Is Getting Easier to Make`,
+              `Something Has to Change at ${input.clubName}`,
+              `${input.clubName} Are Going Backwards`,
+            ]
+          : [
+              `${input.managerName} Has Earned the Benefit of the Doubt`,
+              `Judging ${input.managerName} Fairly`,
+              `What We Actually Know About ${input.managerName}`,
+            ],
+        `op-manager${input.seasonNumber}${recent[0].eventId}`,
+        "headline"
+      ),
+      body: badRun
+        ? `${straightLosses} defeats in a row is not a blip, it is a pattern, and patterns are a manager's problem. The argument that the squad is not his does not survive a third season in charge: at some point the team on the pitch is the one he built. None of this is a demand for anybody's head. It is an observation that the case for patience has to be argued now rather than assumed.`
+        : `The record is ${formString(recent)}, and it is worth saying plainly that a manager's work is not measured over ${recent.length} ${plural(recent.length, "match", "matches")}. It is measured over seasons, and the only honest place to stand is a few paces back. That is not a defence of anybody. It is what the evidence supports, and the evidence is all anybody outside the club actually has.`,
+      article: [
+        pick(
+          badRun
+            ? [
+                `There is a version of this where the manager is right and the results are wrong, and it is the version that ends with everybody out of work. The harder question is not whether he is a good manager but whether the same problems keep arriving, week after week, in the same place.`,
+                `It is worth remembering that this is the third season of a project rather than the third month of one. Projects are allowed to be judged, and they are not allowed to be exempt.`,
+              ]
+            : [
+                `What is knowable is small: a run of results, the squad he has, and how long he has been here. What is not knowable is anything happening inside the training ground at half past nine on a Tuesday, which is where most of this is actually decided.`,
+                `The temptation with a manager who has won something is to stop examining the present. The temptation with one who has not is to stop crediting the past. Both are ways of not reading the evidence.`,
+              ],
+          `op-manager-art${input.seasonNumber}`,
+          "article"
+        ),
+      ],
+      evidence: [
+        `Run ${formString(recent)}`,
+        `${straightLosses} straight ${plural(straightLosses, "defeat")}`,
+        `Season ${input.seasonNumber} of the manager's time here`,
+        badRun ? "Filed hostile: the run justifies the argument" : "Filed straight: the facts do not carry a verdict",
+      ],
+      playerNames: [],
+      publishedOn: at,
+      weight: 78,
+      quote: null,
+    });
+  }
+
+  // 25b. The form column, which is the one a tabloid writes and a broadsheet does not.
+  if (recent.length >= 3) {
+    const wins = recent.filter((match) => match.result === "WIN").length;
+    const losses = recent.filter((match) => match.result === "LOSS").length;
+    items.push({
+      id: `opinion-form-${input.seasonNumber}-${recent[0].eventId}`,
+      kind: "MATCH",
+      category: "OPINION",
+      tone: wins > losses ? "GOOD" : losses > wins ? "CONCERN" : "NEUTRAL",
+      stance: "SENSATIONAL",
+      headline: pick(
+        [
+          `The Numbers Do Not Care About Your Excuses`,
+          `${wins} Wins, ${losses} ${plural(losses, "Defeat", "Defeats")}: the Season in One Line`,
+          `Forget the Table, Look at This`,
+          `It Is Time to Talk About the Form`,
+        ],
+        `op-form${input.seasonNumber}${recent[0].eventId}`,
+        "headline"
+      ),
+      body: `The last ${recent.length} ${plural(recent.length, "match", "matches")} read ${formString(recent)}, and that is the whole of it. Everything else on the page is interpretation. This is the part that will still be true in a month.`,
+      article: [
+        pick(
+          [
+            `There is no clever reading of a run like ${formString(recent)} and anybody offering one has a book to sell. A sequence of results is the least subtle piece of evidence in football and the most reliable.`,
+            `Every club has a paragraph of context for a sequence like this, and every one of those paragraphs has been written before about somebody else. The sequence is the part nobody can argue with.`,
+          ],
+          `op-form-art${input.seasonNumber}`,
+          "article"
+        ),
+      ],
+      evidence: [`Run ${formString(recent)}`, `${wins} wins, ${losses} defeats in the window`],
+      playerNames: [],
+      publishedOn: at,
+      weight: 76,
+      quote: null,
+    });
+  }
+
+  // 25c. The loyal column, from the paper that stands behind the club rather than above it.
+  if (input.squad.length > 0) {
+    items.push({
+      id: `opinion-squad-${input.seasonNumber}`,
+      kind: "STANDING",
+      category: "OPINION",
+      tone: "GOOD",
+      stance: "LOYAL",
+      headline: pick(
+        [
+          `This Squad Is Better Than It Is Being Given Credit For`,
+          `A Note on What ${input.clubName} Actually Have`,
+          `The Case for Backing What Is Already Here`,
+        ],
+        `op-squad${input.seasonNumber}`,
+        "headline"
+      ),
+      body: `A squad of ${input.squad.length} is not a small one, and the instinct to look outside it whenever a result goes wrong is a habit rather than a diagnosis. Clubs at this level are built from what is in the building, and the manager knows better than anybody which parts of it work. That is not an argument against signing anybody. It is an argument against panic.`,
+      article: [
+        pick(
+          [
+            `Every club in this division has a squad of roughly this size and roughly this standard, which is exactly why the differences come from coaching and patience rather than from the market. The market is where money is, and money is what most clubs at this level do not have.`,
+            `It is worth remembering that the players being criticised are the same ones who were being praised a month ago, and that neither verdict was ever about them. Form is a property of a team, and teams take time.`,
+          ],
+          `op-squad-art${input.seasonNumber}`,
+          "article"
+        ),
+      ],
+      evidence: [`Squad of ${input.squad.length}`, "Filed loyal: the fanzine's own line is behind the club"],
+      playerNames: [],
+      publishedOn: at,
+      weight: 46,
+      quote: null,
+    });
+  }
+
+  // 25d. The supporters, who are the only people the paper is actually speaking for.
+  if (recent.length >= 3) {
+    items.push({
+      id: `opinion-supporters-${input.seasonNumber}-${recent[0].eventId}`,
+      kind: "MATCH",
+      category: "OPINION",
+      tone: badRun ? "CONCERN" : "NEUTRAL",
+      stance: "LOYAL",
+      headline: pick(
+        [
+          `What the Supporters Are Actually Saying`,
+          `Nobody Is Asking for Miracles at ${input.clubName}`,
+          `A Word From the Stands`,
+        ],
+        `op-supporters${input.seasonNumber}${recent[0].eventId}`,
+        "headline"
+      ),
+      body: `The people paying for this are not asking for a league title, and they never were. They are asking for the run ${formString(recent)} to look like it is going somewhere. That is a smaller ask than it sounds, and it is the one the manager has to answer.`,
+      article: [
+        pick(
+          [
+            `Supporters forgive a great deal. They forgive losing to a better side, they forgive a bad signing, and they forgive a season that does not work out. What they do not forgive is a team that looks like it has stopped being able to change its own story.`,
+            `The relationship between a club and the people who turn up is not sentimental, whatever the marketing says. It is a straightforward question of whether the thing being paid for is going anywhere, asked every week.`,
+          ],
+          `op-supporters-art${input.seasonNumber}`,
+          "article"
+        ),
+      ],
+      evidence: [`Run ${formString(recent)}`, "Filed loyal: the fanzine speaks for the stands"],
+      playerNames: [],
+      publishedOn: at,
+      weight: 44,
+      quote: null,
+    });
+  }
+
+  // 25e. The academy argument, which is the one column that is always available and always arguable.
+  if (input.academy?.name) {
+    items.push({
+      id: `opinion-youth-${input.seasonNumber}`,
+      kind: "STANDING",
+      category: "OPINION",
+      tone: "GOOD",
+      stance: "LOYAL",
+      headline: pick(
+        [
+          `The Answer May Already Be in the Building`,
+          `${input.academy.name} and the Case for Patience`,
+          `Where the Next One Comes From`,
+        ],
+        `op-youth${input.seasonNumber}`,
+        "headline"
+      ),
+      body: `There is a player in this club's academy worth being patient about, and patience is the only thing that has ever produced one. The clubs that buy their way out of a problem are the clubs with the money to do it. ${input.clubName} are not one of those, and pretending otherwise has never once worked.`,
+      article: [
+        pick(
+          [
+            `A youth player is not a transfer policy and should not be sold as one, but the arithmetic is unavoidable: a club at this level gets maybe one of these a season and cannot afford to be careless with him.`,
+            `The romanticism around academy football obscures something more useful, which is that it is cheap. A player who comes through costs a fraction of one who arrives, and the gap is what pays for everything else.`,
+          ],
+          `op-youth-art${input.seasonNumber}`,
+          "article"
+        ),
+      ],
+      evidence: [`Academy prospect ${input.academy.name}`, "Filed loyal: an argument for the club's own method"],
+      playerNames: [input.academy.name],
+      publishedOn: at,
+      weight: 42,
+      quote: null,
+    });
+  }
+
+  // 25f. The tactical question. Straight, because the desk has a fact and not a view.
+  if (recent.length >= 3 && input.matches.some((match) => (match.weakness ?? "").trim().length > 0)) {
+    items.push({
+      id: `opinion-tactics-${input.seasonNumber}-${recent[0].eventId}`,
+      kind: "MATCH",
+      category: "TALKING POINT",
+      tone: "NEUTRAL",
+      stance: "STRAIGHT",
+      headline: pick(
+        [
+          `The Question Nobody at ${input.clubName} Wants to Answer`,
+          `One Problem, Named and Not Solved`,
+          `What the Record Keeps Showing`,
+        ],
+        `op-tactics${input.seasonNumber}${recent[0].eventId}`,
+        "headline"
+      ),
+      body: `The same problem has been written down more than once this season, which makes it a problem rather than an accident. Nobody is suggesting it is unfixable, and nobody at the club has suggested it is fixed. The gap between those two positions is where the rest of the season lives.`,
+      article: [
+        pick(
+          [
+            `A recurring problem in football is usually a problem of the system rather than of the players, because players change and systems do not. That is not a criticism of anybody in particular and it is where the work is.`,
+            `The interesting thing about a repeat is that it is evidence. A one-off is noise; the second one is a pattern, and the third is a manager's job.`,
+          ],
+          `op-tactics-art${input.seasonNumber}`,
+          "article"
+        ),
+      ],
+      evidence: ["The manager's own match notes name the same problem more than once", "Filed straight: a question rather than a verdict"],
+      playerNames: [],
+      publishedOn: at,
+      weight: 74,
+      quote: null,
+    });
+  }
+
+  // 25g. The money column, which is where a hostile paper does its damage without inventing a word.
+  if (finance && (finance.recordBuy !== null || finance.recordSale !== null || finance.wageTurnoverLevel !== "OK")) {
+    items.push({
+      id: `opinion-money-${input.seasonNumber}`,
+      kind: "STANDING",
+      category: "TALKING POINT",
+      tone: "CONCERN",
+      stance: "HOSTILE",
+      headline: pick(
+        [
+          `The Money Has Always Been the Real Story at ${input.clubName}`,
+          `Follow the Spending`,
+          `${input.clubName} Are Paying for Decisions Already Made`,
+        ],
+        `op-money${input.seasonNumber}`,
+        "headline"
+      ),
+      body: `The wage bill is understood to be ${moneyBand(finance.squadAnnualWage, finance.currency)} a year against a turnover this level of the game supports only up to a point. ${finance.recordBuy !== null ? `The largest fee paid on the record is ${moneyBand(finance.recordBuy, finance.currency)}. ` : ""}None of that is the manager's fault in the first year of a job and all of it is his problem in the third.`,
+      article: [
+        pick(
+          [
+            `A club's wage bill is the most honest thing about it, because it cannot be spun. It says what the club believes its players are worth, and it says it whether or not anybody agrees.`,
+            `Every argument about a manager eventually becomes an argument about money, and every argument about money eventually becomes an argument about who agreed to it. That is where the pressure actually lives.`,
+          ],
+          `op-money-art${input.seasonNumber}`,
+          "article"
+        ),
+      ],
+      evidence: [
+        `Squad wage ${moneyBand(finance.squadAnnualWage, finance.currency)} a year (from the squad's own contract rows)`,
+        `Assumed turnover ${moneyBand(finance.estimatedTierRevenue, finance.currency)} (DERIVED_ESTIMATE)`,
+        "Filed hostile: the numbers are argued rather than reported",
+      ],
+      playerNames: [],
+      publishedOn: at,
+      weight: 70,
+      quote: null,
+    });
+  }
+
+  // 25h. The table, which is a fact and reads best said calmly.
+  if (input.position?.value != null && input.leagueName) {
+    items.push({
+      id: `opinion-table-${input.seasonNumber}-${input.position.value}`,
+      kind: "STANDING",
+      category: "OPINION",
+      tone: input.position.value <= 6 ? "GOOD" : input.position.value >= 18 ? "CONCERN" : "NEUTRAL",
+      stance: "STRAIGHT",
+      headline: pick(
+        [
+          `${ordinal(input.position.value)} Is Not a Disaster and Not an Achievement`,
+          `What ${ordinal(input.position.value)} Actually Means`,
+          `The Table, Read Properly`,
+        ],
+        `op-table${input.seasonNumber}${input.position.value}`,
+        "headline"
+      ),
+      body: `${ordinal(input.position.value)} in the ${input.leagueName} is where this season has got to, and the table is the only verdict that accumulates rather than being announced. Positions in the middle of it are not comfortable or uncomfortable; they are unfinished, and there is a difference between a table that is unfinished and one that is decided.`,
+      article: [
+        pick(
+          [
+            `A league table is the least fashionable piece of analysis in football and the only one that has never been wrong about who finished where. Everything else is a forecast.`,
+            `The honest reading of a mid-season table is that it tells you what has happened and nothing at all about what will. Clubs have climbed from worse and fallen from better, which is the entire reason anybody watches.`,
+          ],
+          `op-table-art${input.seasonNumber}`,
+          "article"
+        ),
+      ],
+      evidence: [`Position ${input.position.value}`, input.position.basis ? `Basis ${input.position.basis}` : "", "Filed straight: the table is reported rather than argued"].filter(Boolean),
+      playerNames: [],
+      publishedOn: at,
+      weight: 54,
+      quote: null,
+    });
+  }
+
+  return finalise(rank(items, input.matches.map((match) => match.eventId), { badRun }), input);
 }
 
 /** How long a return stays a story. About a fortnight: after that the squad has settled without him. */
@@ -2898,6 +3759,8 @@ const BYLINED_CATEGORIES = new Set([
   "TRANSFER DESK",
   "SILVERWARE",
   "TEAM NEWS",
+  // Money is speculation by nature and reads as a column rather than as a notice, so it carries a name.
+  "FINANCE",
   // A column or a rumour without a name on it reads as a system note, and a stated stance only means
   // something if the masthead it belongs to is on the piece.
   "OPINION",
@@ -2954,6 +3817,75 @@ function pickFresh(options: readonly string[], seed: string, slot: string, used:
   }
   return preferred;
 }
+
+/**
+ * What a story is about, for the sake of its closing paragraph.
+ *
+ * Ten subjects, and every story has one. This is the thing the first version of the closing paragraph was
+ * missing entirely.
+ */
+type NewsSubject =
+  | "MATCH"
+  | "TABLE"
+  | "SQUAD"
+  | "PLAYER"
+  | "MONEY"
+  | "INJURY"
+  | "ACADEMY"
+  | "CONTRACT"
+  | "TROPHY"
+  | "CLUB";
+
+/**
+ * The subject of a story, read from the id it was given when it was written.
+ *
+ * A lookup on the id prefix rather than a field on every draft: twenty-seven stories already carry a stable
+ * id, and a second thing to set in all of them is a second thing to forget in one of them.
+ */
+function subjectOf(id: string): NewsSubject {
+  if (
+    /^(result|clean-sheet|finishing|timing|margin|defence|weakness|form-|home-form|away-form|goals|leak|haul|carried|late-winner|thrown-away|drought|opinion-form|opinion-supporters)/.test(
+      id
+    )
+  ) {
+    return "MATCH";
+  }
+  if (/^(position|opinion-table)/.test(id)) return "TABLE";
+  if (/^(depth|star|opinion-squad)/.test(id)) return "SQUAD";
+  if (/^(progress|regress|standout|scorer|assists)/.test(id)) return "PLAYER";
+  if (/^(opinion-money|record-fee|war-chest|wage-|commitments|sell-to-buy)/.test(id)) return "MONEY";
+  if (/^(injury|return)/.test(id)) return "INJURY";
+  if (/^(youth|opinion-youth)/.test(id)) return "ACADEMY";
+  if (/^contract/.test(id)) return "CONTRACT";
+  if (/^trophy/.test(id)) return "TROPHY";
+  return "CLUB";
+}
+
+/**
+ * Which subjects a conclusion is allowed to follow.
+ *
+ * THE BUG THIS FIXES. The first version scored conclusions on how significant they were and let every one of
+ * them follow every story, so a piece about a clean sheet closed on the club's contract situation and a note
+ * about a fifteen year old closed on the middle stretch of the season. A closing line with nothing to do with
+ * the story above it is worse than no closing line at all: the reader notices the last sentence does not
+ * belong long before he can say why, and what he takes from that is that nobody read the piece before it
+ * went out.
+ *
+ * A family with no entry serves every subject, which is right for the two that are genuinely universal - the
+ * phase of the season, and the single generic line held back for a thin edition.
+ */
+const CONCLUSION_SUBJECTS: Record<string, NewsSubject[]> = {
+  run: ["MATCH", "TABLE", "CLUB"],
+  table: ["TABLE", "MATCH", "CLUB"],
+  block: ["MATCH", "TABLE", "CLUB"],
+  injuries: ["INJURY", "SQUAD", "MATCH", "CLUB"],
+  development: ["PLAYER", "SQUAD", "MATCH", "CLUB"],
+  squad: ["SQUAD", "PLAYER", "INJURY", "ACADEMY", "CONTRACT", "CLUB"],
+  contracts: ["CONTRACT", "SQUAD", "MONEY", "CLUB"],
+  trophy: ["TROPHY", "CLUB"],
+  academy: ["ACADEMY", "SQUAD", "CLUB"],
+  tenure: ["CLUB"],
+};
 
 /**
  * The closing paragraph of an article.
@@ -3052,10 +3984,10 @@ function outlookParagraph(
       key: "injuries",
       score: 65,
       options: [
-        `The treatment room is the part of this the manager cannot plan around.`,
+        `The treatment room is the part of a season nobody can plan around.`,
         `What he can control is what he does next, and an unavailable player takes some of that away.`,
         `With ${unavailable.length === 1 ? "an absence" : "absences"} already on the books, the room to change the side is smaller than it looks.`,
-        `None of this happens in isolation: it happens to a squad that is already short somewhere.`,
+        `An absence never arrives in isolation: it lands on a squad that is already short somewhere.`,
         `A squad with a player in the treatment room has less room to move than the team sheet suggests.`,
         `The manager's own options are the constraint he works inside, and they are narrower than they were.`,
       ],
@@ -3069,7 +4001,7 @@ function outlookParagraph(
       key: "development",
       score: 58,
       options: [
-        `The individual story inside it matters too, because a squad improves one player at a time.`,
+        `A squad improves one player at a time, which is the part of it a league table cannot show.`,
         `A team is a set of players, and one of them is moving while this is being written.`,
         `Progress is rarely announced. It turns up in a training session and shows itself a month later.`,
         `The manager will know which of his players this is about, and he will not be saying.`,
@@ -3161,11 +4093,11 @@ function outlookParagraph(
       key: "tenure",
       score: 42,
       options: [
-        `This is ${tenure} in charge, which is a different thing to be judged on from a settled one.`,
+        `${capitalise(tenure)} in charge is a different thing to be judged on from a settled one.`,
         `Whatever the table says, ${tenure} is the context every one of these arguments sits inside.`,
         `${capitalise(tenure)} is either a foundation or an excuse, and only the next month will say which.`,
-        `Managers are given time in units of seasons, and this is ${tenure}.`,
-        `It is worth remembering that this is ${tenure}, because that is the clock he is actually on.`,
+        `Managers are given time in units of seasons rather than in matches.`,
+        `${capitalise(tenure)} is the clock the manager is on, and it is worth remembering.`,
       ],
     });
   }
@@ -3178,12 +4110,11 @@ function outlookParagraph(
       key: "phase",
       score: 35,
       options: [
-        `It matters differently ${atPhase} than it would in a month's time.`,
-        `${capitalise(atPhase)}, there is still enough of the season left for this to change.`,
-        `Judged ${atPhase}, this is a detail rather than a verdict.`,
-        `The calendar is not the argument, but it is part of the context: ${atPhase}, that context will move.`,
-        `Time is the thing the manager has most of, and ${atPhase} there is still time.`,
-        `A season has a shape. ${capitalise(atPhase)}, the shape of this one is not settled yet.`,
+        `Time is the thing a manager has most of, and ${atPhase} there is still time.`,
+        `A season has a shape, and ${atPhase} the shape of this one is not settled yet.`,
+        `Nothing is decided ${atPhase} beyond what has already happened.`,
+        `The calendar is not an argument, and ${atPhase} it is at least part of the context.`,
+        `A league table is a picture rather than a verdict, and ${atPhase} that is worth remembering.`,
       ],
     });
   }
@@ -3196,9 +4127,9 @@ function outlookParagraph(
     generic: true,
     options: [
       `None of that decides a season on its own.`,
-      `Read it as a detail rather than a verdict: seasons turn on a dozen of these, not on one.`,
-      `There is no crisis in it, and there is something to think about, which is the usual state of a football club.`,
-      `The manager will file it away with the rest of what he knows and act when it suits him.`,
+      `It is a detail rather than a verdict, and seasons turn on a dozen details rather than on one.`,
+      `There is no crisis here and there is something to think about, which is the usual state of a football club.`,
+      `The manager will file the detail away with the rest of what he knows and act when it suits him.`,
       `A long season absorbs a story like this one and moves on.`,
       `It is the sort of thing that matters more as the season goes on than on the day it is noticed.`,
     ],
@@ -3207,15 +4138,28 @@ function outlookParagraph(
   /**
    * Ranked by a relevance score the edition's own history discounts.
    *
-   * The discount is the whole point. Ranking on relevance alone reaches for the most relevant conclusion
-   * again and again until its phrasings are gone and it has to repeat itself - which is how two different
-   * stories in one paper ended up sharing a closing sentence. Every use of a family costs it fifty points, so
-   * the paper spreads its conclusions across everything it knows. The hash is inside the value rather than a
-   * fallback, so two candidates that are equally relevant and equally fresh still resolve the same way on
-   * every read.
+   * Two filters before anything is ranked, and the order matters. A conclusion is dropped unless it is about
+   * the same SUBJECT as the story it would close, and only then is the rest ranked by relevance and by how
+   * often this edition has already used it.
+   *
+   * The discount is the second half of the point. Ranking on relevance alone reaches for the most relevant
+   * conclusion again and again until its phrasings are gone and it has to repeat itself - which is how two
+   * different stories in one paper ended up sharing a closing sentence. Every use of a family costs it fifty
+   * points, so the paper spreads its conclusions across everything it knows. The hash sits inside the value
+   * rather than in a fallback, so two candidates that are equally relevant and equally fresh still resolve
+   * the same way on every read.
    */
+  const subject = subjectOf(seed);
+  const onSubject = candidates.filter((candidate) => {
+    const allowed = CONCLUSION_SUBJECTS[candidate.key];
+    return allowed === undefined || allowed.includes(subject);
+  });
+  // Every story reaches the generic line even when nothing else fits, so an empty pool cannot happen - but a
+  // pool that is somehow empty falls back to the whole list rather than closing the piece on nothing.
+  const pool = onSubject.length > 0 ? onSubject : candidates;
+
   const usedTimes = (key: string) => memory.families.get(key) ?? 0;
-  const ranked = candidates
+  const ranked = pool
     .map((candidate) => ({
       ...candidate,
       value:
@@ -3266,9 +4210,14 @@ function finalise(items: StoryDraft[], input: NewsInput): NewsItem[] {
       body: summary,
       article,
       byline,
-      // Taken back off the byline rather than left as asked for, so the stored stance is the one the paper
-      // that actually ran the piece writes in.
-      stance: byline?.stance ?? item.stance ?? null,
+      /**
+       * The line this PIECE takes, which is nothing unless it was written as an opinion.
+       *
+       * Not the outlet's own stance. Every paper in the library has a house line, and inheriting it here
+       * would mark a straight match report as hostile because it happened to be picked up by a tabloid. A
+       * report states facts and takes no position; only a column does, and only a column sets this.
+       */
+      stance: item.stance ?? null,
     };
   });
 }
@@ -3295,8 +4244,15 @@ function matchStatsNote(match: NewsMatch): string {
  * squad, is not being honest, it is being sour, and a reader can tell the difference.
  */
 export function rank<
-  T extends { weight: number; id: string; category: string; tone: NewsTone; playerNames: string[] },
->(items: T[], matchEventIds: readonly string[] = []): T[] {
+  T extends {
+    weight: number;
+    id: string;
+    category: string;
+    tone: NewsTone;
+    playerNames: string[];
+    stance?: OutletStance | null;
+  },
+>(items: T[], matchEventIds: readonly string[] = [], options: { badRun?: boolean } = {}): T[] {
   const sorted = [...items].sort(
     (left, right) => right.weight - left.weight || left.id.localeCompare(right.id)
   );
@@ -3348,19 +4304,68 @@ export function rank<
     withinEvent.push(item);
   }
 
-  const balanced = balanceCoverage(withinEvent);
+  /**
+   * The opinion ration.
+   *
+   * A paper that runs two columns against its own manager on the same day is campaigning rather than
+   * reporting, and a stance only means anything if it is rationed. One leaning column an edition, two only
+   * after three straight defeats - when there is genuinely a case for somebody to answer - and a hostile or
+   * sensational piece is dropped outright unless a straight or a loyal one is on the page beside it. That last
+   * rule is the important one: a reader has to be able to see both arguments at once, which is the whole
+   * difference between a paper with a view and a paper with a grudge.
+   */
+  const leaning = (item: T) => item.stance === "HOSTILE" || item.stance === "SENSATIONAL";
+  const evenHanded = (item: T) => item.stance === "STRAIGHT" || item.stance === "LOYAL";
+  const hasEvenHanded = withinEvent.some(evenHanded);
+  const leaningAllowed = options.badRun ? 2 : 1;
+  const opinionCapped: T[] = [];
+  let leaningKept = 0;
+  for (const item of withinEvent) {
+    if (!leaning(item)) {
+      opinionCapped.push(item);
+      continue;
+    }
+    if (!hasEvenHanded || leaningKept >= leaningAllowed) continue;
+    leaningKept += 1;
+    opinionCapped.push(item);
+  }
 
+  const balanced = balanceCoverage(opinionCapped);
+
+  /**
+   * Interleaved by category, taking the category with the MOST left to place.
+   *
+   * The first version took the highest-ranked story whose category had not just run, and that is not the same
+   * thing: it happily ran the categories with one story each to the end and then placed three columns of the
+   * same kind back to back, because by then nothing else was left. Choosing the category that has the most
+   * remaining is the arrangement that keeps the most separation for as long as possible, so a paper with two
+   * or three columns in it does not finish with them all in a row.
+   *
+   * Within a category the ranked order is kept, so this separates the kinds of story without ever
+   * re-ordering by significance inside one.
+   */
+  const remaining = [...balanced];
   const out: T[] = [];
-  const taken = new Set<T>();
-  // Interleave by category: repeatedly take the highest-ranked story whose category has not just run.
   let lastCategory: string | null = null;
-  while (out.length < balanced.length) {
-    const next =
-      balanced.find((item) => !taken.has(item) && item.category !== lastCategory) ??
-      balanced.find((item) => !taken.has(item));
-    if (!next) break;
+  while (remaining.length > 0) {
+    const counts = new Map<string, number>();
+    for (const item of remaining) counts.set(item.category, (counts.get(item.category) ?? 0) + 1);
+    let bestIndex = -1;
+    let bestCount = -1;
+    for (let index = 0; index < remaining.length; index += 1) {
+      const item = remaining[index];
+      if (item.category === lastCategory) continue;
+      const count = counts.get(item.category) ?? 0;
+      if (count > bestCount) {
+        bestCount = count;
+        bestIndex = index;
+      }
+    }
+    // Nothing left that differs from the last one placed, so the paper has one category's worth of stories
+    // and nowhere else to put them. This is the only case that produces two neighbours of the same kind.
+    if (bestIndex === -1) bestIndex = 0;
+    const [next] = remaining.splice(bestIndex, 1);
     out.push(next);
-    taken.add(next);
     lastCategory = next.category;
   }
   return out;

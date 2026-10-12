@@ -97,34 +97,33 @@ export function deskDate(value: string | null): string | null {
 /**
  * The lead story's picture area.
  *
- * A face when the club's own records resolve the name, and the club's initials when they do not. A story
- * about a team rather than a player gets the monogram too, which is the honest answer: there is no picture
- * of a league position, and a stock photo would be an invention.
+ * A face when the club's own records resolve the name. A story about the CLUB rather than about a player gets
+ * the club's badge, which is the picture for club news: a badge is what a paper prints beside a piece about a
+ * club's season, and the initials were only ever standing in for one. Where the manager has given the app no
+ * badge at all, the monogram is still the honest answer - there is no picture of a league position, and a
+ * stock photograph would be an invention.
  */
 export function LeadPlate({
   item,
   clubName,
+  badgeUrl,
   className = "",
 }: {
   item: NewsItem & { playerIds?: number[] };
   clubName: string;
+  badgeUrl?: string | null;
   className?: string;
 }) {
   const leadId = item.playerIds?.[0] ?? null;
   const leadName = item.playerNames[0] ?? "";
   return (
     <div
-      className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br to-transparent ring-1 ring-black/5 dark:ring-white/10 ${TONES[item.tone].wash} ${className}`}
+      className={`relative flex shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br to-transparent p-3 ring-1 ring-black/5 dark:ring-white/10 ${TONES[item.tone].wash} ${className}`}
     >
       {leadId !== null ? (
         <PlayerFace eaPlayerId={leadId} name={leadName} size={116} />
       ) : (
-        <span
-          aria-hidden="true"
-          className="flex h-[116px] w-[116px] select-none items-center justify-center rounded-full bg-gradient-to-br from-slate-200 to-slate-300 font-heading text-3xl text-slate-600 ring-1 ring-black/10 dark:from-slate-700 dark:to-slate-800 dark:text-slate-300 dark:ring-white/10"
-        >
-          {monogram(clubName)}
-        </span>
+        <ClubCrest clubName={clubName} badgeUrl={badgeUrl} size={104} className="rounded-xl" />
       )}
     </div>
   );
@@ -378,23 +377,20 @@ export function ArticleDialog({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex flex-col gap-5 p-5 sm:flex-row sm:gap-6 sm:p-6">
-          {/* The picture area: the player, and the crest of the club he plays for beside him. */}
+          {/* The picture area. A piece about a player carries his face and the club's badge beside it; a
+              piece about the club carries the badge itself rather than a monogram standing in for it, and
+              then there is no second badge to print beside it. */}
           <div className="flex shrink-0 items-start gap-3">
             <div
-              className={`relative flex items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br to-transparent ring-1 ring-black/5 dark:ring-white/10 ${TONES[item.tone].wash}`}
+              className={`relative flex items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br to-transparent p-3 ring-1 ring-black/5 dark:ring-white/10 ${TONES[item.tone].wash}`}
             >
               {leadId !== null ? (
                 <PlayerFace eaPlayerId={leadId} name={leadName} size={148} />
               ) : (
-                <span
-                  aria-hidden="true"
-                  className="flex h-[148px] w-[148px] select-none items-center justify-center bg-gradient-to-br from-slate-200 to-slate-300 font-heading text-4xl text-slate-600 dark:from-slate-700 dark:to-slate-800 dark:text-slate-300"
-                >
-                  {monogram(clubName)}
-                </span>
+                <ClubCrest clubName={clubName} badgeUrl={badgeUrl} size={124} className="rounded-xl" />
               )}
             </div>
-            <ClubCrest clubName={clubName} badgeUrl={badgeUrl} size={48} />
+            {leadId !== null ? <ClubCrest clubName={clubName} badgeUrl={badgeUrl} size={48} /> : null}
           </div>
 
           <div className="min-w-0 flex-1">
