@@ -9,6 +9,7 @@
  * The CDN is keyed by EA's internal playerid, which is exactly our `players.ea_player_id`, so no
  * mapping table is needed.
  */
+import { cdnRequestInit } from "./cdn-request";
 
 export const FACE_CDN_BASE = "https://cdn.futwiz.com/assets/img/fc26/faces";
 
@@ -61,12 +62,10 @@ export async function fetchSprite(eaPlayerId: number): Promise<SpriteResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(`${FACE_CDN_BASE}/${eaPlayerId}.png`, {
-      signal: controller.signal,
-      // A browser silently drops this (User-Agent is a forbidden header there); Node sends it. Let
-      // one header list serve both rather than branching on which runtime is asking.
-      headers: { "User-Agent": "TouchlineOS/0.1 (local companion)" },
-    });
+    // No headers in a browser, deliberately: the CDN refuses any request that is not a simple
+    // cross-origin GET (see `cdn-request.ts` for the measurements), and Chrome drops the User-Agent
+    // this used to send while Firefox keeps it, which is why faces loaded in Edge and not in Firefox.
+    const response = await fetch(`${FACE_CDN_BASE}/${eaPlayerId}.png`, cdnRequestInit(controller.signal));
     if (!response.ok) return missing;
 
     const bytes = new Uint8Array(await response.arrayBuffer());

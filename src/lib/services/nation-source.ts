@@ -22,6 +22,7 @@
  * memory cache (in `NationFlag`) therefore costs one request per nation and covers every player, which
  * is not worth a second OPFS store and a second `public/` folder to avoid.
  */
+import { cdnRequestInit } from "./cdn-request";
 
 export const FLAG_CDN_BASE = "https://cdn.futwiz.com/assets/img/fc26/flags";
 
@@ -53,12 +54,10 @@ export async function fetchFlag(nationId: number): Promise<Uint8Array | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const response = await fetch(`${FLAG_CDN_BASE}/${nationId}.png`, {
-      signal: controller.signal,
-      // A browser silently drops this (User-Agent is a forbidden header there); Node sends it. One
-      // header list serves both, the same way `fetchSprite` does it.
-      headers: { "User-Agent": "TouchlineOS/0.1 (local companion)" },
-    });
+    // No headers in a browser, for the same reason `fetchSprite` sends none: the CDN answers a
+    // preflight with 405, so any header that is not CORS-safelisted costs the whole request. See
+    // `cdn-request.ts`.
+    const response = await fetch(`${FLAG_CDN_BASE}/${nationId}.png`, cdnRequestInit(controller.signal));
     if (!response.ok) {
       // A refused flag and a nation with no flag look the same on screen, and only one of them is worth
       // acting on, so the status is named rather than swallowed. Throttled to once per nation: a squad

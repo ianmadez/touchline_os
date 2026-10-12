@@ -12,7 +12,8 @@
 import fs from "fs";
 import path from "path";
 import { parseNationTable } from "../src/lib/parser/feasibility-parser";
-import { isUsableNationId } from "../src/lib/services/nation-source";
+import { fetchFlag, isUsableNationId } from "../src/lib/services/nation-source";
+import { fetchSprite } from "../src/lib/services/face-source";
 
 let passed = 0;
 const failures: string[] = [];
@@ -114,9 +115,93 @@ check("rejects a negative", !isUsableNationId(-3));
 check("rejects a fraction", !isUsableNationId(14.5));
 check("rejects NaN", !isUsableNationId(Number.NaN));
 
-console.log(
-  `\n${passed} check${passed === 1 ? "" : "s"} passed, ${failures.length} failed` +
-    (failures.length > 0 ? `\n  ${failures.join("\n  ")}` : "")
-);
+// ---------------------------------------------------------------------------------------------
+// What the CDN request is allowed to carry
+// ---------------------------------------------------------------------------------------------
+//
+// The bug this pins down: the fetch used to attach a User-Agent, on the assumption that a browser
+// drops it. Chromium does; FIREFOX DOES NOT. Firefox therefore had to preflight, the CDN answers a
+// preflight with 405 and no CORS headers, and `fetch` rejected - so faces and flags loaded in Edge
+// and not in Firefox, with no request in the log to explain it.
+//
+// Both call sites are driven for real, under a stubbed `window` and a stubbed `fetch`, because the
+// rule lives at the call site and not in the builder: a helper nobody calls would pass this test and
+// still break the app.
 
-if (failures.length > 0) process.exit(1);
+console.log("\nwhat the sprite and flag request carries");
+
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...new Array(600).fill(0)]);
+
+/** Runs one real fetch through a stub and reports the init it was handed. */
+async function captured(
+  call: () => Promise<unknown>,
+  asBrowser: boolean
+): Promise<RequestInit | null> {
+  const globals = globalThis as { window?: unknown; fetch?: typeof fetch };
+  const realFetch = globalThis.fetch;
+  let seen: RequestInit | null = null;
+
+  globals.fetch = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    seen = init ?? null;
+    return new Response(PNG, { status: 200, headers: { "Content-Type": "image/png" } });
+  }) as typeof fetch;
+  if (asBrowser) globals.window = {};
+  else delete globals.window;
+
+  try {
+    await call();
+  } finally {
+    globals.fetch = realFetch;
+    delete globals.window;
+  }
+  return seen;
+}
+
+/** The header names a request may not carry in a browser: any one of them forces a preflight. */
+const NON_SIMPLE = ["user-agent", "x-probe", "authorization", "content-type"];
+
+const headersOf = (init: RequestInit | null): string[] =>
+  Object.keys((init?.headers ?? {}) as Record<string, string>).map((name) => name.toLowerCase());
+
+// Wrapped rather than top-level await: this script is built as CommonJS.
+void (async () => {
+  const flagInBrowser = await captured(() => fetchFlag(14), true);
+  const faceInBrowser = await captured(() => fetchSprite(231866), true);
+  const flagInNode = await captured(() => fetchFlag(14), false);
+
+  check(
+    "a browser sends a flag request with no headers at all",
+    flagInBrowser !== null && headersOf(flagInBrowser).length === 0,
+    `sent ${JSON.stringify(headersOf(flagInBrowser))}`
+  );
+  check(
+    "and a face request the same way, because that is what keeps it a simple CORS GET",
+    faceInBrowser !== null && headersOf(faceInBrowser).length === 0,
+    `sent ${JSON.stringify(headersOf(faceInBrowser))}`
+  );
+  check(
+    "neither sends a User-Agent, which is the header Firefox keeps and Chromium drops",
+    headersOf(flagInBrowser).every((name) => name !== "user-agent") &&
+      headersOf(faceInBrowser).every((name) => name !== "user-agent")
+  );
+  check(
+    "and no other header arrives that would force a preflight either",
+    [...headersOf(flagInBrowser), ...headersOf(faceInBrowser)].every((name) => !NON_SIMPLE.includes(name))
+  );
+  check(
+    "the timeout signal still goes with them, because a signal is not a header",
+    flagInBrowser?.signal instanceof AbortSignal && faceInBrowser?.signal instanceof AbortSignal
+  );
+  check(
+    "Node still identifies itself, since no CORS rule applies there",
+    headersOf(flagInNode).includes("user-agent"),
+    `sent ${JSON.stringify(headersOf(flagInNode))}`
+  );
+
+  console.log(
+    `\n${passed} check${passed === 1 ? "" : "s"} passed, ${failures.length} failed` +
+      (failures.length > 0 ? `\n  ${failures.join("\n  ")}` : "")
+  );
+
+  if (failures.length > 0) process.exit(1);
+})();
