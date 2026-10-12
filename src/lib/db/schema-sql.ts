@@ -579,6 +579,12 @@ export const SCHEMA_DDL = `
       weight INTEGER NOT NULL DEFAULT 0,
       sort_index INTEGER NOT NULL DEFAULT 0,
       copy_version INTEGER NOT NULL DEFAULT 0,
+      -- Whether the piece was about a match, and the line it was filed in. Both are stored rather than
+      -- recomputed: the closing frame depends on the first, and reprinting a column in another paper's
+      -- voice would be a rewrite. NOT NULL with a default, so a row written before these existed has an
+      -- honest value rather than a null the reader has to interpret.
+      kind TEXT NOT NULL DEFAULT 'STANDING',
+      stance TEXT NOT NULL DEFAULT 'STRAIGHT',
       saved INTEGER NOT NULL DEFAULT 0,
       read_at TEXT,
       edition INTEGER NOT NULL DEFAULT 1,
@@ -802,6 +808,12 @@ export const SCHEMA_MIGRATIONS: string[] = [
     "ALTER TABLE news_items ADD COLUMN writer_role TEXT;",
     "ALTER TABLE news_items ADD COLUMN dateline TEXT;",
     "ALTER TABLE news_items ADD COLUMN copy_version INTEGER NOT NULL DEFAULT 0;",
+    // A published row has to reprint in the shape and the voice it was written in. `kind` decides the frame
+    // the article closes on, and `stance` is part of what the piece said, so neither may be re-derived from
+    // today's rules. The defaults match how the old code behaved: the id regex filed every story it could not
+    // read as STANDING, and every outlet in the library was a straight one.
+    "ALTER TABLE news_items ADD COLUMN kind TEXT NOT NULL DEFAULT 'STANDING';",
+    "ALTER TABLE news_items ADD COLUMN stance TEXT NOT NULL DEFAULT 'STRAIGHT';",
     // The manager's own injury report. The save's own `injury` column read 0 for every player on the
     // reference career, so this is USER data and the only source there is.
     "ALTER TABLE player_user_profiles ADD COLUMN injury_until TEXT;",

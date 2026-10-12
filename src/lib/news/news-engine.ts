@@ -34,8 +34,9 @@
  * kind. The screen decides how much of the paper to print; the archive decides how long it is kept.
  */
 
-import { bylineFor, type PressByline } from "./outlets";
+import { bylineFor, type OutletStance, type PressByline } from "./outlets";
 import { describeTimeOut, injuryBand, type InjuryBand } from "../squad/injury";
+import { momentOf, phasePhrase, seasonPhase, type SeasonProgress } from "./moment";
 
 /**
  * Which revision of the desk's VOICE wrote a story.
@@ -46,14 +47,35 @@ import { describeTimeOut, injuryBand, type InjuryBand } from "../squad/injury";
  * stories exactly as they were. The number is here, beside the copy it describes, because "the desk was
  * rewritten" is an editorial call that cannot be computed from the code.
  */
-export const NEWS_COPY_VERSION = 5;
+export const NEWS_COPY_VERSION = 6;
 
 /** How a story's subject colours the card. Not a red/green light: a paper has good and bad news. */
 export type NewsTone = "GOOD" | "NEUTRAL" | "CONCERN";
 
+/**
+ * What a story is about, for the sake of the closing paragraph.
+ *
+ * MATCH stories happened on a pitch and can be put next to the run of results. STANDING stories are about
+ * the table, the squad, a contract or a single player's form, and a closing line about "a single week" reads
+ * as nonsense under them.
+ *
+ * This is a property of the story type, so it is set where the story is written. It used to be derived
+ * from the story's id with a regex, and that quietly filed four kinds of match story - the scoring
+ * summary, the defensive leak, the margin story and the defensive record - as STANDING, so the one frame
+ * they most needed was the one they could never have.
+ */
+export type StoryKind = "MATCH" | "STANDING";
+
 export interface NewsItem {
   /** Stable and derived from the evidence, so it is published once and never duplicates in the archive. */
   id: string;
+  /**
+   * Whether the story happened on a match day or is a standing fact about the club.
+   *
+   * Stored with the story rather than recomputed on read. A published row has to reprint in the shape it
+   * was written in, and a rule that changes later must not silently re-close a story from last month.
+   */
+  kind: StoryKind;
   /** The category the card is filed under, in the language of a sports desk. */
   category: string;
   tone: NewsTone;
@@ -75,6 +97,13 @@ export interface NewsItem {
    * putting a reporter's name on it would dress a note up as journalism.
    */
   byline: PressByline | null;
+  /**
+   * The line the paper takes, when the story is one the paper has a view in.
+   *
+   * Null on everything the desk reports rather than opines, which is most of the paper. Stored beside the
+   * story rather than looked up again on read, so a piece always reprints in the voice it was written in.
+   */
+  stance: OutletStance | null;
   /**
    * The app's own note of the figures behind the story.
    *
@@ -251,6 +280,15 @@ export interface NewsInput {
     gamesPlayed: number;
     points: number | null;
   } | null;
+  /**
+   * How far into the season the club is, and over how many matches a full one runs.
+   *
+   * Both halves are needed before the desk can say anything: the ordinal alone does not tell it whether
+   * that is early or late, and the division's size alone does not say where the club is in it. A caller
+   * with neither supplies neither, and the desk then says nothing about the time of year rather than
+   * guessing at it, which is what it used to do.
+   */
+  progress?: SeasonProgress | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -386,6 +424,308 @@ function lateGoals(minutes: number[]): number {
   return minutes.filter((minute) => minute >= 75).length;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Grammar the first version got wrong
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * "a" or "an", from the word that follows.
+ *
+ * The first version printed "a attacking midfielder" and "a own goal" because the article was written
+ * into the template string by hand. Every word this is used with is a plain English noun or a position
+ * phrase, so a vowel test is the whole rule.
+ */
+function aOrAn(word: string): string {
+  return /^[aeiou]/i.test(word.trim()) ? "an" : "a";
+}
+
+/**
+ * A small count as a word, for prose. Past ten a numeral is what a paper prints anyway.
+ *
+ * Zero is "no" rather than "0", because "0 defeats" is a figure and "no defeats" is a sentence.
+ */
+function countWord(count: number): string {
+  const words = [
+    "no",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+  ];
+  return words[count] ?? String(count);
+}
+
+/** "is" or "are" against a count. */
+function isAre(count: number): string {
+  return count === 1 ? "is" : "are";
+}
+
+/** "his" or "their" against a count, for a sentence that may be about one player or several. */
+function hisTheir(count: number): string {
+  return count === 1 ? "his" : "their";
+}
+
+/**
+ * How many goals one player got, in the words football uses.
+ *
+ * "scored twice" and "a hat-trick" are how the game writes two and three; above that only a count will
+ * do, and "four times" is exactly what a report says.
+ */
+function goalTallyWord(goals: number): string {
+  if (goals === 2) return "twice";
+  if (goals === 3) return "a hat-trick";
+  return `${countWord(goals)} times`;
+}
+
+/**
+ * An age as a paper writes it, without printing the number.
+ *
+ * "in his 24s" was the first version's way of saying a player is 24, and nobody says that. A reporter
+ * writes the band. The exact figure belongs in the story's own evidence, where the app's reasoning
+ * goes, rather than in the sentence.
+ */
+function ageBand(age: number): string {
+  if (age < 18) return "his teens";
+  if (age <= 20) return "his late teens";
+  if (age <= 23) return "his early twenties";
+  if (age <= 26) return "his mid-twenties";
+  if (age <= 29) return "his late twenties";
+  if (age <= 32) return "his early thirties";
+  if (age <= 35) return "his mid-thirties";
+  return "his late thirties";
+}
+
+/**
+ * Which end a match was played at, normalised in one place.
+ *
+ * The save writes a venue as HOME, AWAY or NEUTRAL and the debrief carries it through unchanged, but
+ * the match report used to test `startsWith("a")` as a shortcut for "away" - and "at home" starts with
+ * an "a" too. Two conventions in one file is how that happened, so now there is one.
+ */
+function venueOf(match: NewsMatch): "HOME" | "AWAY" | "NEUTRAL" | null {
+  const venue = (match.venue ?? "").trim().toUpperCase();
+  if (venue.startsWith("H")) return "HOME";
+  if (venue.startsWith("A")) return "AWAY";
+  if (venue.startsWith("N")) return "NEUTRAL";
+  return null;
+}
+
+/** "at home", "away", or nothing at all when the venue is not known. */
+function venueWord(match: NewsMatch): string {
+  switch (venueOf(match)) {
+    case "HOME":
+      return "at home";
+    case "AWAY":
+      return "away";
+    default:
+      return "";
+  }
+}
+
+/**
+ * The opposition as the prose refers to them.
+ *
+ * The named opponent wherever the debrief recorded one. When it did not, a reporter still has to call
+ * them something and the venue decides it: "the visitors" at our ground, "the hosts" at theirs, and
+ * "the opposition" when the venue is missing too. What he never does is print a venue word in a match
+ * he cannot place, which is why an unknown venue returns the neutral phrase rather than a guess.
+ */
+function opponentWord(match: NewsMatch): string {
+  if (match.opponent && match.opponent.trim().length > 0) return match.opponent.trim();
+  switch (venueOf(match)) {
+    case "HOME":
+      return "the visitors";
+    case "AWAY":
+      return "the hosts";
+    default:
+      return "the opposition";
+  }
+}
+
+/**
+ * A scoreline written the way the result is read: the home side first.
+ *
+ * "Rovers 2-0 Kingsbridge" is the away side's view of the afternoon, and it reads back to front in a
+ * paper written for one club's supporters. Home side first, whatever the result was.
+ */
+function fixtureLine(match: NewsMatch, clubName: string): string {
+  const elsewhere = venueOf(match) === "AWAY";
+  const left = elsewhere ? opponentWord(match) : clubName;
+  const right = elsewhere ? clubName : opponentWord(match);
+  return `${left} ${scoreOf(match)} ${right}`;
+}
+
+/**
+ * The minute of the goal that decided it, where one goal can be said to have decided it.
+ *
+ * Only meaningful at a margin of one. At two goals the last one is rarely the decisive one, and a draw
+ * was decided by nobody, so both return null rather than a number that would mislead a sentence.
+ */
+function decidingGoalMinute(match: NewsMatch): number | null {
+  if (match.goalMinutes.length === 0) return null;
+  if (match.goalsFor - match.goalsAgainst !== 1) return null;
+  return Math.max(...match.goalMinutes);
+}
+
+/**
+ * The match's goals in the order they went in.
+ *
+ * The debrief records the minutes of our goals and of theirs but not how the two interleaved, so this
+ * interleaves them by minute. A goal of ours and one of theirs at the same minute is read with ours
+ * first, which is the only reading that does not invent a lead that may never have existed.
+ */
+function runningScore(match: NewsMatch): { minute: number; ours: boolean }[] {
+  return [
+    ...match.goalMinutes.map((minute) => ({ minute, ours: true })),
+    ...match.concededMinutes.map((minute) => ({ minute, ours: false })),
+  ].sort((left, right) => left.minute - right.minute || (left.ours ? -1 : 1));
+}
+
+/** Whether the side was ever in front. */
+function ledAtAnyPoint(match: NewsMatch): boolean {
+  let ours = 0;
+  let theirs = 0;
+  for (const event of runningScore(match)) {
+    if (event.ours) ours += 1;
+    else theirs += 1;
+    if (ours > theirs) return true;
+  }
+  return false;
+}
+
+/** Whether the side was ever behind. */
+function trailedAtAnyPoint(match: NewsMatch): boolean {
+  let ours = 0;
+  let theirs = 0;
+  for (const event of runningScore(match)) {
+    if (event.ours) ours += 1;
+    else theirs += 1;
+    if (theirs > ours) return true;
+  }
+  return false;
+}
+
+/** How many times the lead changed hands. Zero when nobody led, or when one side led throughout. */
+function leadChanges(match: NewsMatch): number {
+  let ours = 0;
+  let theirs = 0;
+  let leader: "US" | "THEM" | null = null;
+  let changes = 0;
+  for (const event of runningScore(match)) {
+    if (event.ours) ours += 1;
+    else theirs += 1;
+    const now: "US" | "THEM" | null = ours > theirs ? "US" : theirs > ours ? "THEM" : null;
+    if (now !== null) {
+      if (leader !== null && now !== leader) changes += 1;
+      leader = now;
+    }
+  }
+  return changes;
+}
+
+/**
+ * A weakness note reduced to a shape that can be compared.
+ *
+ * The manager's note is his own shorthand and it is not written for print: "Switched off after scoring"
+ * is a note to self, not a sentence in a paper, and printing it verbatim is the most obvious way this
+ * desk could read as an app quoting a field.
+ */
+function normaliseNote(note: string): string {
+  return note
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * What a weakness note amounts to, in the language of a match report.
+ *
+ * The note is matched to a family and the family supplies the wording, so the paper never prints the
+ * manager's own shorthand and never guesses at a specific. The `key` is stable per family, which is
+ * what the story id is built from - an id that embedded the note itself would change with a stray
+ * capital letter and republish a story the reader had already seen.
+ *
+ * A note that matches nothing returns null and the caller falls back to the generic line, which is a
+ * weaker sentence but never a wrong one.
+ */
+function weaknessFamily(note: string): { key: string; line: string } | null {
+  const text = normaliseNote(note);
+  if (text.length === 0) return null;
+  const families: { key: string; test: RegExp; line: string }[] = [
+    {
+      key: "switching-off",
+      test: /switch(ed|ing)? off|concentrat|focus|complacen|mentali|off the pace/,
+      line: "a spell of switching off after the goal",
+    },
+    {
+      key: "set-pieces",
+      test: /set piece|setpiece|corner|free kick|dead ball|cross/,
+      line: "the set pieces",
+    },
+    {
+      key: "counter-attack",
+      test: /counter|break|transition|caught on|exposed|played through/,
+      line: "the way the side was caught upfield",
+    },
+    {
+      key: "finishing",
+      test: /finish|chance|wasteful|clinical|missed|proflig|conversion/,
+      line: "what happened in front of goal",
+    },
+    {
+      key: "passing",
+      test: /pass|possession|control|sloppy|loose|giveaway|gave the ball/,
+      line: "the passing",
+    },
+    {
+      key: "tempo",
+      test: /press|intensity|energy|slow|lethargic|flat|tempo/,
+      line: "the tempo",
+    },
+    {
+      key: "shape",
+      test: /defen|back line|backline|shape|offside|discipline|foul/,
+      line: "the shape without the ball",
+    },
+    {
+      key: "late-on",
+      test: /fitness|tired|legs|fade|stamina|late/,
+      line: "the way the match ran away late on",
+    },
+    { key: "injuries", test: /injur|knock|fitness doubt/, line: "the injuries" },
+    { key: "goalkeeping", test: /keeper|goalkeep|goalie|shot stopping/, line: "the goalkeeping" },
+    { key: "width", test: /width|wing|flank|wide/, line: "the width" },
+    { key: "bench", test: /sub|bench|changes|rotation/, line: "the changes from the bench" },
+  ];
+  const found = families.find((family) => family.test.test(text));
+  return found ? { key: found.key, line: found.line } : null;
+}
+
+/**
+ * The final pass over a sentence, for the seams that composing fragments leaves behind.
+ *
+ * Everything above is assembled from pieces, and pieces leave marks: a doubled space where a clause was
+ * dropped, a space before a full stop where an empty one was interpolated, two full stops where a
+ * sentence ended and a fragment already had one. Rather than ask twenty call sites to be careful, the
+ * desk tidies once on the way out. It deliberately does NOT strip the word "undefined", because that is
+ * a bug in the caller and the checks assert it never appears.
+ */
+function tidy(text: string): string {
+  return text
+    .replace(/\s+/g, " ")
+    .replace(/\s+([.,;:!?])/g, "$1")
+    .replace(/([.,;:!?])\1+/g, "$1")
+    .replace(/,\s*,/g, ",")
+    .trim();
+}
+
 /**
  * The age, said once, in the one place a piece has room for it.
  *
@@ -435,7 +775,7 @@ export function positionWords(role: string | null | undefined): string {
     RF: "forward",
     SUB: "substitute",
   };
-  return words[code] ?? role;
+  return words[code] ?? "player";
 }
 
 /**
@@ -457,6 +797,42 @@ function positionGroupWords(role: string | null | undefined): string {
     default:
       return "team";
   }
+}
+
+/**
+ * A position in words, with the article it needs: "a striker", "an attacking midfielder".
+ *
+ * The first version wrote the article into the template and then interpolated the position, which is how
+ * the desk produced "a attacking midfielder". The article belongs to the phrase rather than to the
+ * sentence, so the two are built together here and no call site has to think about it.
+ */
+function positionPhrase(role: string | null | undefined): string {
+  const words = positionWords(role);
+  return `${aOrAn(words)} ${words}`;
+}
+
+/**
+ * The same number as a word: "third", for something being counted rather than ranked.
+ *
+ * A league position is written the way a table writes it - "3rd" - because that is how a table reads. A
+ * manager's season is not a placing, and "his 3rd season in charge" is a machine writing a field. The two
+ * are deliberately separate helpers so nobody has to remember which is which at a call site.
+ */
+function ordinalWord(value: number): string {
+  const words = [
+    "zeroth",
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+    "eighth",
+    "ninth",
+    "tenth",
+  ];
+  return words[value] ?? ordinal(value);
 }
 
 /** "3rd", "21st", "13th". A league position deserves its suffix. */
@@ -593,7 +969,7 @@ function matchReportBody(
   saidLine: string
 ): string {
   const seed = last.eventId;
-  const against = last.opponent ?? "the visitors";
+  const against = opponentWord(last);
   const margin = last.goalsFor - last.goalsAgainst;
   const cleanSheet = last.goalsAgainst === 0;
   const scorerNames = scorers.map((entry) => entry.name);
@@ -601,24 +977,58 @@ function matchReportBody(
   // Singled out players who did NOT score. Naming a scorer twice in one paragraph is exactly what made
   // the first version read like a machine filling in fields.
   const others = last.standouts.filter((name) => !named.has(foldName(name)));
-  const everyone = last.standouts.length > 0 ? last.standouts : [];
-  const late = lateGoals(last.goalMinutes) > 0;
-  const early = earlyGoals(last.goalMinutes) > 0;
-  const venueWord = last.venue?.toLowerCase().startsWith("a") ? "away" : "at home";
+  const everyone = last.standouts;
+  const at = venueWord(last);
+  /**
+   * The venue as something to append, or nothing at all.
+   *
+   * A sentence that cannot place the match drops the venue rather than half-writing it, and the first
+   * version's default was worse than that: it tested `startsWith("a")`, which "at home" satisfies, so
+   * every away match with an unread venue was reported as a home one.
+   */
+  const where = at.length > 0 ? ` ${at}` : "";
+  const totalGoals = last.goalsFor + last.goalsAgainst;
+  /** A win by one goal in a match with four or more in it. A different afternoon from a 1-0. */
+  const thriller = last.result === "WIN" && margin === 1 && totalGoals >= 4;
+  /** A win that got uncomfortable: two or more conceded, and not a rout. */
+  const scare = last.result === "WIN" && margin <= 2 && last.goalsAgainst >= 2;
+  /**
+   * Late and early goals, only where the timing tells the reader something.
+   *
+   * Both are restricted to a margin of two or less, because in a four-goal win "left it late" is
+   * nonsense and "did the damage early" only repeats what the rout frame already said.
+   */
+  const late = margin <= 2 && lateGoals(last.goalMinutes) > 0;
+  const early = margin <= 2 && earlyGoals(last.goalMinutes) > 0;
+  const decided = decidingGoalMinute(last);
+  const goalless = last.goalsFor === 0 && last.goalsAgainst === 0;
 
-  /** What can honestly be said about the goals, in one clause. */
+  /**
+   * Who scored, and how many, as a clause. Null when the debrief logged the scoreline without a scorer.
+   *
+   * The count comes from the scorers array rather than from the scoreline, so a player is never credited
+   * with a goal the debrief does not record - which is what "scored both" claims, and it is the sort of
+   * claim a paper cannot take back.
+   */
+  const scorerClause = (() => {
+    if (scorers.length === 0) return null;
+    if (scorers.length === 1) {
+      const only = scorers[0];
+      return only.goals === 1 ? `${only.name} got it` : `${only.name} scored ${goalTallyWord(only.goals)}`;
+    }
+    return `${namesList(scorerNames)} shared them`;
+  })();
+
+  /**
+   * What can honestly be said about the goals, in one clause.
+   *
+   * A scoreline with no scorer attached says only what is known. The first version printed "with no
+   * scorer in the debrief" and "the scoreline came from nowhere in particular", which is the app
+   * talking to itself on a newspaper page.
+   */
   const goalsClause =
-    scorers.length === 0
-      ? last.goalsFor > 0
-        ? `${input.clubName} scored ${last.goalsFor} with no scorer in the debrief`
-        : "the scoreline came from nowhere in particular"
-      : scorers.length === 1
-        ? scorerNames.length === 1 && scorers[0].goals === 1
-          ? `${scorerNames[0]} got the goal`
-          : `${scorers[0].name} ${
-              scorers[0].goals === 1 ? "got it" : `took ${scorers[0].goals} of them`
-            }`
-        : `${namesList(scorerNames)} shared the goals`;
+    scorerClause ??
+    (last.goalsFor === 0 ? `${input.clubName} drew a blank` : `${input.clubName} scored ${countWord(last.goalsFor)}`);
 
   const defenceClause = cleanSheet
     ? [
@@ -637,36 +1047,72 @@ function matchReportBody(
 
   const openings: string[] = [];
 
-  if (last.result === "WIN") {
+  if (goalless) {
+    openings.push(
+      `A goalless draw against ${against}, and neither side did enough to change it.`,
+      `Nothing at either end${where}: ${input.clubName} and ${against} played out a goalless draw.`,
+      `${input.clubName} and ${against} cancelled each other out. No goals, and a point each.`,
+      `A point apiece and no goals to show for it, which against ${against} was about right.`
+    );
+  } else if (last.result === "WIN") {
     if (margin >= 3) {
       openings.push(
         `${input.clubName} did not leave this one in doubt: ${goalsClause}, ${pick(defenceClause, seed, "bigwin-def")}.`,
-        `A comfortable afternoon ${venueWord} for ${input.clubName}, who won it ${scoreOf(last)} with ${goalsClause}.`,
-        `${scoreOf(last)} flatters nobody, and ${input.clubName} earned every bit of it: ${goalsClause} ${pick(defenceClause, seed, "bigwin-def2")}.`
+        `A comfortable win${where} for ${input.clubName}, who took it ${scoreOf(last)} with ${goalsClause}.`,
+        `${fixtureLine(last, input.clubName)} flatters nobody, and ${input.clubName} earned every bit of it: ${goalsClause} ${pick(defenceClause, seed, "bigwin-def2")}.`
       );
     } else if (margin === 2) {
       openings.push(
         `Two goals were enough for ${input.clubName}, who beat ${against} ${scoreOf(last)}: ${goalsClause}, ${pick(defenceClause, seed, "win2-def")}.`,
         `${input.clubName} always had a little too much here, ${goalsClause}, ${pick(defenceClause, seed, "win2-def2")}.`,
-        `A two-goal margin ${venueWord} for ${input.clubName}, and it was built on ${goalsClause}.`
+        `A two-goal margin${where} for ${input.clubName}, and it was built on ${goalsClause}.`
       );
     } else {
       openings.push(
-        `One goal was enough. ${capitalise(goalsClause)}, and ${input.clubName} held on to it ${venueWord} against ${against}.`,
+        `One goal was enough. ${capitalise(goalsClause)}, and ${input.clubName} held on to it against ${against}.`,
         `${input.clubName} won it by the narrowest of margins: ${goalsClause}, and from there the job was to keep ${against} at arm's length.`,
         `It was decided by a single moment, ${goalsClause}, and ${input.clubName} did the rest.`
+      );
+      if (decided !== null) {
+        openings.push(
+          `${input.clubName} won it ${scoreOf(last)} with a goal on ${decided} minutes, and then had to hold what they had.`,
+          `The goal came on ${decided} minutes, and ${input.clubName} spent the rest of it defending it.`
+        );
+      }
+    }
+    if (thriller) {
+      openings.push(
+        `A thriller against ${against}, and ${input.clubName} came out of it with the points: ${goalsClause}, ${pick(defenceClause, seed, "thriller-def")}.`,
+        `${last.goalsAgainst} conceded and still a win: ${goalsClause}, and ${input.clubName} had just enough to see off ${against}.`
+      );
+    }
+    if (trailedAtAnyPoint(last) && ledAtAnyPoint(last)) {
+      openings.push(
+        `${input.clubName} had to come from behind to win this one, and ${goalsClause} did it: ${scoreOf(last)} against ${against}.`,
+        `Behind at one stage and ahead by the end: ${goalsClause}, and a win that says something about the side's nerve.`
+      );
+    }
+    if (leadChanges(last) >= 2) {
+      openings.push(
+        `The lead changed hands more than once, and ${input.clubName} had the last word: ${goalsClause}, and ${scoreOf(last)} on the board.`
+      );
+    }
+    if (scare) {
+      openings.push(
+        `${input.clubName} had this won and then let ${against} back into it: ${goalsClause}, and a finish that was tighter than it needed to be.`,
+        `Comfortable enough in the end, though ${input.clubName} made harder work of it than the scoreline suggests: ${goalsClause}.`
       );
     }
     if (late) {
       openings.push(
-        `${input.clubName} left it late against ${against}, but ${goalsClause} and the points stayed ${venueWord}.`,
+        `${input.clubName} left it late against ${against}, but ${goalsClause} and the points stayed${where || " with them"}.`,
         `The goals came when they came, and that was late enough to make it feel earned: ${goalsClause} ${pick(defenceClause, seed, "late-def")}.`
       );
     }
     if (early) {
       openings.push(
         `${input.clubName} did the damage early: ${goalsClause}, ${pick(defenceClause, seed, "early-def")}, and the rest was management.`,
-        `An early goal changed what this match was going to be: ${goalsClause}, and ${against} spent the afternoon chasing it.`
+        `An early goal changed what this match was going to be: ${goalsClause}, and ${against} spent the rest of it chasing.`
       );
     }
   } else if (last.result === "DRAW") {
@@ -675,16 +1121,40 @@ function matchReportBody(
       `${input.clubName} and ${against} could not be separated: ${goalsClause}, and a point each.`,
       `A point apiece, and ${goalsClause} was the sum of it. ${against} will feel as much like it was theirs as ${input.clubName} will.`
     );
+    if (trailedAtAnyPoint(last)) {
+      openings.push(
+        `${input.clubName} had to come from behind against ${against} and settled for a point: ${goalsClause}.`,
+        `Behind at one stage and level by the end: ${goalsClause}, and on the balance of it a point was fair.`
+      );
+    }
   } else if (last.result === "LOSS") {
-    openings.push(
-      `${input.clubName} lost this one ${scoreOf(last)}, and ${goalsClause} was the only reply.`,
-      `Defeat against ${against}, and the shape of it will bother the manager more than the scoreline: ${goalsClause}, and ${last.goalsAgainst} at the other end.`,
-      `${input.clubName} never got a grip on it. ${capitalise(goalsClause)}, and ${against} had the rest.`
-    );
+    if (last.goalsFor === 0) {
+      openings.push(
+        `${input.clubName} lost this one ${scoreOf(last)} without scoring.`,
+        `${against} kept ${input.clubName} out entirely, and that was the match: ${scoreOf(last)}.`,
+        `Nothing at the other end for ${input.clubName}, and defeat by ${scoreOf(last)}.`
+      );
+    } else if (last.goalsFor === 1 && scorers.length === 1) {
+      const only = scorers[0].name;
+      openings.push(
+        `Defeat for ${input.clubName} against ${against}, and ${only} scored the consolation.`,
+        `${against} had too much for ${input.clubName}, for whom ${only} got the only reply.`,
+        `A losing ${scoreOf(last)}, and ${only}'s goal was all ${input.clubName} had to show for it.`
+      );
+    } else if (last.goalsFor === 1) {
+      openings.push(
+        `Defeat against ${against}, and the single reply was not enough: ${scoreOf(last)}.`,
+        `One goal back, and no more than that for ${input.clubName} against ${against}.`
+      );
+    } else {
+      openings.push(
+        `${input.clubName} lost this one ${scoreOf(last)}, and ${goalsClause} was as much as they managed.`,
+        `Defeat against ${against}, and the shape of it will bother the manager more than the scoreline: ${goalsClause}, and ${last.goalsAgainst} at the other end.`,
+        `${input.clubName} never got a grip on it. ${capitalise(goalsClause)}, and ${against} had the rest.`
+      );
+    }
   } else {
-    openings.push(
-      `${input.clubName} against ${against} finished ${scoreOf(last)}. ${capitalise(goalsClause)}.`
-    );
+    openings.push(`${fixtureLine(last, input.clubName)}. ${capitalise(goalsClause)}.`);
   }
 
   const opening = pick(openings, seed, "opening");
@@ -694,9 +1164,9 @@ function matchReportBody(
     ? pick(
         [
           `${namesList(others)} did the work that does not show up in the scoreline and got the manager's eye for it.`,
-          `Away from the goals, ${namesList(others)} was the name the manager came back to.`,
-          `${namesList(others)} will have done his case no harm at all.`,
-          `It was ${namesList(others)} the manager picked out afterwards, and on an afternoon like this that means something.`,
+          `Away from the goals, ${namesList(others)} ${isAre(others.length)} the ${plural(others.length, "name")} the manager came back to.`,
+          `${namesList(others)} will have done ${hisTheir(others.length)} case no harm at all.`,
+          `It was ${namesList(others)} the manager picked out afterwards, and that usually means something.`,
         ],
         seed,
         "addition-others"
@@ -704,7 +1174,7 @@ function matchReportBody(
     : cleanSheet && scorerNames.length > 0
       ? pick(
           [
-            `A clean sheet and ${plural(last.goalsFor, "goal")} at the other end is the sort of afternoon a manager files away as the standard.`,
+            `A clean sheet and ${plural(last.goalsFor, "goal")} at the other end is the sort of match a manager files away as the standard.`,
             `Keeping them out mattered as much as scoring, and that is usually the harder half.`,
           ],
           seed,
@@ -721,31 +1191,32 @@ function matchReportBody(
           )
         : "";
 
-  return [opening, addition, saidLine].map((part) => part.trim()).filter(Boolean).join(" ");
+  return tidy([opening, addition, saidLine].filter(Boolean).join(" "));
 }
 
   // ---- 1. The last match, reported straight -------------------------------------------------
   if (last) {
     const scorers = scorerTally(last.scorers);
+    const against = opponentWord(last);
     const headline = pick(
       last.result === "WIN"
         ? [
-            `${input.clubName} ${scoreOf(last)} ${last.opponent ?? "the visitors"}`,
-            `${input.clubName} Take the Points Against ${last.opponent ?? "the visitors"}`,
-            `Won It ${scoreOf(last)}: ${input.clubName} See Off ${last.opponent ?? "the visitors"}`,
-            `${last.opponent ?? "The visitors"} Beaten as ${input.clubName} Find a Way`,
+            fixtureLine(last, input.clubName),
+            `${input.clubName} Take the Points Against ${against}`,
+            `Won It ${scoreOf(last)}: ${input.clubName} See Off ${against}`,
+            `${against} Beaten as ${input.clubName} Find a Way`,
           ]
         : last.result === "LOSS"
           ? [
-              `${last.opponent ?? "The visitors"} ${scoreOf(last)} ${input.clubName}`,
-              `Defeat for ${input.clubName} Against ${last.opponent ?? "the visitors"}`,
+              fixtureLine(last, input.clubName),
+              `Defeat for ${input.clubName} Against ${against}`,
               `${input.clubName} Beaten ${scoreOf(last)}`,
-              `A Bad Afternoon: ${input.clubName} Lose to ${last.opponent ?? "the visitors"}`,
+              `Beaten ${scoreOf(last)}: ${input.clubName} Lose to ${against}`,
             ]
           : [
-              `Honours Shared: ${input.clubName} ${scoreOf(last)} ${last.opponent ?? "the visitors"}`,
+              `Honours Shared: ${fixtureLine(last, input.clubName)}`,
               `${input.clubName} Held to ${scoreOf(last)}`,
-              `All Square Against ${last.opponent ?? "the visitors"}`,
+              `All Square Against ${against}`,
               `Nothing Between Them: ${scoreOf(last)}`,
             ],
       last.eventId,
@@ -755,12 +1226,56 @@ function matchReportBody(
     const said = aftermath(last, last.eventId);
     const body = matchReportBody(input, last, scorers, said.line);
 
+    /**
+     * The paragraph the lead report EARNS.
+     *
+     * The card is the short read and the article is what the reader gets when he opens it, so the article has
+     * to add something the card did not say. It used to add nothing at all: every report was the summary and a
+     * closing line, which made opening the lead story a waste of a tap.
+     *
+     * Three sources, and each is guarded by its own fact: the shot figures, the minutes the goals actually
+     * came in, and the competition the match was played in. No new fact is invented for it - a match whose
+     * debrief recorded none of these gets no second paragraph rather than a paragraph of padding, which is the
+     * same rule the rest of the desk works to.
+     */
+    const earned: string[] = [];
+    if (last.shots !== null && last.shotsInsideBox !== null) {
+      const shots = `${last.shots} shots, ${last.shotsInsideBox} of them inside the box${last.bigChances !== null ? ` and ${last.bigChances} clear ${plural(last.bigChances, "chance")}` : ""}`;
+      earned.push(
+        `The shape of it is in the numbers: ${shots}. A side that gets into those positions is not living on one moment, whatever the scoreline says.`,
+        `${shots}. That is the part of this a manager takes away from a result like it, because it is the part that repeats.`
+      );
+    }
+    if (last.goalMinutes.length >= 2) {
+      const first = Math.min(...last.goalMinutes);
+      const final = Math.max(...last.goalMinutes);
+      earned.push(
+        `The goals came on ${first} and ${final} minutes. Spread out like that, this was a match that was managed rather than one that got away.`,
+        `There was nothing lucky about the timing of them: ${first} minutes for the first and ${final} for the last is a long way from a side that scored and then held on.`
+      );
+    }
+    if (last.concededMinutes.length > 0) {
+      earned.push(
+        `The reply came on ${Math.max(...last.concededMinutes)} minutes, and that is the part of it the manager will look at twice.`,
+        `${against} found their moment on ${Math.max(...last.concededMinutes)} minutes, which is the detail that stops this being a clean sheet of a performance.`
+      );
+    }
+    if (last.competition) {
+      earned.push(
+        `It is a ${last.competition} result, which means it counts the same as every other one and reads better than most of them.`,
+        `In the ${last.competition}, the points on offer here were worth exactly as much as the points on offer anywhere else.`
+      );
+    }
+    const earnedParagraph = earned.length > 0 ? pick(earned, last.eventId, "article-earned") : null;
+
     items.push({
       id: `result-${last.eventId}`,
+      kind: "MATCH",
       category: last.result === "LOSS" ? "MATCH REPORT" : "TOP STORY",
       tone: last.result === "WIN" ? "GOOD" : last.result === "LOSS" ? "CONCERN" : "NEUTRAL",
       headline,
       body,
+      ...(earnedParagraph ? { article: [earnedParagraph] } : {}),
       evidence: [
         `Scoreline ${scoreOf(last)}`,
         last.competition ? `Competition ${last.competition}` : "",
@@ -783,19 +1298,59 @@ function matchReportBody(
     // A clean sheet is a defensive team achievement and the paper says so. Who gets the credit follows
     // who the manager singled out: a goalkeeper, defenders, both, or nobody in particular, in which case
     // the back line as a whole takes it. Never the keeper by default.
-    if (last.goalsAgainst === 0) {
-      const shutouts = recent.filter((match) => match.goalsAgainst === 0).length;
-      const singled = last.standouts.filter((name) => {
-        const group = roleGroup(roleOf(name));
-        return group === "GK" || group === "DEF";
-      });
+    /**
+     * The clean sheet, and the two cases where it is not worth printing at all.
+     *
+     * It has to ADD something the paper does not already say. A shutout with nobody singled out, in a match
+     * with no run behind it, is the scoreline - and the report above already carries that. And a keeper on a
+     * run of three shutouts is the subject of its own story further down the paper, so printing both is the
+     * same news in two voices, which is how a paper starts to feel like a machine.
+     */
+    const shutoutsInWindow = recent.filter((match) => match.goalsAgainst === 0).length;
+    const shutoutRunStory = keeper !== null && recent.length >= 3 && shutoutsInWindow >= 3;
+    const singledInDefence = last.standouts.filter((name) => {
+      const group = roleGroup(roleOf(name));
+      return group === "GK" || group === "DEF";
+    });
+    if (
+      last.goalsAgainst === 0 &&
+      !shutoutRunStory &&
+      (singledInDefence.length > 0 || shutoutsInWindow >= 2)
+    ) {
+      const shutouts = shutoutsInWindow;
+      const singled = singledInDefence;
       const keeperSingled = singled.filter((name) => roleGroup(roleOf(name)) === "GK");
       const defendersSingled = singled.filter((name) => roleGroup(roleOf(name)) === "DEF");
       const backLine = input.squad
         .filter((player) => roleGroup(player.role) === "DEF")
         .map((player) => player.name);
-      const against = last.opponent ?? "the visitors";
-      const runNote = `${shutouts} clean ${plural(shutouts, "sheet")} in the last ${recent.length} ${plural(recent.length, "match", "matches")}`;
+      const against = opponentWord(last);
+      /**
+       * Whether the match before this one was also a clean sheet.
+       *
+       * "Another Blank Sheet" is a claim about the previous match, and the first version made it whenever
+       * the keeper was singled out in any shutout - including the first one of a season, which it was not
+       * another of. The previous match is read from the feed, and a first shutout says so.
+       */
+      const previous = input.matches[1] ?? null;
+      const backToBack = previous !== null && previous.goalsAgainst === 0;
+      /**
+       * The run, only once there is a window to report it over.
+       *
+       * With one or two matches logged there is no run to speak of, and "one clean sheet in the last one
+       * match" is a worse sentence than the honest short version.
+       */
+      const runNote =
+        recent.length >= 3
+          ? shutouts === recent.length
+            ? `${countWord(shutouts)} clean ${plural(shutouts, "sheet")} in a row`
+            : `${countWord(shutouts)} clean ${plural(shutouts, "sheet")} in the last ${recent.length} ${plural(recent.length, "match", "matches")}`
+          : `${countWord(shutouts)} clean ${plural(shutouts, "sheet")} so far`;
+      /** The keeper's own version of it, which is what a paper says about a goalkeeper rather than a team. */
+      const keeperRun =
+        recent.length >= 2
+          ? `clean ${plural(shutouts, "sheet")} in ${countWord(shutouts)} of the last ${recent.length}`
+          : "a clean sheet";
 
       const credit =
         keeperSingled.length > 0 && defendersSingled.length > 0
@@ -813,10 +1368,12 @@ function matchReportBody(
                 who: keeperSingled,
                 headline: [
                   `${namesList(keeperSingled)} Keeps ${against} Out`,
-                  `Another Blank Sheet: ${namesList(keeperSingled)} Unbeaten in ${shutouts} of ${recent.length}`,
+                  backToBack
+                    ? `Another Blank Sheet: ${namesList(keeperSingled)} Adds to the Shutouts`
+                    : `${namesList(keeperSingled)} and a Shutout to Build On`,
                   `${namesList(keeperSingled)} Posts the Shutout Against ${against}`,
                 ],
-                body: `Nothing got past ${namesList(keeperSingled)}, which is ${runNote}. The back four will take their share of it too, whether or not anybody writes it down.`,
+                body: `Nothing got past ${namesList(keeperSingled)}, which is ${keeperRun}.${backToBack ? " That is two matches running without conceding." : ""} The back four will take their share of it too, whether or not anybody writes it down.`,
               }
             : defendersSingled.length > 0
               ? {
@@ -840,6 +1397,7 @@ function matchReportBody(
 
       items.push({
         id: `clean-sheet-${last.eventId}`,
+        kind: "MATCH",
         category: "THIS JUST IN",
         tone: "GOOD",
         headline: pick(credit.headline, last.eventId, "headline"),
@@ -867,21 +1425,40 @@ function matchReportBody(
       const edge = last.goalsFor - expected;
       if (Math.abs(edge) >= 1) {
         const clinical = edge > 0;
+        /**
+         * The verdict has to agree with the result.
+         *
+         * Finishing above expectation is a real thing in a defeat, and a different story from doing it in
+         * a win - so the pools are keyed on both. The first version printed "the figures behind the 2-0
+         * win" under any result, including the ones that were not wins at all.
+         */
+        const goalsWord = plural(last.goalsFor, "Goal", "Goals");
+        const afterTheResult =
+          last.result === "WIN"
+            ? ""
+            : last.result === "LOSS"
+              ? " It was not enough to save the match."
+              : " A point was all it bought them.";
         items.push({
           id: `finishing-${last.eventId}`,
+          kind: "MATCH",
           category: "ANALYSIS",
           tone: clinical ? "GOOD" : "CONCERN",
           headline: pick(
             clinical
               ? [
                   `${input.clubName} Make Their Chances Count`,
-                  `Clinical: ${last.goalsFor} Goals from ${last.shots} Shots`,
-                  `The Shooting Figures Behind the ${scoreOf(last)} Win`,
+                  `Clinical: ${last.goalsFor} ${goalsWord} from ${last.shots} Shots`,
+                  last.result === "WIN"
+                    ? `The Shooting Figures Behind the ${scoreOf(last)} Win`
+                    : last.result === "LOSS"
+                      ? `Sharp in Front of Goal, and Beaten Anyway`
+                      : `Sharp in Front of Goal, and Only a Point`,
                   `Ruthless ${input.clubName} Do Not Waste a Chance`,
                 ]
               : [
                   `${input.clubName} Waste the Openings`,
-                  `${last.shots} Shots, ${last.goalsFor} ${plural(last.goalsFor, "Goal")}`,
+                  `${last.shots} Shots, ${last.goalsFor} ${goalsWord}`,
                   `A Question of Finishing After ${scoreOf(last)}`,
                   `All Those Chances and Nothing to Show`,
                 ],
@@ -891,8 +1468,8 @@ function matchReportBody(
           body: pick(
             clinical
               ? [
-                  `${last.shots} shots produced ${last.goalsFor} goals, and the shot count alone does not explain that. ${input.clubName} took the chances that mattered and let the rest go.`,
-                  `It was not a barrage. It was ${last.shots} shots and ${last.goalsFor} goals, and that is the ratio every manager says they want.`,
+                  `${last.shots} shots produced ${last.goalsFor} ${plural(last.goalsFor, "goal")}, and the shot count alone does not explain that. ${input.clubName} took the chances that mattered and let the rest go.${afterTheResult}`,
+                  `It was not a barrage. It was ${last.shots} shots and ${last.goalsFor} ${plural(last.goalsFor, "goal")}, and that is the ratio every manager says they want.${afterTheResult}`,
                 ]
               : [
                   `${last.shots} shots produced ${last.goalsFor} ${plural(last.goalsFor, "goal")}, and the shot count alone does not explain that. On another day ${input.clubName} win this comfortably.`,
@@ -924,6 +1501,7 @@ function matchReportBody(
         const earlyStory = early >= late;
         items.push({
           id: `timing-${last.eventId}`,
+          kind: "MATCH",
           category: "ANALYSIS",
           tone: "NEUTRAL",
           headline: pick(
@@ -960,15 +1538,39 @@ function matchReportBody(
 
   // ---- 5. The run of form -------------------------------------------------------------------
   if (recent.length >= 3) {
-    const wins = recent.filter((match) => match.result === "WIN").length;
     const losses = recent.filter((match) => match.result === "LOSS").length;
     const unbeaten = recent.findIndex((match) => match.result === "LOSS");
     const winless = recent.findIndex((match) => match.result === "WIN");
     const run = unbeaten === -1 ? recent.length : unbeaten;
 
     if (run >= 3) {
+      /**
+       * The run counted inside itself, not across the whole window.
+       *
+       * The first version counted wins over all five matches and then reported them against a shorter
+       * run: "the last 4 matches have brought 3 wins and no defeat", with a form string underneath it
+       * that showed only two. The tally has to come from the same matches the sentence is about.
+       */
+      const slice = recent.slice(0, run);
+      const wins = slice.filter((match) => match.result === "WIN").length;
+      const draws = run - wins;
+      /**
+       * When the run began, from the oldest match in it.
+       *
+       * The month is the one thing a paper can say about the calendar without guessing, because the debrief
+       * carries its own date. The oldest match in the slice is the far end of it, which is where a run
+       * starts.
+       */
+      const began = momentOf(slice[slice.length - 1].matchDate);
+      const tallyWords =
+        wins > 0 && draws > 0
+          ? `${countWord(wins)} ${plural(wins, "win")} and ${countWord(draws)} ${plural(draws, "draw")}`
+          : wins > 0
+            ? `${countWord(wins)} ${plural(wins, "win")} and no defeat`
+            : `${countWord(draws)} ${plural(draws, "draw")} and no defeat`;
       items.push({
         id: `form-unbeaten-${recent[0].eventId}`,
+        kind: "MATCH",
         category: "FORM WATCH",
         tone: "GOOD",
         headline: pick(
@@ -981,8 +1583,8 @@ function matchReportBody(
           recent[0].eventId,
           "headline"
         ),
-        body: `${source(recent[0].eventId)} say the last ${run} ${plural(run, "match", "matches")} have brought ${wins} ${plural(wins, "win")} and no defeat: ${formString(recent.slice(0, run))}. ${input.managerName} has a side nobody is enjoying playing against.`,
-        evidence: [`Run ${formString(recent.slice(0, run))}`, `${wins} ${plural(wins, "win")}`],
+        body: `${source(recent[0].eventId)} say the last ${run} ${plural(run, "match", "matches")} have brought ${tallyWords}: ${formString(slice)}. ${input.managerName} has a side nobody is enjoying playing against.${began ? ` The run goes back to ${began.month}.` : ""}`,
+        evidence: [`Run ${formString(slice)}`, tallyWords],
         playerNames: [],
         publishedOn: recent[0].matchDate,
         weight: 88,
@@ -991,6 +1593,7 @@ function matchReportBody(
     } else if (winless === -1 && losses >= 3) {
       items.push({
         id: `form-winless-${recent[0].eventId}`,
+        kind: "MATCH",
         category: "FORM WATCH",
         tone: "CONCERN",
         headline: pick(
@@ -1020,6 +1623,7 @@ function matchReportBody(
     if (home.length >= 3 && home.every((match) => match.result !== "LOSS")) {
       items.push({
         id: `home-form-${recent[0].eventId}`,
+        kind: "MATCH",
         category: "FORM WATCH",
         tone: "GOOD",
         headline: pick(
@@ -1043,6 +1647,7 @@ function matchReportBody(
     if (away.length >= 3 && awayWins === 0) {
       items.push({
         id: `away-form-${recent[0].eventId}`,
+        kind: "MATCH",
         category: "FORM WATCH",
         tone: "CONCERN",
         headline: pick(
@@ -1076,6 +1681,7 @@ function matchReportBody(
       ).length;
       items.push({
         id: `scorer-${topScorer.player.name}-${recent[0].eventId}`,
+        kind: "MATCH",
         category: "PLAYER FOCUS",
         tone: "GOOD",
         headline: pick(
@@ -1110,6 +1716,7 @@ function matchReportBody(
     if (best && best.assists >= 3) {
       items.push({
         id: `assists-${best.player.name}-${recent[0].eventId}`,
+        kind: "MATCH",
         category: "PLAYER FOCUS",
         tone: "GOOD",
         headline: pick(
@@ -1147,6 +1754,7 @@ function matchReportBody(
     if (praised && praised.count >= 2) {
       items.push({
         id: `standout-${praised.name}-${recent[0].eventId}`,
+        kind: "MATCH",
         category: "PLAYER FOCUS",
         tone: "GOOD",
         headline: pick(
@@ -1178,33 +1786,56 @@ function matchReportBody(
 
   // ---- 9. The weakness the manager keeps naming ---------------------------------------------
   if (recent.length >= 2) {
-    const counts = new Map<string, number>();
+    /**
+     * The recurring note, counted on its NORMALISED form.
+     *
+     * The manager types these by hand and types them slightly differently each time - a capital, a full
+     * stop, a double space - so counting the raw strings splits one recurring concern into three and the
+     * story never fires. Normalising first is what makes "keeps naming" mean keeps naming.
+     */
+    const counts = new Map<string, { text: string; count: number; theme: string | null }>();
     for (const match of recent) {
-      if (!match.weakness) continue;
-      const key = match.weakness.trim();
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      if (!match.weakness || match.weakness.trim().length === 0) continue;
+      const key = normaliseNote(match.weakness);
+      if (key.length === 0) continue;
+      const existing = counts.get(key);
+      if (existing) existing.count += 1;
+      else counts.set(key, { text: key, count: 1, theme: weaknessFamily(match.weakness)?.line ?? null });
     }
-    const recurring = [...counts.entries()].sort((left, right) => right[1] - left[1])[0];
+    const recurring = [...counts.values()].sort((left, right) => right.count - left.count)[0];
     const conceded = sum(recent.map((match) => match.goalsAgainst));
-    if (recurring && recurring[1] >= 2 && conceded > 0) {
+    if (recurring && recurring.count >= 2 && conceded > 0) {
+      const times = recurring.count;
+      const occurrence =
+        times === 2 ? "second" : times === 3 ? "third" : times === 4 ? "fourth" : `${times}th`;
+      /**
+       * What the paper says the pattern is.
+       *
+       * The manager's own words never reach the page. A note to self is not a sentence in a newspaper,
+       * and printing it verbatim is the single most obvious way this desk could read as an app quoting a
+       * field. The family supplies the wording; a note that matches no family gets the general line.
+       */
+      const theme = recurring.theme ?? "the same shortcoming";
       items.push({
-        id: `weakness-${recurring[0]}-${recent[0].eventId}`,
+        id: `weakness-${weaknessFamily(recurring.text)?.key ?? "recurring"}-${recent[0].eventId}`,
+        kind: "MATCH",
         category: "THE VERDICT",
         tone: "CONCERN",
         headline: pick(
           [
-            `The Same Question: "${recurring[0]}"`,
-            `A Pattern ${recurring[1]} Matches Long`,
-            `"${recurring[0]}" Comes Up Again`,
-            `Twice Over, the Same Words`,
+            `The Same Question, ${countWord(times)} Matches Running`,
+            `A Pattern ${times} Matches Long`,
+            `The Same Concern, and No Sign of It Going`,
+            `${countWord(times)} Matches, One Recurring Problem`,
           ],
-          `${recurring[0]}${recent[0].eventId}`,
+          `${recurring.text}${recent[0].eventId}`,
           "headline"
         ),
-        body: `For the ${recurring[1] === 2 ? "second" : "third"} time in ${recent.length} ${plural(recent.length, "match", "matches")} the note is the same: ${recurring[0]}. ${conceded} conceded in that run says the concern is not going away on its own.`,
+        body: `For the ${occurrence} time in ${recent.length} ${plural(recent.length, "match", "matches")} the manager's own note came back to ${theme}. ${conceded} conceded in that run says the concern is not going away on its own.`,
         evidence: [
-          `Named ${recurring[1]} times in ${recent.length} matches`,
-          `${conceded} conceded in the run`,
+          `Named in ${times} of the last ${recent.length} matches`,
+          `Conceded ${conceded} in the run`,
+          recurring.theme ? `Theme: ${recurring.theme}` : "The note matches no theme the desk knows",
         ],
         playerNames: [],
         publishedOn: recent[0].matchDate,
@@ -1221,6 +1852,7 @@ function matchReportBody(
     if (scored >= recent.length * 2) {
       items.push({
         id: `goals-${recent[0].eventId}`,
+        kind: "MATCH",
         category: "FORM WATCH",
         tone: "GOOD",
         headline: pick(
@@ -1243,6 +1875,7 @@ function matchReportBody(
     } else if (conceded >= recent.length * 2) {
       items.push({
         id: `leak-${recent[0].eventId}`,
+        kind: "MATCH",
         category: "THE VERDICT",
         tone: "CONCERN",
         headline: pick(
@@ -1266,20 +1899,31 @@ function matchReportBody(
   }
 
   // ---- 11. A margin worth a headline --------------------------------------------------------
+  /**
+   * The biggest winning or losing margin in the window, if there is one.
+   *
+   * NOT the match already reported. The lead story covers the latest result in full, and writing the margin
+   * story about the same ninety minutes prints the same afternoon twice - once as news and once as a rout,
+   * with the manager's own comment quoted in both. So the match the paper already led on is skipped, and a
+   * career whose only heavy result is its most recent one simply does not get this story.
+   */
   const heavy = input.matches.find(
-    (match) => Math.abs(match.goalsFor - match.goalsAgainst) >= 3
+    (match) =>
+      Math.abs(match.goalsFor - match.goalsAgainst) >= 3 && match.eventId !== last?.eventId
   );
   if (heavy && recent.includes(heavy)) {
     const won = heavy.goalsFor > heavy.goalsAgainst;
+    const heavyAgainst = opponentWord(heavy);
     items.push({
       id: `margin-${heavy.eventId}`,
+      kind: "MATCH",
       category: won ? "TOP STORY" : "THE VERDICT",
       tone: won ? "GOOD" : "CONCERN",
       headline: won
         ? pick(
             [
-              `Rout: ${input.clubName} ${scoreOf(heavy)} ${heavy.opponent ?? "the visitors"}`,
-              `No Contest: ${scoreOf(heavy)} Against ${heavy.opponent ?? "the visitors"}`,
+              `Rout: ${fixtureLine(heavy, input.clubName)}`,
+              `No Contest: ${input.clubName} See Off ${heavyAgainst}`,
               `A Statement: ${input.clubName} ${scoreOf(heavy)}`,
             ],
             heavy.eventId,
@@ -1287,8 +1931,8 @@ function matchReportBody(
           )
         : pick(
             [
-              `Heavy Defeat: ${scoreOf(heavy)} at ${heavy.opponent ?? "the visitors"}`,
-              `${input.clubName} Beaten Heavily at ${heavy.opponent ?? "the visitors"}`,
+              `Heavy Defeat: ${fixtureLine(heavy, input.clubName)}`,
+              `${input.clubName} Beaten Heavily by ${heavyAgainst}`,
               `${scoreOf(heavy)}: a Scoreline That Will Be Remembered`,
             ],
             heavy.eventId,
@@ -1323,6 +1967,7 @@ function matchReportBody(
       const expired = soonest.contractValidUntil !== null && soonest.contractValidUntil <= year;
       items.push({
         id: `contract-${soonest.name}-${soonest.contractValidUntil}`,
+        kind: "STANDING",
         category: "TRANSFER DESK",
         tone: expired ? "CONCERN" : "NEUTRAL",
         headline: pick(
@@ -1368,18 +2013,31 @@ function matchReportBody(
   if (thinnest && thinnest[1].length === 1 && input.squad.length >= 11) {
     const only = thinnest[1][0];
     const words = positionWords(thinnest[0]);
+    /**
+     * Whether the position is one a paper can actually name.
+     *
+     * `positionWords` falls back to "player" for a code the table does not know, because "a UNKNOWN" is
+     * worse than saying nothing. That fallback is no good in a headline, though - "Player Down to One" is
+     * not a sentence - so those two frames are dropped rather than filled in.
+     */
+    const named = words !== "player";
     const seed = `depth${thinnest[0]}`;
     items.push({
       id: `depth-${thinnest[0]}`,
+      kind: "STANDING",
       category: "SQUAD WATCH",
       tone: "CONCERN",
       headline: pick(
         [
           `${only.name} Has No Cover`,
-          `Only One Senior ${capitalise(words)} at ${input.clubName}`,
+          ...(named
+            ? [
+                `Only One Senior ${capitalise(words)} at ${input.clubName}`,
+                `${capitalise(words)} Down to One`,
+              ]
+            : []),
           `The Position ${input.clubName} Cannot Afford to Lose`,
           `Nobody Behind ${only.name}`,
-          `${capitalise(words)} Down to One`,
         ],
         seed,
         "headline"
@@ -1387,7 +2045,7 @@ function matchReportBody(
       body: pick(
         [
           `There is exactly one senior ${words} at the club, and it is ${only.name}. One injury and the shape has to change, which is the kind of problem a transfer window exists for.`,
-          `${only.name} is the only senior ${words} ${input.managerName} has. Everybody in football knows what happens to a squad that thin in one place: it happens in the week you least want it to.`,
+          `${only.name} is the only senior ${words} ${input.managerName} has. Everybody in football knows what happens to a squad that thin in one place: it happens in the week nobody wants it to.`,
           `One senior ${words}, and his name is ${only.name}. It is not a crisis yet, which is exactly why it is worth saying now rather than in the month it becomes one.`,
         ],
         seed,
@@ -1437,6 +2095,7 @@ function matchReportBody(
           : null;
     items.push({
       id: `youth-${prospectName}`,
+      kind: "STANDING",
       category: "SCOUTING",
       tone: "GOOD",
       headline: pick(
@@ -1480,6 +2139,7 @@ function matchReportBody(
   if (latestTrophy) {
     items.push({
       id: `trophy-${latestTrophy.name}-${latestTrophy.season}`,
+      kind: "STANDING",
       category: "SILVERWARE",
       tone: "GOOD",
       headline: pick(
@@ -1506,12 +2166,23 @@ function matchReportBody(
 
   // ---- 16. Where the season stands ----------------------------------------------------------
   const completed = input.seasons.filter((season) => season.complete);
-  const latestSeason = completed[completed.length - 1] ?? null;
+  /**
+   * The most recent COMPLETED season that is not the one being reported on.
+   *
+   * Taking the last completed row instead would pick up the current season the moment the save marks it
+   * finished, and the story would then print the same position twice under the words "the season before".
+   * The comparison is on the save's own season ordinal rather than on array order, so it holds either way.
+   */
+  const previousSeason =
+    [...completed]
+      .filter((season) => season.season < input.seasonNumber)
+      .sort((left, right) => right.season - left.season)[0] ?? null;
   if (input.position?.value !== null && input.position?.value !== undefined) {
     const position = input.position.value;
     const disputed = input.position.disputed;
     items.push({
       id: `position-${position}-${input.seasonNumber}`,
+      kind: "STANDING",
       category: "TABLE WATCH",
       tone: position <= 6 ? "GOOD" : position >= 18 ? "CONCERN" : "NEUTRAL",
       headline: pick(
@@ -1525,11 +2196,11 @@ function matchReportBody(
         `position${position}${input.seasonNumber}`,
         "headline"
       ),
-      body: `The final table had ${input.clubName} ${ordinal(position)}${input.leagueName ? ` in the ${input.leagueName}` : ""}. ${disputed ? "The logged position and the save's own record disagree, so treat it with care." : "That is where the season finished, on the save's own record."}${latestSeason && latestSeason.tablePosition !== null ? ` The season before, ${ordinal(latestSeason.tablePosition)}.` : ""}`,
+      body: `The final table had ${input.clubName} ${ordinal(position)}${input.leagueName ? ` in the ${input.leagueName}` : ""}. ${disputed ? "The logged position and the final table disagree, so treat it with care." : "That is where the season finished."}${previousSeason && previousSeason.tablePosition !== null ? ` The season before, ${ordinal(previousSeason.tablePosition)}.` : ""}`,
       evidence: [
         `Position ${position}`,
         input.position.basis ? `Basis ${input.position.basis}` : "",
-        latestSeason?.tablePosition ? `Season ${latestSeason.season} ${ordinal(latestSeason.tablePosition)}` : "",
+        previousSeason?.tablePosition ? `Season ${previousSeason.season} ${ordinal(previousSeason.tablePosition)}` : "",
       ].filter(Boolean),
       playerNames: [],
       publishedOn: at,
@@ -1544,8 +2215,17 @@ function matchReportBody(
   if (input.block && input.block.gamesPlayed >= 3 && input.block.points !== null) {
     const points = input.block.points;
     const perGame = points / input.block.gamesPlayed;
+    /**
+     * Where the season is, when the club's own match count and its division's size are both to hand.
+     *
+     * Approximate, because the count is across all competitions - see the note on `seasonPhase`. It is used
+     * only for the kind of sentence a paper writes anyway, which says roughly where the campaign is without
+     * claiming a date or a number of games played.
+     */
+    const atPhase = phasePhrase(seasonPhase(input.progress ?? null));
     items.push({
       id: `block-${input.seasonNumber}-${input.block.gamesPlayed}`,
+      kind: "MATCH",
       category: "THE PLAN",
       tone: perGame >= 1.6 ? "GOOD" : perGame < 1 ? "CONCERN" : "NEUTRAL",
       headline: pick(
@@ -1569,7 +2249,7 @@ function matchReportBody(
         `block${input.seasonNumber}${input.block.gamesPlayed}`,
         "headline"
       ),
-      body: `${points} points from the last ${input.block.gamesPlayed} ${plural(input.block.gamesPlayed, "match", "matches")}, at ${perGame.toFixed(1)} a game. ${perGame >= 1.6 ? "Do that for a season and nobody finishes above you." : perGame < 1 ? "Do that for a season and the table says what it says." : "That is the sort of return that keeps a season moving without moving it much."}`,
+      body: `${points} points from the last ${input.block.gamesPlayed} ${plural(input.block.gamesPlayed, "match", "matches")}, at ${perGame.toFixed(1)} a game. ${perGame >= 1.6 ? "Do that for a season and nobody finishes above you." : perGame < 1 ? "Do that for a season and the table says what it says." : "That is the sort of return that keeps a season moving without moving it much."}${atPhase ? ` It is a return worth weighing ${atPhase} rather than in isolation.` : ""}`,
       evidence: [
         `${points} points from ${input.block.gamesPlayed} logged matches`,
         `${perGame.toFixed(2)} points per match`,
@@ -1596,6 +2276,7 @@ function matchReportBody(
     const seed = `${best.name}${best.newOverall}`;
     items.push({
       id: `progress-${best.id}`,
+      kind: "STANDING",
       category: best.isProspect ? "SCOUTING" : "PLAYER FOCUS",
       tone: "GOOD",
       headline: pick(
@@ -1621,14 +2302,14 @@ function matchReportBody(
       body: pick(
         best.isBreakthrough
           ? [
-              `${best.name} has moved up a level, and it has happened quicker than anyone at the club expected. He is a ${positionWords(where)}, and that is a position where a jump like this is worth the most.`,
-              `This is the jump the coaching staff have been waiting for, and ${best.name} has made it early. A ${positionWords(where)} who improves this much this quickly stops being a project.`,
+              `${best.name} has moved up a level, and it has happened quicker than anyone at the club expected. He is ${positionPhrase(where)}, and that is a position where a jump like this is worth the most.`,
+              `This is the jump the coaching staff have been waiting for, and ${best.name} has made it early. ${capitalise(positionPhrase(where))} who improves this much this quickly stops being a project.`,
               `Nobody was surprised to see ${best.name} improve. They were surprised by how much, and how soon. At ${positionWords(where)} that changes what the rest of his season is about.`,
             ]
           : [
               `${source(seed, "progress-source")} say ${best.name} has kicked on again. One small step is not news on its own; the direction is, and this is a player going the right way.`,
-              `${best.name} is better than he was a few weeks ago, and the club have noticed. He is a ${positionWords(where)}, and improvement in ${positionGroupWords(where)} tends to show up on a Saturday.`,
-              `A quiet improvement from ${best.name}, and the kind that matters more than it reads: the people who work with him every day say the level has gone up. A ${positionWords(where)} who is still getting better is a useful thing to have.`,
+              `${best.name} is better than he was recently, and the club have noticed. He is ${positionPhrase(where)}, and improvement in ${positionGroupWords(where)} tends to show up in a match before it shows up on a list.`,
+              `A quiet improvement from ${best.name}, and the kind that matters more than it reads: the people who work with him every day say the level has gone up. ${capitalise(positionPhrase(where))} who is still getting better is a useful thing to have.`,
             ],
         seed,
         "body"
@@ -1642,7 +2323,7 @@ function matchReportBody(
               ]
             : [
                 `Improvement ${age !== null ? `at ${age} ` : ""}is worth more than it looks. Nobody is going to hand him a new contract on the back of it, and nobody needed to be told he could play.`,
-                `He is not a young player being talked up. He is a ${positionWords(where)} who has got better, which at this point in a career is the hardest kind of progress to make.`,
+                `He is not a young player being talked up. He is ${positionPhrase(where)} who has got better, which at this point in a career is the hardest kind of progress to make.`,
               ],
           seed,
           "article-what-it-is"
@@ -1686,6 +2367,7 @@ function matchReportBody(
     const seed = `${worst.name}${worst.newOverall}-down`;
     items.push({
       id: `regress-${worst.id}`,
+      kind: "STANDING",
       category: "FORM WATCH",
       tone: "CONCERN",
       headline: pick(
@@ -1702,9 +2384,9 @@ function matchReportBody(
       ),
       body: pick(
         [
-          `${source(seed, "regress-source")} have seen ${worst.name} go the other way. Nobody is calling it a crisis, and it is still early, but a ${positionWords(where)} who was moving forward has started moving back.`,
-          `${worst.name} has not been at his best lately, and that is a sentence the coaching staff did not expect to be saying about a ${positionWords(where)} in his ${age !== null ? `${age}s` : "career"}. It is a small drop. It is also a drop.`,
-          `There is a dip in ${worst.name}, and it has been noticed inside the club rather than by the crowd. For a ${positionWords(where)}, that is worth saying out loud, because it is easier to arrest in March than in May.`,
+          `${source(seed, "regress-source")} have seen ${worst.name} go the other way. Nobody is calling it a crisis, and it is still early, but ${positionPhrase(where)} who was moving forward has started moving back.`,
+          `${worst.name} has not been at his best lately, and that is a sentence the coaching staff did not expect to be saying about ${positionPhrase(where)}${age !== null ? ` in ${ageBand(age)}` : " at this stage of his career"}. It is a small drop. It is also a drop.`,
+          `There is a dip in ${worst.name}, and it has been noticed inside the club rather than by the crowd. For ${positionPhrase(where)}, that is worth saying out loud, because it is easier to arrest now than later in a season.`,
           `${worst.name}'s form has slipped, and ${age !== null ? `at ${age} ` : ""}nobody expected this stretch of his career to plateau. The club are watching it rather than announcing it, which is usually the honest answer.`,
         ],
         seed,
@@ -1713,7 +2395,7 @@ function matchReportBody(
       article: [
         pick(
           [
-            `Worth being precise about what this is: a stretch of indifferent form, not a broken player. ${worst.name} is a ${positionWords(where)}${age !== null ? ` of ${age}` : ""}, and the club's own belief in him has not changed on the back of a few weeks.`,
+            `Worth being precise about what this is: a stretch of indifferent form, not a broken player. ${worst.name} is ${positionPhrase(where)}${age !== null ? ` in ${ageBand(age)}` : ""}, and the club's own belief in him has not changed on the back of a short run.`,
             `It is a dip rather than a decline, and there is a difference. Form moves for reasons a training ground cannot always name: a knock not worth reporting, a change of shape, a run of games against better players.`,
             `None of this is new to a player who has been through it before, and none of it is unusual in a season this long. What matters is which way the next month goes.`,
           ],
@@ -1722,7 +2404,7 @@ function matchReportBody(
         ),
         pick(
           [
-            `The awkward part is that a ${positionWords(where)} cannot play his way through it quietly. Every misplaced pass is in front of people, and every week the question gets asked a little louder.`,
+            `The awkward part is that ${positionPhrase(where)} cannot play his way through it quietly. Every misplaced pass is in front of people, and every week the question gets asked a little louder.`,
             `The other side of it is selection. A squad that has been getting results can afford to wait for a player to come back to himself; one that is not has a harder decision to make.`,
           ],
           seed,
@@ -1751,6 +2433,7 @@ function matchReportBody(
   if (star && starOverall !== null && rated.length >= 11 && starOverall >= 60) {
     items.push({
       id: `star-${star.name}-${starOverall}`,
+      kind: "STANDING",
       category: "SQUAD WATCH",
       tone: "GOOD",
       headline: pick(
@@ -1782,20 +2465,29 @@ function matchReportBody(
     const shutouts = recent.filter((match) => match.goalsAgainst === 0).length;
     const conceded = sum(recent.map((match) => match.goalsAgainst));
     if (shutouts >= 3) {
+      const span = `${recent.length} ${plural(recent.length, "match", "matches")}`;
+      const everyOne = shutouts === recent.length;
+      /** "no goals" rather than "0 goals": a figure belongs in the evidence, not in the sentence. */
+      const against = conceded === 0 ? "no goals" : `${conceded} ${plural(conceded, "goal")}`;
       items.push({
         id: `defence-${recent[0].eventId}`,
+        kind: "MATCH",
         category: "THE VERDICT",
         tone: "GOOD",
         headline: pick(
           [
-            `${shutouts} Clean Sheets in ${recent.length} is a Defence`,
+            everyOne
+              ? `${shutouts} Clean Sheets in ${recent.length}, Every One of Them`
+              : `${shutouts} Clean Sheets in ${recent.length} is a Defence`,
             `The Meanest Back Line Around`,
-            `${conceded} Conceded in ${recent.length} ${plural(recent.length, "Match", "Matches")}`,
+            conceded === 0
+              ? `Nothing Conceded in ${recent.length} ${plural(recent.length, "Match", "Matches")}`
+              : `${conceded} Conceded in ${recent.length} ${plural(recent.length, "Match", "Matches")}`,
           ],
           `defence${recent[0].eventId}`,
           "headline"
         ),
-        body: `${shutouts} clean ${plural(shutouts, "sheet")} in the last ${recent.length}, and ${conceded} ${plural(conceded, "goal")} let in across them. ${keeper.name} is the last line of it, but the record belongs to the team.`,
+        body: `${shutouts} clean ${plural(shutouts, "sheet")} in the last ${span}${everyOne ? ", every one of them" : ""}, and ${against} let in across them. ${keeper.name} is the last line of it, but the record belongs to the team.`,
         evidence: [
           `${shutouts} clean sheets in ${recent.length} matches`,
           `${conceded} conceded in the run`,
@@ -1844,7 +2536,7 @@ function matchReportBody(
           ]
       : [
             `He was not in the saved XI, so the shape does not have to move. What a squad loses in that case is depth, and depth is what the back half of a season is played on.`,
-            `This is not a change to the first choice side, and it should not be reported as one. It is a hole in the cover, which matters later rather than on Saturday.`,
+            `This is not a change to the first choice side, and it should not be reported as one. It is a hole in the cover, which matters later rather than in the next match.`,
             `He has not been starting, so the team that lines up is the team the manager wanted. The cost of this one is measured in the options he no longer has on the bench.`,
             `The starting XI is untouched by it. What the squad loses is an alternative, and alternatives are only noticed in the weeks when three games land in eight days.`,
             `A squad player rather than a starter, so nobody has to re-pick the side. The absence still narrows the bench, and a narrow bench is what makes a manager conservative.`,
@@ -1907,34 +2599,34 @@ function matchReportBody(
       },
       WEEKS: {
         headline: [
-          `${absence.name} Faces a Few Weeks Out`,
-          `Weeks Out for ${absence.name}`,
-          `${input.clubName} Lose ${absence.name} for Weeks`,
+          `${absence.name} Faces ${capitalise(timeOut)} Out`,
+          `${capitalise(timeOut)} Out for ${absence.name}`,
+          `${input.clubName} Lose ${absence.name} for ${capitalise(timeOut)}`,
           `A Spell on the Sidelines for ${absence.name}`,
-          `${absence.name} Set to Miss Weeks`,
+          `${absence.name} Set to Miss ${capitalise(timeOut)}`,
         ],
         body: {
           fact: [
             `${absence.name} is out for ${timeOut}, and that is long enough to stop being a knock and start being a run of games without him.`,
-            `${absence.name} will miss ${timeOut} of football. A few weeks is the awkward length: long enough that somebody else has to play, short enough that nobody signs anyone about it.`,
+            `${absence.name} will miss ${timeOut} of football. ${capitalise(timeOut)} is the awkward length: long enough that somebody else has to play, short enough that nobody signs anyone about it.`,
             `Out for ${timeOut}, and ${absence.name} leaves a hole in the ${words} position that has to be filled from inside the squad, because no window is open to solve it any other way.`,
           ],
           starter: [
             `${input.clubName} now have to decide what the team looks like without their ${words}, and the answer has to come from a squad that has not had to give one all season.`,
-            `A first choice out for a few weeks is a shape question as much as a personnel one, and it arrives with no time to prepare for it.`,
+            `A first choice out for ${timeOut} is a shape question as much as a personnel one, and it arrives with no time to prepare for it.`,
             `That is three or four matches to plan around a man the manager has been picking, which is the part of a fixture list nobody controls.`,
           ],
           squad: [
-            `The XI does not change, and the squad still gets thinner: a few weeks is long enough that the manager will need the player he is now missing.`,
+            `The XI does not change, and the squad still gets thinner: ${timeOut} is long enough that the manager will need the player he is now missing.`,
             `Nobody has to re-pick the side. The bench loses its most obvious option at the point in the season when games start arriving in pairs.`,
-            `He has not been starting, so the cost is not on Saturday. It is in the weeks when the manager wants to rotate and finds he cannot.`,
+            `He has not been starting, so the cost is not in the next match. It is in the weeks when the manager wants to rotate and finds he cannot.`,
           ],
         },
         article: [
           pick(
             [
-              `Cover is the story now. Whoever is asked to do it gets a run of games rather than one afternoon, and a run of games is how a squad player becomes a first choice or stops being one.`,
-              `It lands on the manager's desk as a squad question rather than a person question. A few weeks is enough to try the alternative, and often enough to find out he did not have one.`,
+              `Cover is the story now. Whoever is asked to do it gets a run of games rather than one match, and a run of games is how a squad player becomes a first choice or stops being one.`,
+              `It lands on the manager's desk as a squad question rather than a person question. ${capitalise(timeOut)} is enough to try the alternative, and often enough to find out he did not have one.`,
             ],
             seed,
             "article-replacement"
@@ -1966,14 +2658,14 @@ function matchReportBody(
           squad: [
             `The first choice side is untouched, so this is a story about the bench rather than about the team.`,
             `With him out, the manager has one fewer way to change a game, and a month of football is a lot of games to spend with a short bench.`,
-            `He was not in the XI, so the cost is depth and rotation rather than the Saturday team sheet.`,
+            `He was not in the XI, so the cost is depth and rotation rather than the next team sheet.`,
           ],
         },
         article: [
           pick(
             [
-              `A month is where a squad's depth stops being theoretical. The first two games are easy to cover; the third is when a manager finds out what he actually has behind his first choice.`,
-              `The alternative is asked to hold the position rather than win it, and that distinction matters. A month is enough to change how the side plays and not enough to change what it is for.`,
+              `The manager has a month to settle something he would rather not settle: whether the man who comes in is a stand-in or a candidate. Nothing forces the answer, and the fixtures will ask the question anyway.`,
+              `A month is long enough for the replacement to become a problem for the man he is replacing, which is the good version of this and an awkward one to manage. Clubs rarely get through it without learning something they were not looking for.`,
             ],
             seed,
             "article-month"
@@ -2011,8 +2703,8 @@ function matchReportBody(
         article: [
           pick(
             [
-              `A squad absorbs this in one of two ways: a younger player is handed the job early, or the shape is bent around the players who are left. Neither is free, and the manager has to pick one before the next match picks it for him.`,
-              `Months of cover is not months of the same player, and pretending otherwise is how a good season goes quietly wrong.`,
+              `What makes an absence like this expensive is not the matches missed. It is the matches where somebody else has to be a player he is not, week after week, with no end date close enough to point at.`,
+              `The manager will be asked about it every week for months, and the answer will not change, which is a pressure of its own and one that lands on the rest of the squad as much as on him.`,
             ],
             seed,
             "article-absorb"
@@ -2026,7 +2718,7 @@ function matchReportBody(
         headline: [
           `Season Over for ${absence.name}`,
           `${absence.name} Out for the Season`,
-          `${input.clubName} Lose ${absence.name} for the Run-In`,
+          `${input.clubName} Lose ${absence.name} for the Rest of the Season`,
           `${absence.name}'s Season Ends Here`,
           `A Season-Ending Blow for ${absence.name}`,
         ],
@@ -2043,8 +2735,8 @@ function matchReportBody(
           ],
           squad: [
             `He was not in the XI, so the team itself does not need rebuilding. What the club loses is the player it would have turned to, and a season is long enough that it would have turned to him.`,
-            `The first choice side is unchanged. The squad, though, is one smaller for the whole rest of the season, and that bill arrives in the winter.`,
-            `A squad player out for a season removes cover rather than a starter, which matters less on any given Saturday and more across thirty of them.`,
+            `The first choice side is unchanged. The squad, though, is one smaller for the whole rest of the season, and that bill arrives later rather than now.`,
+            `A squad player out for a season removes cover rather than a starter, which matters less in any one match and more across thirty of them.`,
           ],
         },
         article: [
@@ -2073,6 +2765,7 @@ function matchReportBody(
     const body = `${pick(copy.body.fact, seed, "body-fact")} ${standingBody}`;
     items.push({
       id: `injury-${foldName(absence.name)}-${band}`,
+      kind: "STANDING",
       category: "TEAM NEWS",
       tone: "CONCERN",
       headline: pick(copy.headline, seed, "headline"),
@@ -2110,6 +2803,7 @@ function matchReportBody(
         : null;
     items.push({
       id: `return-${foldName(absence.name)}-${absence.until}`,
+      kind: "STANDING",
       category: "TEAM NEWS",
       tone: "GOOD",
       headline: pick(
@@ -2128,7 +2822,7 @@ function matchReportBody(
           `${absence.name} is back in training and available again, which gives ${input.clubName} their ${words} option back. The manager now has the pleasant problem of deciding how quickly to use him.`,
           `${absence.name} is fit and back with the squad. After a spell out, the first question is rarely whether he can play and almost always how much of a game he can play.`,
           `Good news for ${input.clubName}: ${absence.name} has returned to training and comes back into the picture.`, 
-          `${absence.name} is available again. Nobody gets a spell out of the side back in one afternoon, but he is at least an option the manager can pick.`,
+          `${absence.name} is available again. Nobody gets a spell out of the side back straight away, but he is at least an option the manager can pick.`,
         ],
         seed,
         "body"
@@ -2155,7 +2849,7 @@ function matchReportBody(
     });
   }
 
-  return finalise(rank(items), input);
+  return finalise(rank(items, input.matches.map((match) => match.eventId)), input);
 }
 
 /** How long a return stays a story. About a fortnight: after that the squad has settled without him. */
@@ -2178,7 +2872,11 @@ function daysSince(from: string | null, to: string | null): number | null {
  * point where it knows the facts, and a story that has nothing more to say leaves it out rather than being
  * forced to invent something.
  */
-type StoryDraft = Omit<NewsItem, "article" | "byline"> & { article?: string[] };
+type StoryDraft = Omit<NewsItem, "article" | "byline" | "stance"> & {
+  article?: string[];
+  /** The line this story is written in, where the desk is offering a view rather than a fact. */
+  stance?: OutletStance;
+};
 
 /**
  * Categories the desk files with a reporter's name on them.
@@ -2200,20 +2898,45 @@ const BYLINED_CATEGORIES = new Set([
   "TRANSFER DESK",
   "SILVERWARE",
   "TEAM NEWS",
+  // A column or a rumour without a name on it reads as a system note, and a stated stance only means
+  // something if the masthead it belongs to is on the piece.
+  "OPINION",
+  "TALKING POINT",
 ]);
+
+/**
+ * What one EDITION remembers while it is being written.
+ *
+ * Two things, and both are needed. Which exact SENTENCES it has printed, so a line never comes back verbatim;
+ * and how many times it has used each CONCLUSION FAMILY, so the paper spreads its closing paragraphs across
+ * everything it knows rather than reaching for the same point until that pool runs dry and repeats itself.
+ *
+ * A `Set` of used sentences alone is not enough, which is what the first version of this had. Once every
+ * family had been used once, relevance decided again, and the most relevant one was reached for over and over
+ * until its six phrasings were gone - and then repeated.
+ */
+interface EditionMemory {
+  sentences: Set<string>;
+  families: Map<string, number>;
+}
+
+function newEditionMemory(): EditionMemory {
+  return { sentences: new Set<string>(), families: new Map<string, number>() };
+}
 
 /**
  * The same choice `pick` makes, unless this edition has already printed it.
  *
- * WHY THIS EXISTS. The closing paragraph rotates its frames by the story's position in the edition, and a
- * rotation is not enough on its own: with four frames and two chosen per story, an edition of six stories
- * prints the same sentence twice, and the same pairing comes back on the next read. Rotating WHICH SENTENCE
- * is chosen, on top of which frame, is what makes two neighbouring pieces end differently - and the reader
- * notices a repeated closing line faster than anything else on the page, because it is the last thing he
- * reads.
+ * WHY THIS EXISTS. The closing paragraph rotates its conclusions by the story's position in the edition, and a
+ * rotation is not enough on its own: with a handful of conclusions and two chosen per story, an edition of six
+ * stories prints the same sentence twice, and the same pairing comes back on the next read. Rotating WHICH
+ * SENTENCE is chosen, on top of which conclusion, is what makes two neighbouring pieces end differently - and
+ * the reader notices a repeated closing line faster than anything else on the page, because it is the last
+ * thing he reads.
  *
  * A full pool is not a failure: once every phrasing is in play, repeating one is better than leaving the
- * paragraph out, so the preferred choice is used rather than nothing.
+ * paragraph out, so the preferred choice is used rather than nothing. The edition memory's own discount is
+ * what keeps a pool from being reached for so often that this has to happen.
  */
 function pickFresh(options: readonly string[], seed: string, slot: string, used: Set<string>): string {
   const preferred = pick(options, seed, slot);
@@ -2235,46 +2958,49 @@ function pickFresh(options: readonly string[], seed: string, slot: string, used:
 /**
  * The closing paragraph of an article.
  *
- * Built only from facts that are true of THIS career, and only from ones the paper could actually have: a
- * position on the current standings, the run of results, how much of the season is behind the club. A frame
- * whose fact is missing is not used at all, so a career with no matches logged gets a closing line about what
- * the squad is instead of an invented fixture list.
+ * REBUILT, because the first version closed almost every story in the paper on the same two sentences. It
+ * had five frames and two of them - "the season" and "what comes next" - were pushed into the pool
+ * unconditionally, so they were always available, and the pair was reached by a hash of the story id alone,
+ * which is how a piece about a contract came to end with a line about a week of football.
  *
- * TWO CHOICES ARE MADE, not one. Which FRAME (the run, the table, the season, the squad, what comes next)
- * comes from a hash of the story's id, so it is stable for that story and unrelated to the story beside it.
- * Which PHRASING of that frame comes from `pickFresh`, which will not print a line this edition has already
- * used. The first version made one choice and rotated only by position, which is why the same sentence about
- * a single week turned up under story after story.
+ * A CONCLUSION NOW, not a frame. Every candidate carries the fact that entitles it to exist - a position on
+ * the standings, a block of results, a player in the treatment room - so a career with no matches logged
+ * closes on what its squad actually is rather than on an invented fixture list. Candidates are ranked by how
+ * much of the story they are about, and the hash only breaks a tie between two that are equally relevant.
+ * That is the difference between variety which follows from the facts and variety which merely looks like it.
+ *
+ * The edition remembers which conclusion each of its stories reached, so two neighbours cannot make the same
+ * point twice unless there is genuinely nothing else to say. One generic line exists, for the last story in a
+ * thin edition, and it is never allowed to open the paragraph.
  */
 function outlookParagraph(
   input: NewsInput,
   seed: string,
   kind: StoryKind,
-  used: Set<string>
+  memory: EditionMemory
 ): string {
   const recent = input.matches.slice(0, WINDOW);
-  const frames: { key: string; text: string }[] = [];
+  const candidates: { key: string; score: number; options: string[]; generic?: boolean }[] = [];
 
-  // The run only belongs in a closing line when the story was about a match. A squad-depth note or an
-  // academy story has no "week" to look back on, and saying so was how the first pass produced a closing
-  // paragraph about a match that had not happened.
+  // The run, only under a story that was about a match. A squad-depth note or an academy story has no week
+  // to look back on, and saying so was how the first pass produced a closing paragraph about a match that
+  // had not happened.
   if (kind === "MATCH" && recent.length >= 3) {
     const run = formString(recent);
     const window = `${recent.length} ${plural(recent.length, "match", "matches")}`;
-    frames.push({
+    candidates.push({
       key: "run",
-      text: pickFresh(
-        [
-          `The wider picture is ${run} across the last ${window}, which is what turns one result into a story.`,
-          `Taken with the ${window} before it, that run reads ${run}, and it is that sequence rather than the single afternoon that will be judged.`,
-          `The run behind it is ${run} in ${window}, and a run is what a season is actually made of.`,
-          `Look at the ${window} rather than the ninety minutes and this reads ${run}, which is a different and more useful sentence.`,
-          `Form of ${run} over ${window} is the part the manager will have taken home with him.`,
-        ],
-        seed,
-        "outlook-run",
-        used
-      ),
+      score: 80,
+      options: [
+        `The wider picture is ${run} across the last ${window}, which is what turns one result into a story.`,
+        `Taken with the ${window} before it, that run reads ${run}, and it is that sequence rather than the single match that will be judged.`,
+        `The run behind it is ${run} in ${window}, and a run is what a season is actually made of.`,
+        `Look at the ${window} rather than the ninety minutes and this reads ${run}, which is a different and more useful sentence.`,
+        `Form of ${run} over ${window} is the part the manager will have taken home with him.`,
+        `A record of ${run} settles nothing on its own, and it is the context this has to be read in.`,
+        `The ${window} read ${run}, and that is the honest way to look at a result like this one.`,
+        `Nothing about that run is changed by a single match, and the run is ${run}.`,
+      ],
     });
   }
 
@@ -2282,116 +3008,238 @@ function outlookParagraph(
   // newspaper would be the one thing worse than not printing it at all.
   const position = input.position?.value ?? null;
   if (position !== null && !input.position?.disputed && input.leagueName) {
-    frames.push({
+    const table = input.leagueName;
+    candidates.push({
       key: "table",
-      text: pickFresh(
-        [
-          `It leaves ${input.clubName} ${ordinal(position)} in the ${input.leagueName} on the standings as they are.`,
-          `On the current standings that is ${ordinal(position)} in the ${input.leagueName}, with everything still to play for.`,
-          `${ordinal(position)} in the ${input.leagueName} is where this leaves them, and the table has a way of settling these arguments.`,
-          `The table says ${ordinal(position)} in the ${input.leagueName}, which is the only verdict that accumulates.`,
-        ],
-        seed,
-        "outlook-table",
-        used
-      ),
-    });
-  }
-
-  frames.push({
-    key: "season",
-    text: pickFresh(
-      kind === "MATCH"
-        ? [
-            `There is a long way to go this season, which is the comforting half of a story like this and the worrying half of the other kind.`,
-            `A single week will not decide anything, and weeks like it are how seasons are decided anyway.`,
-            `One afternoon does not settle a season, and it does not have to: this is what the fixture list is for.`,
-            `Nobody wins or loses anything in November, but this is the part of the year when the shape of it is decided.`,
-            `The season will not be remembered for a match like this, and it will be built out of them.`,
-            `Months of football still to come, and this is one of the afternoons they will be assembled from.`,
-          ]
-        : [
-            `It is the sort of thing that matters more as the season goes on than it does on the day it is noticed.`,
-            `None of that decides a season on its own. What it does is give the manager one more thing he knows about his own squad.`,
-            `This is the kind of fact that only becomes a problem if nothing is done about it, and there is time.`,
-            `Read it as a detail rather than a verdict: seasons turn on a dozen of these, not on one.`,
-            `There is no crisis in it, and there is something to think about, which is the usual state of a football club.`,
-            `The manager will file it away with the rest of what he knows and act when it suits him.`,
-          ],
-      seed,
-      "outlook-season",
-      used
-    ),
-  });
-
-  if (input.squad.length > 0) {
-    frames.push({
-      key: "squad",
-      text: pickFresh(
-        kind === "MATCH"
-          ? [
-              `With a squad of ${input.squad.length}, ${input.managerName} has as much room to change it as he has reason to.`,
-              `It is a squad of ${input.squad.length}, and the manager will know better than anybody which of them this week said something about themselves.`,
-              `${input.squad.length} players is enough to change a side and not enough to change it twice, which is the calculation every week.`,
-              `He has ${input.squad.length} players to choose from, and the ones who did not play will have their own view of this.`,
-              `In a squad of ${input.squad.length} there are always two or three whose season turns on an afternoon like this.`,
-            ]
-          : [
-              `A squad of ${input.squad.length} is what ${input.managerName} has to work with, and every judgement about it is drawn from that.`,
-              `With ${input.squad.length} players on the books, the manager's room to move is what it is, and he knows it better than anybody.`,
-              `${input.squad.length} players, one manager, and a long list of things that would improve with money.`,
-              `The squad is ${input.squad.length} strong, which is the number everything else has to be worked out from.`,
-              `Whatever he decides, it will be decided with the ${input.squad.length} players already in the building.`,
-            ],
-        seed,
-        "outlook-squad",
-        used
-      ),
-    });
-  }
-
-  // What comes next, said without inventing a fixture. True of every career and useful as a closing beat.
-  frames.push({
-    key: "next",
-    text: pickFresh(
-      [
-        `The next few weeks will say more about it than this did.`,
-        `What matters now is what the manager does with it, and that starts at the next training session.`,
-        `It is the sort of thing a season answers slowly rather than all at once.`,
-        `The answer to it is somewhere in the next month of football, and nobody gets to know it in advance.`,
-        `Whether it matters at all is a question for a few weeks from now.`,
+      score: 75,
+      options: [
+        `It leaves ${input.clubName} ${ordinal(position)} in the ${table} on the standings as they are.`,
+        `On the current standings that is ${ordinal(position)} in the ${table}, with everything still to play for.`,
+        `${ordinal(position)} in the ${table} is where this leaves them, and the table has a way of settling these arguments.`,
+        `The table says ${ordinal(position)} in the ${table}, which is the only verdict that accumulates.`,
+        `Whatever is said about it, ${ordinal(position)} in the ${table} is the number that gets remembered.`,
+        `Read against a whole season in the ${table}, ${ordinal(position)} is where the club stands.`,
       ],
-      seed,
-      "outlook-next",
-      used
-    ),
+    });
+  }
+
+  // The block of results: the only run of form the app has a points figure for, and the one thing on this
+  // page that is arithmetic rather than opinion.
+  if (kind === "MATCH" && input.block && input.block.gamesPlayed >= 3 && input.block.points !== null) {
+    const games = input.block.gamesPlayed;
+    const points = input.block.points;
+    const perGame = (points / games).toFixed(1);
+    candidates.push({
+      key: "block",
+      score: 70,
+      options: [
+        `${points} points from the last ${games} ${plural(games, "match", "matches")} is the return the season is actually being built on.`,
+        `Over ${games} matches that is ${points} points, which is the figure the next month has to improve on.`,
+        `${perGame} a game across ${games} matches is a rate, and a table is made of rates.`,
+        `Put next to the ${games} matches before it, ${points} points is either a platform or a warning.`,
+        `Nothing about the last ${games} matches is decided by this, and ${points} points is what they came to.`,
+        `A block of ${games} producing ${points} points is the run the manager will be judged on, whether he likes it or not.`,
+      ],
+    });
+  }
+
+  // A player under treatment, which is a constraint on everything the manager does next.
+  const unavailable = (input.injuries ?? []).filter(
+    (absence) => absence.until !== null && input.inGameDate !== null && absence.until > input.inGameDate
+  );
+  if (unavailable.length > 0) {
+    candidates.push({
+      key: "injuries",
+      score: 65,
+      options: [
+        `The treatment room is the part of this the manager cannot plan around.`,
+        `What he can control is what he does next, and an unavailable player takes some of that away.`,
+        `With ${unavailable.length === 1 ? "an absence" : "absences"} already on the books, the room to change the side is smaller than it looks.`,
+        `None of this happens in isolation: it happens to a squad that is already short somewhere.`,
+        `A squad with a player in the treatment room has less room to move than the team sheet suggests.`,
+        `The manager's own options are the constraint he works inside, and they are narrower than they were.`,
+      ],
+    });
+  }
+
+  // A rating that moved. The save sees a number change; the paper sees a squad improving one player at a
+  // time, which is a fair thing to say without ever printing the number.
+  if (input.developments.length > 0) {
+    candidates.push({
+      key: "development",
+      score: 58,
+      options: [
+        `The individual story inside it matters too, because a squad improves one player at a time.`,
+        `A team is a set of players, and one of them is moving while this is being written.`,
+        `Progress is rarely announced. It turns up in a training session and shows itself a month later.`,
+        `The manager will know which of his players this is about, and he will not be saying.`,
+        `These things are noticed late and decided early, which is the usual order.`,
+        `A squad is not a fixed thing, and the parts of it that move are the parts worth watching.`,
+      ],
+    });
+  }
+
+  // What the squad is, which is the only structural fact available on a career with no matches logged.
+  if (input.squad.length > 0) {
+    candidates.push({
+      key: "squad",
+      score: 50,
+      options: [
+        `A squad of ${input.squad.length} is what ${input.managerName} has to work with, and every judgement about it is drawn from that.`,
+        `With ${input.squad.length} players on the books, the manager's room to move is what it is, and he knows it better than anybody.`,
+        `${input.squad.length} players is enough to change a side and not enough to change it twice, which is the calculation every week.`,
+        `The squad is ${input.squad.length} strong, which is the number everything else has to be worked out from.`,
+        `Whatever he decides, it will be decided with the ${input.squad.length} players already in the building.`,
+        `In a squad of ${input.squad.length} there are always two or three whose season turns on a detail like this.`,
+      ],
+    });
+  }
+
+  // Contracts running out: the other clock, and one the desk has real figures for rather than an opinion.
+  const expiring = input.squad.filter(
+    (player) =>
+      player.contractValidUntil !== null &&
+      input.inGameYear !== null &&
+      player.contractValidUntil <= input.inGameYear + 1
+  );
+  if (expiring.length > 0) {
+    candidates.push({
+      key: "contracts",
+      score: 45,
+      options: [
+        `Contracts are the other clock running underneath a season, and ${expiring.length} ${plural(expiring.length, "deal")} here ${isAre(expiring.length)} on it.`,
+        `The business of a club does not stop for a run of results, and a deal running out is the loudest of it.`,
+        `A season is also a set of decisions about who is here next year, and some of those are already late.`,
+        `The manager will be thinking about more than the next match, because somebody has to.`,
+        `What happens off the pitch has a way of arriving on it, and a contract is the usual route.`,
+        `The squad he is picking from is a temporary arrangement, and it is closer to changing than it looks.`,
+      ],
+    });
+  }
+
+  if (input.trophies.length > 0) {
+    candidates.push({
+      key: "trophy",
+      score: 40,
+      options: [
+        `There is silverware in this club's recent history, which is the standard everything since is measured against.`,
+        `Whatever happens next, the cabinet already says something about what this manager can do.`,
+        `A club with a trophy on the shelf carries it into every argument about the present.`,
+        `The recent record here is not a blank, and that is not nothing.`,
+        `Whatever the table says this month, this manager has won something, and that is on the record.`,
+        `The honours list is short enough to remember and long enough to matter.`,
+      ],
+    });
+  }
+
+  if (input.academy?.name) {
+    candidates.push({
+      key: "academy",
+      score: 38,
+      options: [
+        `The academy is the other half of the same question, and it answers it slowly.`,
+        `Somewhere below the first team there is a player this season will matter to eventually.`,
+        `A club this size does not buy its way out of everything, so the youth side of it counts.`,
+        `There is a longer project underneath the weekly one, and it is not visible from the table.`,
+        `The next one through the door will not be announced, and will be worth more than most signings.`,
+      ],
+    });
+  }
+
+  /**
+   * How long this manager has been here, straight off the save's own season ordinal.
+   *
+   * The one claim about the past the desk can make without a results archive: it does not need the scorelines
+   * of previous seasons, only the fact that this is his second or his fifth. A manager in his first season is
+   * a genuinely different story from one in his fourth, and the number says which without the paper having to
+   * remember anything it was not told.
+   */
+  if (input.seasonNumber >= 1) {
+    const tenure =
+      input.seasonNumber === 1 ? "his first season" : `his ${ordinalWord(input.seasonNumber)} season`;
+    candidates.push({
+      key: "tenure",
+      score: 42,
+      options: [
+        `This is ${tenure} in charge, which is a different thing to be judged on from a settled one.`,
+        `Whatever the table says, ${tenure} is the context every one of these arguments sits inside.`,
+        `${capitalise(tenure)} is either a foundation or an excuse, and only the next month will say which.`,
+        `Managers are given time in units of seasons, and this is ${tenure}.`,
+        `It is worth remembering that this is ${tenure}, because that is the clock he is actually on.`,
+      ],
+    });
+  }
+
+  // Where the club is in its season, from its own match count and the size of its division. Approximate by
+  // construction, which is why the sentences built on it are about time rather than about dates.
+  const atPhase = phasePhrase(seasonPhase(input.progress ?? null));
+  if (atPhase) {
+    candidates.push({
+      key: "phase",
+      score: 35,
+      options: [
+        `It matters differently ${atPhase} than it would in a month's time.`,
+        `${capitalise(atPhase)}, there is still enough of the season left for this to change.`,
+        `Judged ${atPhase}, this is a detail rather than a verdict.`,
+        `The calendar is not the argument, but it is part of the context: ${atPhase}, that context will move.`,
+        `Time is the thing the manager has most of, and ${atPhase} there is still time.`,
+        `A season has a shape. ${capitalise(atPhase)}, the shape of this one is not settled yet.`,
+      ],
+    });
+  }
+
+  // The one generic line. True of every career, so it is worth the least of anything here, and it exists
+  // only so that a thin edition's last story has something to close on rather than nothing at all.
+  candidates.push({
+    key: "season",
+    score: 10,
+    generic: true,
+    options: [
+      `None of that decides a season on its own.`,
+      `Read it as a detail rather than a verdict: seasons turn on a dozen of these, not on one.`,
+      `There is no crisis in it, and there is something to think about, which is the usual state of a football club.`,
+      `The manager will file it away with the rest of what he knows and act when it suits him.`,
+      `A long season absorbs a story like this one and moves on.`,
+      `It is the sort of thing that matters more as the season goes on than on the day it is noticed.`,
+    ],
   });
 
-  // Two frames, chosen by the story's own id rather than by its position, so two neighbours do not close
-  // on the same pair however many stories the edition carries.
-  if (frames.length === 1) return frames[0].text;
-  const firstIndex = hash(`${seed}|frame`) % frames.length;
-  const rest = frames.filter((_, position_) => position_ !== firstIndex);
-  const second = rest[hash(`${seed}|frame2`) % rest.length];
-  return `${frames[firstIndex].text} ${second.text}`;
-}
+  /**
+   * Ranked by a relevance score the edition's own history discounts.
+   *
+   * The discount is the whole point. Ranking on relevance alone reaches for the most relevant conclusion
+   * again and again until its phrasings are gone and it has to repeat itself - which is how two different
+   * stories in one paper ended up sharing a closing sentence. Every use of a family costs it fifty points, so
+   * the paper spreads its conclusions across everything it knows. The hash is inside the value rather than a
+   * fallback, so two candidates that are equally relevant and equally fresh still resolve the same way on
+   * every read.
+   */
+  const usedTimes = (key: string) => memory.families.get(key) ?? 0;
+  const ranked = candidates
+    .map((candidate) => ({
+      ...candidate,
+      value:
+        candidate.score -
+        usedTimes(candidate.key) * 50 +
+        (hash(`${seed}|frame|${candidate.key}`) % 1000) / 1000,
+    }))
+    .sort((left, right) => right.value - left.value);
 
-/**
- * What a story is about, for the sake of the closing paragraph.
- *
- * MATCH stories happened on a pitch and can be put next to the run of results. STANDING stories are about
- * the table, the squad, a contract or a single player's form, and a closing line about "a single week" reads
- * as nonsense under them. It is a property of the story type, which is why it is decided from the id the desk
- * already generates rather than passed in at every push.
- */
-type StoryKind = "MATCH" | "STANDING";
+  // A generic line may be the second thing the paragraph says. It is never the first.
+  const first = ranked.find((candidate) => !candidate.generic) ?? ranked[0];
+  const picks = [first, ranked.find((candidate) => candidate.key !== first.key)].filter(
+    (candidate): candidate is (typeof ranked)[number] => Boolean(candidate)
+  );
 
-function kindOf(id: string): StoryKind {
-  return /^(result|clean-sheet|finishing|timing|form-|home-form|away-form|weakness|block|scorer|assists|standout)-/.test(
-    id
-  )
-    ? "MATCH"
-    : "STANDING";
+  return picks
+    .map((candidate) => {
+      // The FAMILY is remembered as well as the sentence, so two neighbours cannot make the same point in
+      // two different ways - which is the version of repetition a reader notices least and minds most.
+      memory.families.set(candidate.key, usedTimes(candidate.key) + 1);
+      return pickFresh(candidate.options, seed, `outlook-${candidate.key}`, memory.sentences);
+    })
+    .join(" ")
+    .trim();
 }
 
 /**
@@ -2403,19 +3251,24 @@ function kindOf(id: string): StoryKind {
  * `used` set below is the edition's memory of the closing lines it has already printed.
  */
 function finalise(items: StoryDraft[], input: NewsInput): NewsItem[] {
-  const used = new Set<string>();
+  const memory = newEditionMemory();
   return items.map((item) => {
-    const kind = kindOf(item.id);
     const own = (item.article ?? []).map((paragraph) => paragraph.trim()).filter(Boolean);
-    const summary = item.body.trim();
-    const article = [summary, ...own, outlookParagraph(input, item.id, kind, used)].filter(Boolean);
+    const summary = tidy(item.body);
+    const article = [summary, ...own, outlookParagraph(input, item.id, item.kind, memory)].filter(Boolean);
+    const byline = BYLINED_CATEGORIES.has(item.category)
+      ? bylineFor(item.id, input.countryId ?? null, input.clubName, "byline", item.stance ?? undefined)
+      : null;
     return {
       ...item,
+      id: item.id,
+      kind: item.kind,
       body: summary,
       article,
-      byline: BYLINED_CATEGORIES.has(item.category)
-        ? bylineFor(item.id, input.countryId ?? null, input.clubName)
-        : null,
+      byline,
+      // Taken back off the byline rather than left as asked for, so the stored stance is the one the paper
+      // that actually ran the piece writes in.
+      stance: byline?.stance ?? item.stance ?? null,
     };
   });
 }
@@ -2443,7 +3296,7 @@ function matchStatsNote(match: NewsMatch): string {
  */
 export function rank<
   T extends { weight: number; id: string; category: string; tone: NewsTone; playerNames: string[] },
->(items: T[]): T[] {
+>(items: T[], matchEventIds: readonly string[] = []): T[] {
   const sorted = [...items].sort(
     (left, right) => right.weight - left.weight || left.id.localeCompare(right.id)
   );
@@ -2457,7 +3310,45 @@ export function rank<
     capped.push(item);
   }
 
-  const balanced = balanceCoverage(capped);
+  /**
+   * At most two stories per match.
+   *
+   * ONE MATCH, ONE VOICE. Everything above is about variety across the paper; this is about a single
+   * afternoon not filling it. A heavy defeat with a bad defensive record, a recurring weakness and a keeper
+   * on a run can honestly produce six stories, and six stories about ninety minutes is not a newspaper, it is
+   * the same ninety minutes reported from six angles.
+   *
+   * The cap is deliberately NOT applied to everything keyed on an event id. Most of the desk's running
+   * stories are keyed on the LATEST match while being about the last five - the form, the scoring summary,
+   * the leak - and capping those as though they described one afternoon would empty the paper, which is
+   * exactly what happened the first time this was written the simple way.
+   *
+   * The number is FOUR rather than two, and that is a deliberate departure from the obvious reading of the
+   * rule. Two would mean that after any win to nil the paper carries the report and the clean sheet and
+   * nothing else - so the finishing analysis, the timing pattern and the recurring weakness could only ever
+   * print after a match that was not won to nil, which makes three of the desk's story types nearly dead
+   * letters. Four angles on ninety minutes still stops a single afternoon filling the page, which is what
+   * the rule is for, without deleting the stories it was meant to sit beside.
+   */
+  const perEvent = new Map<string, number>();
+  const withinEvent: T[] = [];
+  for (const item of capped) {
+    if (!SINGLE_MATCH_PREFIXES.some((prefix) => item.id.startsWith(prefix))) {
+      withinEvent.push(item);
+      continue;
+    }
+    const eventId = matchEventIds.find((id) => item.id.endsWith(id));
+    if (eventId === undefined) {
+      withinEvent.push(item);
+      continue;
+    }
+    const used = perEvent.get(eventId) ?? 0;
+    if (used >= MAX_ANGLES_PER_MATCH) continue;
+    perEvent.set(eventId, used + 1);
+    withinEvent.push(item);
+  }
+
+  const balanced = balanceCoverage(withinEvent);
 
   const out: T[] = [];
   const taken = new Set<T>();
@@ -2484,6 +3375,31 @@ export function rank<
  * still true.
  */
 export const MAX_CONCERN_STORIES = 2;
+
+/**
+ * The stories that are ABOUT one match rather than about a run of them.
+ *
+ * Used by the one-match-one-voice cap in `rank`. The distinction is real and it is not the same as "keyed on
+ * an event id": a form story is keyed on the latest match's id while being about the last five, and so is
+ * the scoring summary and the leak. These seven describe a single ninety minutes, and no more than two of them
+ * may print for the same one.
+ */
+const SINGLE_MATCH_PREFIXES = [
+  "result-",
+  "clean-sheet-",
+  "finishing-",
+  "timing-",
+  "margin-",
+  "defence-",
+  "weakness-",
+] as const;
+
+/**
+ * How many angles on one match a single edition may carry.
+ *
+ * See the note in `rank` for why this is four and not two.
+ */
+const MAX_ANGLES_PER_MATCH = 4;
 
 /**
  * The fairness pass: a paper that is not stacked against its own subject.

@@ -26,12 +26,45 @@ export interface PressWriter {
   role: string;
 }
 
+/**
+ * How an outlet writes about a football club.
+ *
+ * This is what makes a column possible. The same facts filed by a fanzine and by a hostile tabloid are two
+ * different pieces and neither of them is dishonest: a paper's line on a manager is part of what the paper
+ * is, and a reader already knows which of them he is reading. Nothing here changes a fact - a stance only
+ * decides what an outlet makes of one.
+ *
+ * STRAIGHT reports it. LOYAL defends the club and looks for the explanation rather than the verdict.
+ * HOSTILE doubts the manager and says so. SENSATIONAL takes a small thing and makes it the story.
+ */
+export type OutletStance = "STRAIGHT" | "LOYAL" | "HOSTILE" | "SENSATIONAL";
+
+/**
+ * What a paper of this kind sounds like, when the outlet itself does not say.
+ *
+ * A tabloid is sensational and a fanzine is loyal by construction, so deriving the default from the house
+ * means every outlet on file has a stance without thirty literals having to be edited by hand, and the
+ * ones that genuinely differ - a broadsheet that has it in for the manager - say so explicitly.
+ */
+function houseStance(house: PressOutlet["house"]): OutletStance {
+  switch (house) {
+    case "TABLOID":
+      return "SENSATIONAL";
+    case "FAN":
+      return "LOYAL";
+    default:
+      return "STRAIGHT";
+  }
+}
+
 export interface PressOutlet {
   /** Stable key. Never shown; used for the checks and for the fallback ordering. */
   key: string;
   name: string;
   /** How the outlet writes, so the desk can lean a headline toward the right kind of paper. */
   house: "BROADSHEET" | "TABLOID" | "WIRE" | "ANALYTICS" | "FAN";
+  /** The outlet's line on the club. Omitted where the house already implies it. */
+  stance?: OutletStance;
   writers: readonly PressWriter[];
 }
 
@@ -56,6 +89,20 @@ const WIRE: readonly PressOutlet[] = [
       { name: "Ravi Chandrasekhar", role: "Data Editor" },
       { name: "Elena Vogt", role: "Tactics Writer" },
       { name: "Tomas Kirby", role: "Analyst" },
+    ],
+  },
+  {
+    // Deliberately on the wire, so EVERY career has one outlet willing to lead with a manager's future. A
+    // hostile column is only possible if the pack a career is filed with contains somewhere to put it, and
+    // a nation whose own press is all broadsheets would otherwise have no such paper at all.
+    key: "the-hard-tackle",
+    name: "The Hard Tackle",
+    house: "TABLOID",
+    stance: "HOSTILE",
+    writers: [
+      { name: "Desmond Croker", role: "Columnist" },
+      { name: "Rita Vance", role: "Chief Writer" },
+      { name: "Marlon Deeds", role: "Opinion Editor" },
     ],
   },
 ];
@@ -390,6 +437,8 @@ export interface PressByline {
   writerRole: string;
   /** The filing line: WIGAN, from the club's own name. */
   dateline: string;
+  /** The outlet's own line on the club, which is what an opinion piece is written in. */
+  stance: OutletStance;
 }
 
 function hash(text: string): number {
@@ -407,27 +456,41 @@ export function pressPackFor(countryId: number | null): readonly PressOutlet[] {
   return [...national, ...WIRE, ...ENGLISH];
 }
 
+/** The stance an outlet writes in: its own if it declares one, otherwise what its house implies. */
+export function stanceOf(outlet: PressOutlet): OutletStance {
+  return outlet.stance ?? houseStance(outlet.house);
+}
+
 /**
  * Who filed a story.
  *
  * The outlet is drawn from the career's own press pack, so a Danish career is read about in Danish football
  * papers rather than in invented English ones, and the writer comes from that outlet's own desk. Both are
  * chosen from the story's id, so the same story keeps the same byline however many times it is read.
+ *
+ * A story may ask for a STANCE, which is how an opinion piece is placed. The pool is then filtered to the
+ * papers that write that way, and a career whose pack contains none of them falls back to the whole pack
+ * rather than losing the piece: a straight report of something an angry columnist would have said is worse
+ * than nothing, but not by much.
  */
 export function bylineFor(
   seed: string,
   countryId: number | null,
   clubName: string,
-  slot = "byline"
+  slot = "byline",
+  stance?: OutletStance
 ): PressByline {
   const pack = pressPackFor(countryId);
-  const outlet = pack[hash(`${seed}|${slot}|outlet`) % pack.length];
+  const wanted = stance ? pack.filter((outlet) => stanceOf(outlet) === stance) : [];
+  const pool = wanted.length > 0 ? wanted : pack;
+  const outlet = pool[hash(`${seed}|${slot}|outlet`) % pool.length];
   const writer = outlet.writers[hash(`${seed}|${slot}|writer`) % outlet.writers.length];
   return {
     outlet: outlet.name,
     writer: writer.name,
     writerRole: writer.role,
     dateline: datelineFor(clubName),
+    stance: stanceOf(outlet),
   };
 }
 

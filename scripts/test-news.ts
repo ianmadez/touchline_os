@@ -17,6 +17,7 @@
 import { buildNews, foldName, roleGroup, MAX_CONCERN_STORIES, type NewsAbsence, type NewsInput, type NewsMatch, type NewsPlayer } from "../src/lib/news/news-engine";
 import { mediaAskFor } from "../src/lib/news/media";
 import { allOutlets } from "../src/lib/news/outlets";
+import { momentOf, phasePhrase, seasonPhase } from "../src/lib/news/moment";
 
 let passed = 0;
 const failures: string[] = [];
@@ -365,11 +366,40 @@ const onceOnly = buildNews(
 );
 check("named once, it is not", !has(onceOnly, "weakness-"));
 
-const heavy = buildNews(
+const heavyLatest = buildNews(
   input({ matches: [{ ...MATCHES[0], goalsFor: 5, goalsAgainst: 0 }, ...MATCHES.slice(1)] })
 );
-check("a three goal margin is its own headline", has(heavy, "margin-"));
+/* One match, one voice. The lead story has already reported this ninety minutes in full, so a rout that is
+ * also the latest result does not get a second piece - the same afternoon printed twice, with the manager's
+ * own comment quoted in both. */
+check("a rout that is also the latest result is not written up twice", !has(heavyLatest, "margin-"));
+
+const heavyEarlier = buildNews(
+  input({
+    matches: [
+      { ...MATCHES[0], goalsFor: 1, goalsAgainst: 0 },
+      { ...MATCHES[1], goalsFor: 5, goalsAgainst: 1 },
+      ...MATCHES.slice(2),
+    ],
+  })
+);
+check("a three goal margin from an earlier match is its own headline", has(heavyEarlier, "margin-"));
 check("a one goal win is not", has(buildNews(input({ matches: [MATCHES[3], ...MATCHES.slice(1)] })), "result-"));
+
+check(
+  "and no single match is covered from more than four angles",
+  (() => {
+    const built = buildNews(input());
+    const perEvent = new Map<string, number>();
+    for (const item of built) {
+      const eventId = input().matches.map((match) => match.eventId).find((id) => item.id.endsWith(id));
+      if (!eventId) continue;
+      if (!/^(result|clean-sheet|finishing|timing|margin|defence|weakness)-/.test(item.id)) continue;
+      perEvent.set(eventId, (perEvent.get(eventId) ?? 0) + 1);
+    }
+    return [...perEvent.values()].every((count) => count <= 4);
+  })()
+);
 
 check("contracts inside a year are flagged", has(rich, "contract-"));
 check(
@@ -899,7 +929,13 @@ check(
     const reused = closings.filter((closing, index) => closings.indexOf(closing) !== index);
     return reused.length === 0;
   })(),
-  `${new Set(rich.map((item) => item.article.at(-1))).size} distinct closings for ${rich.length} stories`
+  (() => {
+    const closings = rich.map((item) => item.article.at(-1) ?? "");
+    const reused = [...new Set(closings.filter((c, i) => closings.indexOf(c) !== i))];
+    return `${new Set(closings).size} distinct for ${rich.length} stories; repeated: ${reused
+      .map((closing) => `"${closing.slice(0, 70)}"`)
+      .join(" | ")}`;
+  })()
 );
 check(
   "nothing in an article repeats a sentence from another paragraph of itself",
@@ -961,7 +997,7 @@ check(
   buildNews(input({ countryId: 999 }))
     .filter((item) => item.byline !== null)
     .every((item) =>
-      ["Continental Sport Wire", "Ninety Plus", "The Touchline", "Final Whistle", "The Terrace", "Matchday Post"].includes(
+      ["Continental Sport Wire", "Ninety Plus", "The Hard Tackle", "The Touchline", "Final Whistle", "The Terrace", "Matchday Post"].includes(
         item.byline?.outlet ?? ""
       )
     )
@@ -1475,6 +1511,374 @@ check(
       const copy = [item.headline, item.body, ...item.article].join(" ");
       return !copy.includes("\u2014") && !/\b(?:a|the|at)\s+(?:CM|RW|CB|LB|RB|ST|GK|DM)\b/.test(copy);
     })
+);
+
+// ---------------------------------------------------------------------------------------------
+// Part A: the sentences that used to break
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nthe report says what happened, in sentences that hold");
+
+/* Every shape of result, crossed with the things that used to break a sentence.
+ *
+ * A generated matrix rather than a handful of fixtures, because every one of these bugs is a "one
+ * combination happens to do it": a single scorer with a brace, a scoreline with no scorer logged, a
+ * goalless match, an away match, no opponent recorded at all. Each cell has to pass the same rules, so the
+ * combination nobody thought of is covered by construction rather than by remembering to add it. */
+const GOAL_SHAPES: {
+  label: string;
+  goalsFor: number;
+  goalsAgainst: number;
+  scorers: string[];
+  minutes: number[];
+  conceded: number[];
+}[] = [
+  { label: "0-0", goalsFor: 0, goalsAgainst: 0, scorers: [], minutes: [], conceded: [] },
+  { label: "1-0", goalsFor: 1, goalsAgainst: 0, scorers: ["Jordan Pike"], minutes: [30], conceded: [] },
+  { label: "2-0 brace", goalsFor: 2, goalsAgainst: 0, scorers: ["Jordan Pike", "Jordan Pike"], minutes: [10, 50], conceded: [] },
+  { label: "3-0 hat-trick", goalsFor: 3, goalsAgainst: 0, scorers: ["Jordan Pike", "Jordan Pike", "Jordan Pike"], minutes: [5, 25, 80], conceded: [] },
+  { label: "4-1", goalsFor: 4, goalsAgainst: 1, scorers: ["Jordan Pike", "Jordan Pike", "Danny Whitlock", "Omar Haddad"], minutes: [9, 33, 61, 88], conceded: [70] },
+  { label: "3-2 thriller", goalsFor: 3, goalsAgainst: 2, scorers: ["Jordan Pike", "Omar Haddad", "Danny Whitlock"], minutes: [12, 44, 90], conceded: [20, 77] },
+  { label: "2-2", goalsFor: 2, goalsAgainst: 2, scorers: ["Jordan Pike", "Danny Whitlock"], minutes: [11, 70], conceded: [30, 55] },
+  { label: "1-1", goalsFor: 1, goalsAgainst: 1, scorers: ["Omar Haddad"], minutes: [41], conceded: [62] },
+  { label: "1-2 defeat", goalsFor: 1, goalsAgainst: 2, scorers: ["Jordan Pike"], minutes: [15], conceded: [40, 85] },
+  { label: "2-4 defeat", goalsFor: 2, goalsAgainst: 4, scorers: ["Jordan Pike", "Omar Haddad"], minutes: [15, 66], conceded: [5, 32, 58, 90] },
+  { label: "0-3 defeat, no scorer", goalsFor: 0, goalsAgainst: 3, scorers: [], minutes: [], conceded: [12, 48, 79] },
+  { label: "5-0, no scorer logged", goalsFor: 5, goalsAgainst: 0, scorers: [], minutes: [], conceded: [] },
+];
+
+/** A month, a weekday or a time of day the desk could only know by guessing. */
+const CALENDAR_WORDS =
+  /\b(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|winter|spring|summer|autumn|afternoon|evening|tonight|weekend)\b/;
+
+/** Everything a sentence must never look like, whatever facts produced it. */
+function copyOffences(text: string): string[] {
+  const offences: string[] = [];
+  if (/\ba\s+[aeiouAEIOU]/.test(text)) offences.push("a + vowel");
+  if (/\ban\s+[^aeiouAEIOU\s\d]/.test(text)) offences.push("an + consonant");
+  if (/\s{2,}/.test(text)) offences.push("double space");
+  if (/\s+[.,;:!?]/.test(text)) offences.push("space before punctuation");
+  if (/\bundefined\b|\bNaN\b/.test(text)) offences.push("undefined");
+  if (/\bdebrief\b|\bsave's own record\b|\bthe app\b/i.test(text)) offences.push("app voice");
+  if (CALENDAR_WORDS.test(text)) offences.push(`calendar word ${CALENDAR_WORDS.exec(text)?.[0]}`);
+  if (text.includes("\u2014")) offences.push("em dash");
+  return offences;
+}
+
+const matrixRows: { label: string; report: string; whole: string; venue: string | null; opponent: string | null }[] = [];
+
+for (const shape of GOAL_SHAPES) {
+  for (const venue of ["Home", "Away", null] as (string | null)[]) {
+    for (const opponent of ["Northgate Rovers", null] as (string | null)[]) {
+      const result = shape.goalsFor > shape.goalsAgainst ? "WIN" : shape.goalsFor < shape.goalsAgainst ? "LOSS" : "DRAW";
+      const built = buildNews(
+        input({
+          matches: [
+            match({
+              eventId: `mx-${shape.label}-${venue}-${opponent}`,
+              venue,
+              opponent,
+              result,
+              goalsFor: shape.goalsFor,
+              goalsAgainst: shape.goalsAgainst,
+              scorers: shape.scorers,
+              goalMinutes: shape.minutes,
+              concededMinutes: shape.conceded,
+              weakness: "Switched off after scoring",
+              shots: 10,
+              shotsInsideBox: 5,
+              bigChances: 2,
+            }),
+          ],
+        })
+      );
+      const report = built.find((item) => item.id.startsWith("result-"));
+      matrixRows.push({
+        label: `${shape.label} / ${venue ?? "no venue"} / ${opponent ?? "no opponent"}`,
+        report: [report?.headline, report?.body, ...(report?.article ?? [])].filter(Boolean).join(" "),
+        whole: built.flatMap((item) => [item.headline, item.body, ...item.article]).join(" "),
+        venue,
+        opponent,
+      });
+    }
+  }
+}
+
+check(
+  "every one of the 72 report shapes exists",
+  matrixRows.length === GOAL_SHAPES.length * 6 && matrixRows.every((row) => row.report.length > 0),
+  `${matrixRows.length} rows`
+);
+
+const reportOffences = matrixRows.flatMap((row) =>
+  copyOffences(row.report).map((offence) => `${row.label}: ${offence}`)
+);
+check(
+  "and none of them breaks a sentence",
+  reportOffences.length === 0,
+  reportOffences.slice(0, 4).join(" | ")
+);
+
+const editionOffences = matrixRows.flatMap((row) =>
+  copyOffences(row.whole).map((offence) => `${row.label}: ${offence}`)
+);
+check(
+  "and no story beside them does either",
+  editionOffences.length === 0,
+  editionOffences.slice(0, 4).join(" | ")
+);
+
+/* A venue the debrief never recorded must not be claimed. "files away as the standard", "come away with some
+ * credit" and "one that got away" are idioms rather than venue words, so the check excludes an "away" that is
+ * followed by the preposition, or by the punctuation, that makes it one. */
+check(
+  "a venue the debrief did not record produces no venue word at all",
+  matrixRows
+    .filter((row) => row.venue === null)
+    .every(
+      (row) =>
+        !/\bat home\b/.test(row.report) &&
+        !/\baway\b(?!\s*(?:from|as|with|to|and|[.,;:!?]))/i.test(row.report)
+    )
+);
+
+check(
+  "an away match with no opponent recorded is never called a home one",
+  matrixRows
+    .filter((row) => row.venue === "Away" && row.opponent === null)
+    .every((row) => !/the visitors/.test(row.report))
+);
+
+check(
+  "a home match with no opponent recorded is never called an away one",
+  matrixRows
+    .filter((row) => row.venue === "Home" && row.opponent === null)
+    .every((row) => !/the hosts/.test(row.report))
+);
+
+check(
+  "the manager's own weakness note is never printed",
+  matrixRows.every((row) => !/switched off after scoring/i.test(row.whole))
+);
+
+check(
+  "a scoreline with no scorer logged never invents one",
+  matrixRows
+    .filter((row) => row.label.startsWith("5-0") || row.label.startsWith("0-3"))
+    .every((row) => !/scored twice|hat-trick|got it/.test(row.report))
+);
+
+const goallessRow = matrixRows.find((row) => row.label.startsWith("0-0"));
+check(
+  "a goalless draw is reported as one",
+  /goalless|no goals|nothing at either end|cancelled each other out/i.test(goallessRow?.report ?? ""),
+  goallessRow?.report.slice(0, 90)
+);
+
+const oneNilRow = matrixRows.find((row) => row.label.startsWith("1-0"));
+check(
+  "a single goal is one goal, not goals",
+  !/\b1 goals\b/i.test(oneNilRow?.report ?? "") && !/\b1 matches\b/i.test(oneNilRow?.whole ?? "")
+);
+
+const defeatRow = matrixRows.find((row) => row.label.startsWith("1-2"));
+check(
+  "a defeat that scored once names the consolation rather than a win",
+  /consolation|only reply|all .* had to show/i.test(defeatRow?.report ?? "") &&
+    !/\bwin\b/i.test(defeatRow?.report ?? ""),
+  defeatRow?.report.slice(0, 120)
+);
+
+check(
+  "every story carries the kind the closing paragraph needs",
+  buildNews(input()).every((item) => item.kind === "MATCH" || item.kind === "STANDING")
+);
+
+check(
+  "and a match story is not filed as a standing one",
+  ["result-", "clean-sheet-", "finishing-", "goals-", "leak-", "defence-"].every((prefix) => {
+    const item = buildNews(input()).find((story) => story.id.startsWith(prefix));
+    return item === undefined || item.kind === "MATCH";
+  })
+);
+
+/* The four stories the old regex filed as standing, which meant they could never close on the week's run.
+ * This is the bug Part A exists to fix, so it is asserted rather than assumed. */
+check(
+  "the scoring, the leak, the margin and the defensive record are match stories",
+  (() => {
+    const built = buildNews(input());
+    const kinds = ["goals-", "leak-", "margin-", "defence-"].map(
+      (prefix) => built.find((story) => story.id.startsWith(prefix))?.kind
+    );
+    return kinds.every((kind) => kind === undefined || kind === "MATCH");
+  })()
+);
+
+check(
+  "no position code is ever printed as a word",
+  !/\ba UNKNOWN\b|\ba RES\b|\bthe UNKNOWN\b/.test(buildNews(input()).flatMap((i) => [i.headline, i.body]).join(" "))
+);
+
+// ---------------------------------------------------------------------------------------------
+// Part B: the calendar comes from the save, or it is not mentioned
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nthe calendar comes from the save or it is not mentioned");
+
+const MONTH_NAMES =
+  /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b/g;
+
+check(
+  "the save's own date is read as a day of the week, and a month",
+  momentOf("2026-11-08")?.weekday === "Sunday" && momentOf("2026-11-08")?.month === "November",
+  `${momentOf("2026-11-08")?.weekday}`
+);
+check(
+  "and it knows a weekend from a midweek round",
+  momentOf("2026-11-07")?.isWeekend === true &&
+    momentOf("2026-11-07")?.isMidweek === false &&
+    momentOf("2026-11-10")?.isMidweek === true &&
+    momentOf("2026-11-10")?.isWeekend === false
+);
+check(
+  "a date the save did not supply produces no words at all",
+  momentOf(null) === null && momentOf(undefined) === null && momentOf("") === null
+);
+check(
+  "and one that cannot be a real date is refused rather than guessed at",
+  momentOf("2026-13-45") === null && momentOf("last Tuesday") === null && momentOf("08/11/2026") === null
+);
+check(
+  "a phase needs both halves of the fact to be known",
+  seasonPhase(null) === null &&
+    seasonPhase({ matchday: 5, expectedGames: 0 }) === null &&
+    seasonPhase({ matchday: -1, expectedGames: 46 }) === null &&
+    seasonPhase({ matchday: 0, expectedGames: 46 }) === "OPENING"
+);
+check(
+  "and the season's bands are genuinely different",
+  seasonPhase({ matchday: 2, expectedGames: 46 }) === "OPENING" &&
+    seasonPhase({ matchday: 12, expectedGames: 46 }) === "EARLY" &&
+    seasonPhase({ matchday: 20, expectedGames: 46 }) === "MIDDLE" &&
+    seasonPhase({ matchday: 40, expectedGames: 46 }) === "BUSINESS_END" &&
+    seasonPhase({ matchday: 46, expectedGames: 46 }) === "FINAL_STRETCH"
+);
+check(
+  "and each one carries its own preposition, because they do not share one",
+  phasePhrase("OPENING") === "in the opening weeks" &&
+    phasePhrase("EARLY") === "early in the campaign" &&
+    phasePhrase("MIDDLE") === "in the middle stretch" &&
+    phasePhrase("BUSINESS_END") === "at the business end" &&
+    phasePhrase("FINAL_STRETCH") === "in the closing weeks" &&
+    phasePhrase(null) === null
+);
+
+const PHASE_WORDS =
+  /business end|opening weeks|middle stretch|closing weeks|early in the campaign/i;
+
+check(
+  "no phase word is invented when the division's size is unknown",
+  !PHASE_WORDS.test(
+    buildNews(input())
+      .flatMap((item) => [item.headline, item.body, ...item.article])
+      .join(" ")
+  )
+);
+check(
+  "and the phase appears once the season's position in it is known",
+  PHASE_WORDS.test(
+    buildNews(input({ progress: { matchday: 40, expectedGames: 46 } }))
+      .flatMap((item) => [item.headline, item.body, ...item.article])
+      .join(" ")
+  )
+);
+
+check(
+  "every month the paper names is a month one of its own match dates supplied",
+  (() => {
+    const supplied = new Set(
+      input()
+        .matches.map((entry) => momentOf(entry.matchDate)?.month)
+        .filter((month): month is string => typeof month === "string")
+    );
+    const named =
+      buildNews(input())
+        .flatMap((item) => [item.headline, item.body, ...item.article])
+        .join(" ")
+        .match(MONTH_NAMES) ?? [];
+    return named.every((month) => supplied.has(month));
+  })()
+);
+
+check(
+  "and a career with no dates on its matches names no month at all",
+  !/January|February|March|April|May|June|July|August|September|October|November|December/.test(
+    buildNews(
+      input({ matches: input().matches.map((entry) => ({ ...entry, matchDate: null })) })
+    )
+      .flatMap((item) => [item.headline, item.body, ...item.article])
+      .join(" ")
+  )
+);
+
+// ---------------------------------------------------------------------------------------------
+// Part F: an absence is written for how long it is
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nan absence is written for how long it is");
+
+/** The injury story for one player out until a given date. */
+const outUntil = (until: string) =>
+  buildNews(
+    input({
+      injuries: [
+        {
+          name: "Marcus Bell",
+          role: "GK",
+          age: 29,
+          until,
+          note: null,
+          reportedOn: "2026-11-08",
+          isStarter: true,
+        },
+      ],
+    })
+  ).find((item) => item.id.startsWith("injury-"));
+
+const forFortnight = outUntil("2026-11-28");
+const forMonth = outUntil("2026-12-06");
+const forMonths = outUntil("2027-02-16");
+
+check(
+  "each length of absence produces a story",
+  Boolean(forFortnight && forMonth && forMonths),
+  `${forFortnight?.headline} / ${forMonth?.headline} / ${forMonths?.headline}`
+);
+check(
+  "and a month is not the same story as months",
+  forMonth?.body !== forMonths?.body && forMonth?.headline !== forMonths?.headline
+);
+check(
+  "and neither is the same as a fortnight",
+  forFortnight?.body !== forMonth?.body && forFortnight?.headline !== forMonths?.headline
+);
+check(
+  "the duration the manager gave is the one the copy uses",
+  Boolean(
+    forMonth &&
+      (forMonth.body.includes("a month") ||
+        forMonth.evidence.some((line) => line.includes("month"))) &&
+      forMonths &&
+      (forMonths.body.includes("months") ||
+        forMonths.evidence.some((line) => line.includes("months")))
+  )
+);
+check(
+  "and no absence story states a duration it was not given",
+  [forFortnight, forMonth, forMonths].every(
+    (item) => item === undefined || !/\b(?:a few weeks|six weeks|two months|three months)\b/i.test(item.body)
+  )
 );
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

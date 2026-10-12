@@ -175,6 +175,8 @@ export class NewsArchiveService {
         tone: item.tone,
         headline: item.headline,
         body: item.body,
+        kind: item.kind,
+        stance: item.byline?.stance ?? item.stance ?? "STRAIGHT",
         articleJson: JSON.stringify(item.article),
         outlet: item.byline?.outlet ?? null,
         writer: item.byline?.writer ?? null,
@@ -250,6 +252,15 @@ export class NewsArchiveService {
         tone: row.tone as NewsItem["tone"],
         headline: row.headline,
         body: row.body,
+        /**
+         * Read back as stored, never re-derived.
+         *
+         * A row written before the column existed takes the column's own default, which is what the old id
+         * rule would have decided anyway - so an old story reprints under the frame it was actually written
+         * with rather than under whatever today's rules would choose.
+         */
+        kind: row.kind as NewsItem["kind"],
+        stance: row.stance as NewsItem["stance"],
         // A story published before the article existed carries its summary as the whole piece. Better a short
         // read than an empty page, and the manager can still see everything the desk wrote at the time.
         article: article.length > 0 ? article : [row.body],
@@ -260,6 +271,8 @@ export class NewsArchiveService {
                 writer: row.writer,
                 writerRole: row.writerRole ?? "",
                 dateline: row.dateline ?? "",
+                // The column is NOT NULL, so a byline always knows the line it was filed in.
+                stance: row.stance as NonNullable<NewsItem["stance"]>,
               }
             : null,
         evidence: parseJsonArray(row.evidenceJson).filter(

@@ -1268,6 +1268,19 @@ export const newsItems = sqliteTable(
      * no row to reprint, so neither its bookmark nor its dismissal is disturbed.
      */
     copyVersion: integer("copy_version").notNull().default(0),
+    /**
+     * Whether the piece was about a match or a standing fact about the club, and the line it was filed in.
+     *
+     * Both are stored rather than recomputed on read. The closing paragraph of an article depends on
+     * `kind`, and a rule that changes later must not silently re-close a story from last month under a
+     * different frame. A stance is part of what a piece SAID, so reprinting it in the voice of a different
+     * paper would be a rewrite rather than a reprint.
+     *
+     * The defaults are the honest backfill for rows written before the columns existed: the old id rule
+     * filed everything it could not read as STANDING, and every outlet in the library was a straight one.
+     */
+    kind: text("kind").notNull().default("STANDING"),
+    stance: text("stance").notNull().default("STRAIGHT"),
     /** The manager's bookmark. Never overwritten, never dismissed. */
     saved: integer("saved", { mode: "boolean" }).notNull().default(false),
     /** Null until the paper has been opened over it. */

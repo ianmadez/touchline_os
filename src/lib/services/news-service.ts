@@ -227,6 +227,23 @@ export class NewsService {
         ? { value: currentSeasonRow.tablePosition, basis: "season record", disputed: false }
         : null;
 
+    /**
+     * How far into the season the club is, and over how many matches a full one runs.
+     *
+     * The match count comes from the save's own per-season record, which counts every competition, and the
+     * division's size from the career row: `2 x (size - 1)` is what a full league campaign is, and it is
+     * arithmetic rather than a guess. BOTH halves are required, and neither is filled in when it is
+     * missing: with no size on file the desk says nothing about the time of year rather than working from a
+     * typical division, and with no games played there is nothing to place the club against. That is what
+     * keeps a phase word in the copy grounded in the save rather than in an assumption about it.
+     */
+    const leagueSize = career.leagueSize ?? null;
+    const playedThisSeason = currentSeasonRow?.gamesPlayed ?? null;
+    const progress =
+      leagueSize !== null && leagueSize >= 4 && playedThisSeason !== null && playedThisSeason > 0
+        ? { matchday: playedThisSeason, expectedGames: 2 * (leagueSize - 1) }
+        : null;
+
     const input: NewsInput = {
       clubName: career.clubName,
       managerName: career.managerName,
@@ -239,6 +256,7 @@ export class NewsService {
       // and exactly what a season ordinal must never be. See the note in the trophy service.
       inGameYear: career.currentSeason,
       inGameDate: career.inGameDate,
+      progress,
       matches,
       squad: players,
       developments,
