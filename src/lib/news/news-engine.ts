@@ -47,7 +47,7 @@ import { momentOf, phasePhrase, seasonPhase, type SeasonProgress } from "./momen
  * stories exactly as they were. The number is here, beside the copy it describes, because "the desk was
  * rewritten" is an editorial call that cannot be computed from the code.
  */
-export const NEWS_COPY_VERSION = 7;
+export const NEWS_COPY_VERSION = 8;
 
 /** How a story's subject colours the card. Not a red/green light: a paper has good and bad news. */
 export type NewsTone = "GOOD" | "NEUTRAL" | "CONCERN";
@@ -341,6 +341,17 @@ export interface NewsInput {
    * yet, which is why the copy says what the number counts rather than implying it includes today.
    */
   gamesInCharge?: number | null;
+  /**
+   * The KINDS of story the last few editions already ran.
+   *
+   * The one input the desk cannot work out for itself. Everything else here is a fact about the career; this
+   * is a fact about the PAPER, and only the archive knows it. Supplying it is what makes the front page move
+   * on: the same evidence supports the same stories every read, so without a memory of what has already been
+   * printed the manager opens the paper to the same nine pieces until the facts change underneath them.
+   *
+   * Absent means no history, which is the correct reading for the first edition of a career.
+   */
+  recentTypes?: readonly string[];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -430,6 +441,28 @@ function formString(matches: NewsMatch[]): string {
   return matches
     .map((match) => (match.result === "WIN" ? "W" : match.result === "LOSS" ? "L" : "D"))
     .join(" ");
+}
+
+/**
+ * The same run in WORDS, for a sentence.
+ *
+ * "W W D" is a form guide, and a form guide belongs in the story's own evidence where the app's shorthand is
+ * at home. In prose it is a machine reading its own output aloud: "they are asking for the run W W D to look
+ * like it is going somewhere" is not a sentence anybody writes. Football says "two wins and a draw", so the
+ * paper does too, and the two are kept deliberately separate so a call site has to choose which it wants.
+ */
+function formWords(matches: NewsMatch[]): string {
+  const wins = matches.filter((match) => match.result === "WIN").length;
+  const draws = matches.filter((match) => match.result === "DRAW").length;
+  const losses = matches.filter((match) => match.result === "LOSS").length;
+  const parts = [
+    wins > 0 ? `${countWord(wins)} ${plural(wins, "win")}` : "",
+    draws > 0 ? `${countWord(draws)} ${plural(draws, "draw")}` : "",
+    losses > 0 ? `${countWord(losses)} ${plural(losses, "defeat")}` : "",
+  ].filter(Boolean);
+  if (parts.length === 0) return "nothing to show for it";
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
 function plural(count: number, one: string, many = `${one}s`): string {
@@ -962,7 +995,7 @@ const WINDOW = 5;
  * Each branch is guarded by its own condition and returns at most one item, so a feed can never repeat
  * a kind of story twice in one edition however many matches are on the pile.
  */
-export function buildNews(input: NewsInput): NewsItem[] {
+export function buildNews(input: NewsInput, options: { maxStories?: number } = {}): NewsItem[] {
   const items: StoryDraft[] = [];
   /**
    * The sentences this EDITION has already printed.
@@ -1666,7 +1699,7 @@ function matchReportBody(
           recent[0].eventId,
           "headline"
         ),
-        body: `${source(recent[0].eventId)} say the last ${run} ${plural(run, "match", "matches")} have brought ${tallyWords}: ${formString(slice)}. ${input.managerName} has a side nobody is enjoying playing against.${began ? ` The run goes back to ${began.month}.` : ""}`,
+        body: `${source(recent[0].eventId)} say the last ${run} ${plural(run, "match", "matches")} have brought ${tallyWords}. ${input.managerName} has a side nobody is enjoying playing against.${began ? ` The run goes back to ${began.month}.` : ""}`,
         evidence: [`Run ${formString(slice)}`, tallyWords],
         playerNames: [],
         publishedOn: recent[0].matchDate,
@@ -1689,7 +1722,7 @@ function matchReportBody(
           recent[0].eventId,
           "headline"
         ),
-        body: `${formString(recent)} is the record of the last ${recent.length} ${plural(recent.length, "match", "matches")}: ${losses} ${plural(losses, "defeat")} and no win. The questions will not go away until that changes.`,
+        body: `The last ${recent.length} ${plural(recent.length, "match", "matches")} have brought ${formWords(recent)}, and no win at all. The questions will not go away until that changes.`,
         evidence: [`Run ${formString(recent)}`, `${losses} ${plural(losses, "defeat")}`],
         playerNames: [],
         publishedOn: recent[0].matchDate,
@@ -1718,7 +1751,7 @@ function matchReportBody(
           `home${recent[0].eventId}`,
           "headline"
         ),
-        body: `${home.length} home ${plural(home.length, "match", "matches")} and no defeat: ${formString(home)}. On their own ground ${input.clubName} have become awkward opponents.`,
+        body: `${home.length} home ${plural(home.length, "match", "matches")} and no defeat: ${formWords(home)}. On their own ground ${input.clubName} have become awkward opponents.`,
         evidence: [`Home run ${formString(home)}`, `${home.length} home matches in the window`],
         playerNames: [],
         publishedOn: recent[0].matchDate,
@@ -1742,7 +1775,7 @@ function matchReportBody(
           `away${recent[0].eventId}`,
           "headline"
         ),
-        body: `${formString(away)} across the last ${away.length} away ${plural(away.length, "match", "matches")}. Whatever is working at home is not surviving the journey.`,
+        body: `${capitalise(formWords(away))} across the last ${away.length} away ${plural(away.length, "match", "matches")}. Whatever is working at home is not surviving the journey.`,
         evidence: [`Away run ${formString(away)}`, `${away.length} away matches in the window`],
         playerNames: [],
         publishedOn: recent[0].matchDate,
@@ -3422,7 +3455,7 @@ function matchReportBody(
       ),
       body: badRun
         ? `${straightLosses} defeats in a row is not a blip, it is a pattern, and patterns are a manager's problem. The argument that the squad is not his does not survive a third season in charge: at some point the team on the pitch is the one he built. None of this is a demand for anybody's head. It is an observation that the case for patience has to be argued now rather than assumed.`
-        : `The record is ${formString(recent)}, and it is worth saying plainly that a manager's work is not measured over ${recent.length} ${plural(recent.length, "match", "matches")}. It is measured over seasons, and the only honest place to stand is a few paces back. That is not a defence of anybody. It is what the evidence supports, and the evidence is all anybody outside the club actually has.`,
+        : `The record is ${formWords(recent)}, and it is worth saying plainly that a manager's work is not measured over ${recent.length} ${plural(recent.length, "match", "matches")}. It is measured over seasons, and the only honest place to stand is a few paces back. That is not a defence of anybody. It is what the evidence supports, and the evidence is all anybody outside the club actually has.`,
       article: [
         pick(
           badRun
@@ -3471,11 +3504,11 @@ function matchReportBody(
         `op-form${input.seasonNumber}${recent[0].eventId}`,
         "headline"
       ),
-      body: `The last ${recent.length} ${plural(recent.length, "match", "matches")} read ${formString(recent)}, and that is the whole of it. Everything else on the page is interpretation. This is the part that will still be true in a month.`,
+      body: `The last ${recent.length} ${plural(recent.length, "match", "matches")} have brought ${formWords(recent)}, and that is the whole of it. Everything else on the page is interpretation. This is the part that will still be true in a month.`,
       article: [
         pick(
           [
-            `There is no clever reading of a run like ${formString(recent)} and anybody offering one has a book to sell. A sequence of results is the least subtle piece of evidence in football and the most reliable.`,
+            `There is no clever reading of a run like this one and anybody offering one has a book to sell. A sequence of results is the least subtle piece of evidence in football and the most reliable.`,
             `Every club has a paragraph of context for a sequence like this, and every one of those paragraphs has been written before about somebody else. The sequence is the part nobody can argue with.`,
           ],
           `op-form-art${input.seasonNumber}`,
@@ -3543,7 +3576,7 @@ function matchReportBody(
         `op-supporters${input.seasonNumber}${recent[0].eventId}`,
         "headline"
       ),
-      body: `The people paying for this are not asking for a league title, and they never were. They are asking for the run ${formString(recent)} to look like it is going somewhere. That is a smaller ask than it sounds, and it is the one the manager has to answer.`,
+      body: `The people paying for this are not asking for a league title, and they never were. They are asking for a run of ${formWords(recent)} to look like it is going somewhere. That is a smaller ask than it sounds, and it is the one the manager has to answer.`,
       article: [
         pick(
           [
@@ -3710,7 +3743,14 @@ function matchReportBody(
     });
   }
 
-  return finalise(rank(items, input.matches.map((match) => match.eventId), { badRun }), input);
+  return finalise(
+    rank(items, input.matches.map((match) => match.eventId), {
+      badRun,
+      recentTypes: input.recentTypes ?? [],
+      maxStories: options.maxStories,
+    }),
+    input
+  );
 }
 
 /** How long a return stays a story. About a fortnight: after that the squad has settled without him. */
@@ -3878,13 +3918,37 @@ const CONCLUSION_SUBJECTS: Record<string, NewsSubject[]> = {
   run: ["MATCH", "TABLE", "CLUB"],
   table: ["TABLE", "MATCH", "CLUB"],
   block: ["MATCH", "TABLE", "CLUB"],
-  injuries: ["INJURY", "SQUAD", "MATCH", "CLUB"],
-  development: ["PLAYER", "SQUAD", "MATCH", "CLUB"],
+  injuries: ["INJURY"],
+  development: ["PLAYER", "SQUAD"],
   squad: ["SQUAD", "PLAYER", "INJURY", "ACADEMY", "CONTRACT", "CLUB"],
   contracts: ["CONTRACT", "SQUAD", "MONEY", "CLUB"],
   trophy: ["TROPHY", "CLUB"],
   academy: ["ACADEMY", "SQUAD", "CLUB"],
   tenure: ["CLUB"],
+};
+
+/**
+ * Which NARROWER thing a conclusion is about, among the conclusions that share a subject.
+ *
+ * The second filter, and the one that took two bad paragraphs to learn. A shared subject is not enough: two
+ * conclusions can both be about a match and still have nothing to do with each other, which is how a piece
+ * closed on the run of results and then on the treatment room, as though the second sentence followed from the
+ * first. A group is tighter - results, the squad, availability, time - and where nothing shares the first
+ * sentence's group the paragraph simply stops at one, which reads better than two that do not belong together.
+ */
+const CONCLUSION_GROUPS: Record<string, string> = {
+  run: "results",
+  block: "results",
+  table: "results",
+  squad: "squad",
+  contracts: "squad",
+  development: "squad",
+  tenure: "squad",
+  injuries: "availability",
+  academy: "academy",
+  trophy: "trophy",
+  phase: "time",
+  season: "time",
 };
 
 /**
@@ -3918,19 +3982,20 @@ function outlookParagraph(
   // to look back on, and saying so was how the first pass produced a closing paragraph about a match that
   // had not happened.
   if (kind === "MATCH" && recent.length >= 3) {
-    const run = formString(recent);
+    // In WORDS, not as a form guide. See the note on `formWords`: "W W D" belongs in the evidence.
+    const run = formWords(recent);
     const window = `${recent.length} ${plural(recent.length, "match", "matches")}`;
     candidates.push({
       key: "run",
       score: 80,
       options: [
         `The wider picture is ${run} across the last ${window}, which is what turns one result into a story.`,
-        `Taken with the ${window} before it, that run reads ${run}, and it is that sequence rather than the single match that will be judged.`,
+        `Taken with the ${window} before it, that is ${run}, and it is the sequence rather than the single match that will be judged.`,
         `The run behind it is ${run} in ${window}, and a run is what a season is actually made of.`,
-        `Look at the ${window} rather than the ninety minutes and this reads ${run}, which is a different and more useful sentence.`,
-        `Form of ${run} over ${window} is the part the manager will have taken home with him.`,
+        `The ${window} have produced ${run}, which is a more useful thing to look at than ninety minutes.`,
+        `A record of ${run} over ${window} is the part the manager will have taken home with him.`,
         `A record of ${run} settles nothing on its own, and it is the context this has to be read in.`,
-        `The ${window} read ${run}, and that is the honest way to look at a result like this one.`,
+        `The ${window} have brought ${run}, and that is the honest way to look at a result like this one.`,
         `Nothing about that run is changed by a single match, and the run is ${run}.`,
       ],
     });
@@ -4171,7 +4236,18 @@ function outlookParagraph(
 
   // A generic line may be the second thing the paragraph says. It is never the first.
   const first = ranked.find((candidate) => !candidate.generic) ?? ranked[0];
-  const picks = [first, ranked.find((candidate) => candidate.key !== first.key)].filter(
+  const firstGroup = CONCLUSION_GROUPS[first.key] ?? first.key;
+  /**
+   * The second sentence, only if it is about the same thing as the first.
+   *
+   * Where nothing shares the first sentence's group, the paragraph stops at one sentence rather than padding
+   * itself out with a line that has nothing to do with the one before it.
+   */
+  const second = ranked.find(
+    (candidate) =>
+      candidate.key !== first.key && (CONCLUSION_GROUPS[candidate.key] ?? candidate.key) === firstGroup
+  );
+  const picks = [first, second].filter(
     (candidate): candidate is (typeof ranked)[number] => Boolean(candidate)
   );
 
@@ -4252,7 +4328,7 @@ export function rank<
     playerNames: string[];
     stance?: OutletStance | null;
   },
->(items: T[], matchEventIds: readonly string[] = [], options: { badRun?: boolean } = {}): T[] {
+>(items: T[], matchEventIds: readonly string[] = [], options: { badRun?: boolean; recentTypes?: readonly string[]; maxStories?: number } = {}): T[] {
   const sorted = [...items].sort(
     (left, right) => right.weight - left.weight || left.id.localeCompare(right.id)
   );
@@ -4333,6 +4409,38 @@ export function rank<
   const balanced = balanceCoverage(opinionCapped);
 
   /**
+   * The edition cap, and the novelty that keeps a paper worth opening twice.
+   *
+   * THE CAP is what makes this a paper. The desk can support around thirty kinds of story, a rich career
+   * produces twenty in one read, and printing all of them is how a feature list reads: nobody finishes it, and
+   * by the tenth item the reader has stopped believing any of them are news.
+   *
+   * THE ROTATION is what makes the cap acceptable. Everything above ranks on significance, and significance
+   * does not change between two reads - so the same nine would win every time and the manager would see one
+   * front page for a month. A type the last editions already ran costs twenty points, which is enough to hand
+   * its slot to a fresher story of similar weight and not enough to bury a rout or an injury on the day it
+   * happens. A small hash of the id breaks the remaining ties, so two stories of equal weight take turns
+   * instead of one of them always winning.
+   *
+   * The balance pass runs AFTER the trim, because dropping four stories from a paper can leave it with three
+   * criticisms and one good news item, which is the thing the fairness rules exist to prevent.
+   */
+  const history = new Set(options.recentTypes ?? []);
+  const trimmed = [...balanced]
+    .map((item) => ({
+      item,
+      score:
+        item.weight -
+        (history.has(typeOf(item.id)) ? RECENT_TYPE_PENALTY : 0) +
+        (hash(`${item.id}|slot`) % 1000) / 125,
+    }))
+    .sort((left, right) => right.score - left.score || left.item.id.localeCompare(right.item.id))
+    .slice(0, options.maxStories ?? MAX_EDITION_STORIES)
+    .map((entry) => entry.item);
+
+  const finalised = balanceCoverage(trimmed);
+
+  /**
    * Interleaved by category, taking the category with the MOST left to place.
    *
    * The first version took the highest-ranked story whose category had not just run, and that is not the same
@@ -4344,7 +4452,7 @@ export function rank<
    * Within a category the ranked order is kept, so this separates the kinds of story without ever
    * re-ordering by significance inside one.
    */
-  const remaining = [...balanced];
+  const remaining = [...finalised];
   const out: T[] = [];
   let lastCategory: string | null = null;
   while (remaining.length > 0) {
@@ -4382,12 +4490,106 @@ export function rank<
 export const MAX_CONCERN_STORIES = 2;
 
 /**
+ * Every kind of story this desk can write, as the prefix its id starts with.
+ *
+ * Used by `typeOf` below, which is what the edition cap and the novelty rotation work on. A list rather than a
+ * regex because the prefixes are not a pattern - `form-unbeaten` and `home-form` both exist, and so do
+ * `wage-pressure` and `wage-control` - and guessing at them from a string is how a type gets split in two.
+ */
+const STORY_TYPES = [
+  "result",
+  "clean-sheet",
+  "finishing",
+  "timing",
+  "margin",
+  "defence",
+  "weakness",
+  "form-unbeaten",
+  "form-winless",
+  "home-form",
+  "away-form",
+  "scorer",
+  "assists",
+  "standout",
+  "goals",
+  "leak",
+  "haul",
+  "carried",
+  "late-winner",
+  "thrown-away",
+  "drought",
+  "contract",
+  "depth",
+  "youth",
+  "trophy",
+  "position",
+  "block",
+  "progress",
+  "regress",
+  "star",
+  "milestone",
+  "injury",
+  "return",
+  "wage-pressure",
+  "wage-control",
+  "war-chest",
+  "commitments",
+  "record-fee",
+  "sell-to-buy",
+  "opinion-manager",
+  "opinion-form",
+  "opinion-squad",
+  "opinion-supporters",
+  "opinion-youth",
+  "opinion-tactics",
+  "opinion-money",
+  "opinion-table",
+] as const;
+
+/**
+ * Which KIND of story an id belongs to, with everything specific about it stripped off.
+ *
+ * The longest matching prefix wins, so `home-form-` is not read as `form-`, and anything unrecognised falls
+ * back to its first segment rather than becoming its own type per story.
+ */
+export function typeOf(id: string): string {
+  let match = "";
+  for (const type of STORY_TYPES) {
+    if (id.startsWith(`${type}-`) && type.length > match.length) match = type;
+  }
+  return match || (id.split("-")[0] ?? id);
+}
+
+/**
+ * How many stories one edition carries.
+ *
+ * NINE, and deliberately fewer than ten. The desk can support around thirty kinds of story and a rich career
+ * can honestly produce twenty in one read, but a paper is a front page rather than a transcript of everything
+ * that is true. Printing all of it is how a feature list reads: the reader skips the fourth item, and by the
+ * tenth he has stopped taking any of them seriously.
+ *
+ * Nothing is lost by the cap. A story that does not print is not tombstoned, so it prints on a later read
+ * while it is still true - and because the novelty penalty below demotes what the last editions ran, the ones
+ * that waited are the ones that surface next.
+ */
+export const MAX_EDITION_STORIES = 9;
+
+/**
+ * What a story type costs an edition that has already run it recently.
+ *
+ * The reason the paper changes. Without it the same nine stories win every read, because weight is fixed and
+ * the facts that produced them are still true - so the reader sees the same front page five times and stops
+ * opening it. The penalty is big enough to hand a slot to a fresher story of similar weight and small enough
+ * that a rout or an injury still leads the paper the day it happens.
+ */
+const RECENT_TYPE_PENALTY = 20;
+
+/**
  * The stories that are ABOUT one match rather than about a run of them.
  *
- * Used by the one-match-one-voice cap in `rank`. The distinction is real and it is not the same as "keyed on
- * an event id": a form story is keyed on the latest match's id while being about the last five, and so is
- * the scoring summary and the leak. These seven describe a single ninety minutes, and no more than two of them
- * may print for the same one.
+ * Used by the one-match-one-voice cap in `rank`. The distinction is not the same as "keyed on an event id": a
+ * form story is keyed on the latest match's id while being about the last five, and so is the scoring summary
+ * and the leak. These seven describe a single ninety minutes.
  */
 const SINGLE_MATCH_PREFIXES = [
   "result-",

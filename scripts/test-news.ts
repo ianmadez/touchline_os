@@ -14,10 +14,21 @@
  *
  *   npm run news:test
  */
-import { buildNews, foldName, roleGroup, MAX_CONCERN_STORIES, type NewsAbsence, type NewsInput, type NewsMatch, type NewsPlayer } from "../src/lib/news/news-engine";
+import { buildNews as buildEdition, foldName, roleGroup, typeOf, MAX_CONCERN_STORIES, MAX_EDITION_STORIES, type NewsAbsence, type NewsInput, type NewsMatch, type NewsPlayer } from "../src/lib/news/news-engine";
 import { mediaAskFor } from "../src/lib/news/media";
 import { allOutlets } from "../src/lib/news/outlets";
 import { momentOf, phasePhrase, seasonPhase } from "../src/lib/news/moment";
+
+/**
+ * The desk with the paper's length cap lifted.
+ *
+ * The cap is a property of the EDITION rather than of the desk, so a check that a particular kind of story
+ * exists would otherwise be checking that it won a slot on a page it shares with twenty others. Every check
+ * below about what the desk CAN write asks for all of it; the length of a real edition, and the novelty that
+ * rotates it, are checked separately against `buildEdition`.
+ */
+const buildNews = (newsInput: NewsInput, options: { maxStories?: number } = {}) =>
+  buildEdition(newsInput, { maxStories: 99, ...options });
 
 let passed = 0;
 const failures: string[] = [];
@@ -2094,6 +2105,88 @@ check(
 check(
   "and a career with no season record claims no milestone at all",
   !buildNews(input({ gamesInCharge: null })).some((item) => item.id.startsWith("milestone-"))
+);
+
+// ---------------------------------------------------------------------------------------------
+// The length of a paper, and the novelty that keeps it worth opening twice
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nthe paper is a front page, and it moves on");
+
+const firstRead = buildEdition(input());
+
+check(
+  "an edition is shorter than ten stories",
+  firstRead.length <= MAX_EDITION_STORIES && firstRead.length < 10,
+  `${firstRead.length} stories`
+);
+check(
+  "and the desk could have written far more than that",
+  buildNews(input()).length > firstRead.length,
+  `${buildNews(input()).length} available, ${firstRead.length} printed`
+);
+
+const firstTypes = [...new Set(firstRead.map((item) => typeOf(item.id)))];
+const secondRead = buildEdition(input({ recentTypes: firstTypes }));
+const secondTypes = secondRead.map((item) => typeOf(item.id));
+
+check(
+  "the edition after one has run is still a paper and not a different one entirely",
+  secondRead.length > 0 && secondRead.length <= MAX_EDITION_STORIES,
+  `${secondRead.length} stories`
+);
+check(
+  "and the kinds that ran are demoted, so the page is not the same nine every read",
+  secondTypes.filter((type) => firstTypes.includes(type)).length < secondTypes.length,
+  `${secondTypes.filter((type) => firstTypes.includes(type)).length} of ${secondTypes.length} repeated`
+);
+check(
+  "and a reader who reloads without playing on sees exactly what he saw before",
+  buildEdition(input({ recentTypes: firstTypes })).map((item) => item.id).join() ===
+    secondRead.map((item) => item.id).join()
+);
+check(
+  "every story is still one the desk would write on its own",
+  secondRead.every((item) => item.id.length > 0 && item.headline.length > 0 && item.article.length > 0)
+);
+
+console.log("\nand a form guide stays out of the prose");
+
+/* "W W D" is the app's shorthand and belongs in the evidence. In a sentence it is a machine reading its own
+ * output aloud, which is how "they are asking for the run W W D to look like it is going somewhere" got
+ * printed. The two are now separate helpers so a call site has to choose which one it wants. */
+const FORM_GUIDE = /\b(?:[WDL] ){2,}[WDL]\b/;
+
+check(
+  "no headline, card or article contains a form guide",
+  buildNews(input()).every(
+    (item) => !FORM_GUIDE.test([item.headline, item.body, ...item.article].join(" "))
+  ),
+  buildNews(input())
+    .map((item) => [item.headline, item.body, ...item.article].join(" "))
+    .find((text) => FORM_GUIDE.test(text))
+    ?.slice(0, 90)
+);
+check(
+  "and the run is still in the evidence, where the shorthand belongs",
+  buildNews(input()).some((item) => item.evidence.some((line) => FORM_GUIDE.test(line)))
+);
+
+check(
+  "and a closing paragraph never pairs the run of results with the treatment room",
+  buildNews(input()).every((item) => {
+    const closing = item.article.at(-1) ?? "";
+    const results =
+      /(?:two|three|four|five|six|one|no) (?:wins?|draws?|defeats?)|wider picture|record of|have brought/i.test(
+        closing
+      );
+    const availability = /treatment room|unavailable player|absence never/i.test(closing);
+    return !(results && availability);
+  }),
+  buildNews(input())
+    .map((item) => item.article.at(-1) ?? "")
+    .find((closing) => /treatment room/i.test(closing) && /have brought|wider picture/i.test(closing))
+    ?.slice(0, 90)
 );
 
 console.log(`\n${passed} passed, ${failures.length} failed`);

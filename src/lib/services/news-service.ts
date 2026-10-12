@@ -12,9 +12,9 @@
  * evidence in the app.
  */
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "../db/client";
-import { careerEvents, careers, leagues } from "../db/schema";
+import { careerEvents, careers, leagues, newsItems } from "../db/schema";
 import { SquadService } from "./squad-service";
 import { SeasonService } from "./season-service";
 import { TacticsService } from "./tactics-service";
@@ -26,6 +26,8 @@ import { ADVISORY_THRESHOLDS } from "../realism";
 import {
   buildNews,
   foldName,
+  typeOf,
+  MAX_EDITION_STORIES,
   type NewsAbsence,
   type NewsDevelopment,
   type NewsInput,
@@ -293,6 +295,22 @@ export class NewsService {
       finance = null;
     }
 
+    /**
+     * What the last editions already ran, so the front page can move on.
+     *
+     * Only the archive knows this: the desk cannot tell a story it printed yesterday from one it has never
+     * printed, because the same facts support both. Read from the CURRENT rows, which is what the manager has
+     * actually seen - a story dropped by the cap is not stored, so it stays available and surfaces on a later
+     * read once the types around it have been used.
+     */
+    const recentRows = await db
+      .select({ id: newsItems.id })
+      .from(newsItems)
+      .where(eq(newsItems.careerId, careerId))
+      .orderBy(desc(newsItems.edition), asc(newsItems.sortIndex))
+      .limit(MAX_EDITION_STORIES * 2);
+    const recentTypes = [...new Set(recentRows.map((row) => typeOf(row.id)))];
+
     const input: NewsInput = {
       clubName: career.clubName,
       managerName: career.managerName,
@@ -318,6 +336,7 @@ export class NewsService {
         seasons.length > 0
           ? seasons.reduce((total, season) => total + (season.gamesPlayed ?? 0), 0)
           : null,
+      recentTypes,
       matches,
       squad: players,
       developments,

@@ -23,7 +23,7 @@ import { and, asc, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { newsItems, newsPublished } from "../db/schema";
 import { NewsService, type NewsEdition } from "./news-service";
-import { NEWS_COPY_VERSION, type NewsItem } from "../news/news-engine";
+import { MAX_EDITION_STORIES, NEWS_COPY_VERSION, type NewsItem } from "../news/news-engine";
 
 /**
  * How many unsaved stories one career keeps.
@@ -234,7 +234,17 @@ export class NewsArchiveService {
     }
   }
 
-  /** The stored paper: newest edition first, in the order the desk wrote it. */
+  /**
+   * The stored paper: newest edition first, in the order the desk wrote it.
+   *
+   * THE PAPER IS A FRONT PAGE, so it carries one edition's worth of news rather than everything ever printed
+   * for this career. Storage keeps more than this on purpose - a story that has been published is never
+   * written again, and the tombstones are what stop the desk churning - but a reader opening a newspaper does
+   * not get yesterday's front page stapled to today's.
+   *
+   * SAVED stories are the exception and are always shown, however old. A bookmark is the manager's and hiding
+   * one to keep the page short would be taking something away from him to save space.
+   */
   private async listItems(careerId: string): Promise<ArchivedNewsItem[]> {
     const rows = await db
       .select()
@@ -242,7 +252,19 @@ export class NewsArchiveService {
       .where(eq(newsItems.careerId, careerId))
       .orderBy(desc(newsItems.edition), asc(newsItems.sortIndex));
 
-    return rows.map((row) => {
+    const shown: typeof rows = [];
+    let unsaved = 0;
+    for (const row of rows) {
+      if (row.saved) {
+        shown.push(row);
+        continue;
+      }
+      if (unsaved >= MAX_EDITION_STORIES) continue;
+      unsaved += 1;
+      shown.push(row);
+    }
+
+    return shown.map((row) => {
       const article = parseJsonArray(row.articleJson).filter(
         (paragraph): paragraph is string => typeof paragraph === "string"
       );
