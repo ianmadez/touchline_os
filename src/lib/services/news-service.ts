@@ -52,6 +52,14 @@ export interface NewsEdition {
   inGameDate: string | null;
   /** How many matches the edition was written from, so the screen can say how much evidence there is. */
   matchesConsidered: number;
+  /**
+   * The matches this edition was written from, newest first.
+   *
+   * Carried out of the service because the ARCHIVE needs them: a stored story's id ends with the match it
+   * was written from, so these are what let the front page work out which of the rows it is holding is about
+   * the match just played and which is about a budget. Empty on a career with no logged match yet.
+   */
+  matchEventIds: readonly string[];
   items: PublishedNewsItem[];
 }
 
@@ -394,6 +402,7 @@ export class NewsService {
       seasonNumber,
       inGameDate: career.inGameDate,
       matchesConsidered: matches.length,
+      matchEventIds: matches.map((match) => match.eventId),
       items,
     };
   }

@@ -47,7 +47,7 @@ import { momentOf, phasePhrase, seasonPhase, type SeasonProgress } from "./momen
  * stories exactly as they were. The number is here, beside the copy it describes, because "the desk was
  * rewritten" is an editorial call that cannot be computed from the code.
  */
-export const NEWS_COPY_VERSION = 9;
+export const NEWS_COPY_VERSION = 10;
 
 /** How a story's subject colours the card. Not a red/green light: a paper has good and bad news. */
 export type NewsTone = "GOOD" | "NEUTRAL" | "CONCERN";
@@ -3562,7 +3562,7 @@ function matchReportBody(
     const losses = recent.filter((match) => match.result === "LOSS").length;
     items.push({
       id: `opinion-form-${input.seasonNumber}-${recent[0].eventId}`,
-      kind: "MATCH",
+      kind: "OPINION",
       category: "OPINION",
       tone: wins > losses ? "GOOD" : losses > wins ? "CONCERN" : "NEUTRAL",
       stance: "SENSATIONAL",
@@ -3635,7 +3635,7 @@ function matchReportBody(
   if (recent.length >= 3) {
     items.push({
       id: `opinion-supporters-${input.seasonNumber}-${recent[0].eventId}`,
-      kind: "MATCH",
+      kind: "OPINION",
       category: "OPINION",
       tone: badRun ? "CONCERN" : "NEUTRAL",
       stance: "LOYAL",
@@ -3707,7 +3707,7 @@ function matchReportBody(
   if (recent.length >= 3 && input.matches.some((match) => (match.weakness ?? "").trim().length > 0)) {
     items.push({
       id: `opinion-tactics-${input.seasonNumber}-${recent[0].eventId}`,
-      kind: "MATCH",
+      kind: "OPINION",
       category: "TALKING POINT",
       tone: "NEUTRAL",
       stance: "STRAIGHT",
@@ -4445,6 +4445,7 @@ export function rank<
   T extends {
     weight: number;
     id: string;
+    kind: StoryKind;
     category: string;
     tone: NewsTone;
     playerNames: string[];
@@ -4537,12 +4538,15 @@ export function rank<
    * produces twenty in one read, and printing all of them is how a feature list reads: nobody finishes it, and
    * by the tenth item the reader has stopped believing any of them are news.
    *
-   * THE ROTATION is what makes the cap acceptable. Everything above ranks on significance, and significance
-   * does not change between two reads - so the same nine would win every time and the manager would see one
-   * front page for a month. A type the last editions already ran costs twenty points, which is enough to hand
-   * its slot to a fresher story of similar weight and not enough to bury a rout or an injury on the day it
-   * happens. A small hash of the id breaks the remaining ties, so two stories of equal weight take turns
-   * instead of one of them always winning.
+   * THE ROTATION is what makes the cap acceptable. It used to be the only thing that varied between two
+   * reads, because significance does not change and the same nine therefore won every time. A type the last
+   * editions already ran costs forty points, which is enough to hand its slot to a fresher story of similar
+   * weight and not enough to bury a rout or an injury on the day it happens. A small hash of the id breaks
+   * the remaining ties, so two stories of equal weight take turns instead of one of them always winning.
+   *
+   * WHAT THE SUM IS is `salienceOf`: weight plus relevance, less the novelty price. Relevance is why the
+   * report of the match just played outranks a wage bill that has not moved, and it is the reason this is no
+   * longer a ranking on significance with a rotation bolted on.
    *
    * The balance pass runs AFTER the trim, because dropping four stories from a paper can leave it with three
    * criticisms and one good news item, which is the thing the fairness rules exist to prevent.
@@ -4552,7 +4556,7 @@ export function rank<
     .map((item) => ({
       item,
       score:
-        item.weight -
+        salienceOf(item, matchEventIds) -
         (history.has(typeOf(item.id)) ? RECENT_TYPE_PENALTY : 0) +
         (hash(`${item.id}|slot`) % 1000) / 125,
     }))
@@ -4577,6 +4581,19 @@ export function rank<
   const remaining = [...finalised];
   const out: T[] = [];
   let lastCategory: string | null = null;
+  /**
+   * The lead is the highest-scoring story, and the interleave starts from there.
+   *
+   * The category rule below must never choose the front page. It exists to stop two stories of the same kind
+   * running next to each other, and it picks by whichever category has the most left to place - so letting it
+   * choose the first story is how a paper led on a squad note while the report of the last match sat fourth,
+   * behind two pieces about money that happened to be in larger supply.
+   */
+  if (remaining.length > 0) {
+    const [lead] = remaining.splice(0, 1);
+    out.push(lead);
+    lastCategory = lead.category;
+  }
   while (remaining.length > 0) {
     const counts = new Map<string, number>();
     for (const item of remaining) counts.set(item.category, (counts.get(item.category) ?? 0) + 1);
@@ -4703,8 +4720,90 @@ export const MAX_EDITION_STORIES = 9;
  * the facts that produced them are still true - so the reader sees the same front page five times and stops
  * opening it. The penalty is big enough to hand a slot to a fresher story of similar weight and small enough
  * that a rout or an injury still leads the paper the day it happens.
+ *
+ * It is quoted at forty rather than twenty because RELEVANCE now sits in the same sum (see `relevanceOf`).
+ * Twenty points of novelty against up to eighty points of being about the match just played is not a rotation
+ * at all: the same nine would return every read with a fresh excuse. The price moved, so the rotation still
+ * costs what it always cost.
  */
-const RECENT_TYPE_PENALTY = 20;
+const RECENT_TYPE_PENALTY = 40;
+
+/**
+ * Where a story stands in the order of what has just happened.
+ *
+ * WEIGHT IS NOT RELEVANCE, and telling the two apart is the whole point of this table. Weight says how BIG a
+ * story is; relevance says whether it is about NOW. A budget nobody has touched since August is a perfectly
+ * good story and it is not why anybody opens the paper the morning after a match, while a modest story about
+ * the match itself is exactly why. Ranking on weight alone is what put a squad note and two pieces about
+ * money above the report of the last ninety minutes.
+ *
+ * A topic only sets the floor. Being keyed on the match just played is worth more than any topic is, because
+ * that is the difference between a story written about this afternoon and a story that merely could have been.
+ */
+const RELEVANCE_BY_TOPIC: Record<StoryKind, number> = {
+  MATCH: 40,
+  FORM: 35,
+  OPINION: 30,
+  /**
+   * Higher than the other topics because an absence is the one topic that can never earn the match bonus.
+   *
+   * An injury is reported on its own date rather than written from a match, so `relevanceOf` finds no event
+   * id on the end of its id and its topic floor is the whole of its relevance. Left at the same level as a
+   * column it ranked below one, which is the wrong way round: a fortnight out is a fact about the squad and a
+   * column is a view about it.
+   */
+  TEAMNEWS: 42,
+  TABLE: 26,
+  PLAYER: 20,
+  SQUAD: 14,
+  TRANSFER: 12,
+  CONTRACT: 12,
+  FINANCE: 6,
+  TROPHY: 4,
+  MILESTONE: 4,
+};
+
+/** A story keyed on the match just played, and on the ones shortly before it. */
+const RELEVANCE_LATEST_MATCH = 40;
+const RELEVANCE_RECENT_MATCH = 14;
+const RECENT_MATCHES_IN_WINDOW = 3;
+
+/**
+ * How much of the paper's attention a story has earned by being about now.
+ *
+ * A story's id ends with the match it was written from, which is what makes this answerable from a stored row
+ * and its own columns with nothing else to hand. Exported because the ARCHIVE ranks the whole paper with it
+ * and not one edition at a time: the front page has to be able to tell which of the rows it is holding is
+ * about the match just played and which is about a wage bill.
+ */
+export function relevanceOf(
+  item: { id: string; kind: StoryKind },
+  matchEventIds: readonly string[] = []
+): number {
+  const topic = RELEVANCE_BY_TOPIC[item.kind] ?? 0;
+  const index = matchEventIds.findIndex((eventId) => item.id.endsWith(eventId));
+  const fromMatch =
+    index === 0
+      ? RELEVANCE_LATEST_MATCH
+      : index > 0 && index < RECENT_MATCHES_IN_WINDOW
+        ? RELEVANCE_RECENT_MATCH
+        : 0;
+  return topic + fromMatch;
+}
+
+/**
+ * The whole of the desk's judgement about a story: how big it is, and how much it is about now.
+ *
+ * One function rather than the same expression written out twice, because the ENGINE and the ARCHIVE have to
+ * agree. The desk ranks one edition with it and the archive orders the stored paper with it, and two sums
+ * that were meant to be one sum is how a paper ends up leading with a story its own desk did not rank first.
+ */
+export function salienceOf(
+  item: { id: string; kind: StoryKind; weight: number },
+  matchEventIds: readonly string[] = []
+): number {
+  return item.weight + relevanceOf(item, matchEventIds);
+}
 
 /**
  * The stories that are ABOUT one match rather than about a run of them.

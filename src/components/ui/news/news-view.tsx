@@ -224,8 +224,8 @@ export function NewsView({
             </div>
           </article>
 
-          {/* Everything else, grouped by the edition that published it */}
-          <EditionRun
+          {/* Everything else, grouped by what the story is about */}
+          <DeskSections
             items={items.slice(1)}
             busyId={busyId}
             onToggleSaved={(id, next) => void act(id, () => setSaved(id, next))}
@@ -261,13 +261,55 @@ export function NewsView({
 }
 
 /**
- * The stories after the lead, in dated runs.
+ * The subjects a club paper is divided into.
  *
- * Grouped by the edition that published them rather than printed as one long list: the paper grows by
- * editions, the cap overwrites from the back, and a reader needs to see where one day's news ends and the
- * next begins. The header is the newest dateline in the run, which is the day those stories were current.
+ * A story's topic decides its section, and the order here is only a fallback: the sections are printed in
+ * the order of their best story, so a day when the money is the story puts the money first.
  */
-function EditionRun({
+const SECTIONS: { id: string; title: string; note: string; kinds: ArchivedNewsItem["kind"][] }[] = [
+  {
+    id: "PITCH",
+    title: "On the pitch",
+    note: "the result and the run behind it",
+    kinds: ["MATCH", "FORM", "TABLE"],
+  },
+  {
+    id: "SQUAD",
+    title: "The squad",
+    note: "players, injuries and deals",
+    kinds: ["TEAMNEWS", "PLAYER", "SQUAD", "CONTRACT", "TRANSFER"],
+  },
+  { id: "MONEY", title: "The money", note: "budgets and wages", kinds: ["FINANCE"] },
+  { id: "OPINION", title: "Opinion", note: "the desk's own view", kinds: ["OPINION"] },
+  { id: "RECORD", title: "The record", note: "trophies and milestones", kinds: ["TROPHY", "MILESTONE"] },
+];
+
+/**
+ * Where a story goes when its topic is not one the paper has a page for.
+ *
+ * Reachable only by a row written before a topic existed, and a story the reader can still read belongs on
+ * the page even if the desk has since decided it is filed under something else.
+ */
+const OTHER_SECTION = {
+  id: "OTHER",
+  title: "Also on the desk",
+  note: "the rest of what the desk has filed",
+  kinds: [] as ArchivedNewsItem["kind"][],
+};
+
+/**
+ * The stories after the lead, in the sections a paper is divided into.
+ *
+ * NOT grouped by the edition that published them, which is what this used to do. An edition is a fact about
+ * how the paper is STORED rather than about what is in it, so it produced a second half headed "Earlier" -
+ * a word that tells a reader nothing, and one that made the shape of the page an artefact of when the manager
+ * last happened to open it.
+ *
+ * The sections are the subjects a club paper actually has, and they run in the order of their best story, so
+ * relevance still decides what a reader meets first. Within a section the paper's own order is kept, which is
+ * why this only partitions the list and never sorts it.
+ */
+function DeskSections({
   items,
   busyId,
   onToggleSaved,
@@ -282,25 +324,29 @@ function EditionRun({
   onEvidence: (item: ArchivedNewsItem) => void;
   onOpen: (item: ArchivedNewsItem) => void;
 }) {
-  if (items.length === 0) return null;
+  const sections = useMemo(() => {
+    const buckets = new Map<string, ArchivedNewsItem[]>();
+    for (const item of items) {
+      const section = SECTIONS.find((candidate) => candidate.kinds.includes(item.kind)) ?? OTHER_SECTION;
+      const bucket = buckets.get(section.id);
+      if (bucket) bucket.push(item);
+      else buckets.set(section.id, [item]);
+    }
+    return [...SECTIONS, OTHER_SECTION]
+      .map((section) => ({ section, group: buckets.get(section.id) ?? [] }))
+      .filter((entry) => entry.group.length > 0)
+      .sort((left, right) => items.indexOf(left.group[0]) - items.indexOf(right.group[0]));
+  }, [items]);
 
-  const runs: { edition: number; items: ArchivedNewsItem[] }[] = [];
-  for (const item of items) {
-    const last = runs[runs.length - 1];
-    if (last && last.edition === item.edition) last.items.push(item);
-    else runs.push({ edition: item.edition, items: [item] });
-  }
+  if (items.length === 0) return null;
 
   return (
     <>
-      {runs.map((run, index) => (
-        <section key={run.edition} className="space-y-4">
-          <PageHeading
-            title={index === 0 ? "Also in this edition" : "Earlier"}
-            note={datelineOf(run.items)}
-          />
+      {sections.map(({ section, group }) => (
+        <section key={section.id} className="space-y-4">
+          <PageHeading title={section.title} note={section.note} />
           <ul className="grid gap-4 md:grid-cols-2">
-            {run.items.map((item) => (
+            {group.map((item) => (
               <StoryCard
                 key={item.id}
                 item={item}
@@ -316,16 +362,6 @@ function EditionRun({
       ))}
     </>
   );
-}
-
-/** The newest dateline in a run: the day those stories were the news. */
-function datelineOf(items: ArchivedNewsItem[]): string {
-  const dates = items
-    .map((item) => item.publishedOn)
-    .filter((value): value is string => Boolean(value))
-    .sort();
-  const newest = dates.at(-1) ?? null;
-  return newest ? `Published ${deskDate(newest)}` : `${items.length} stories`;
 }
 
 function PageHeading({ title, note }: { title: string; note: string }) {

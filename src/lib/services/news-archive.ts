@@ -19,11 +19,18 @@
  * becoming "5 in 5") has a different id and therefore reads as the new story it is.
  */
 
-import { and, asc, desc, eq, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { newsItems, newsPublished } from "../db/schema";
 import { NewsService, type NewsEdition } from "./news-service";
-import { MAX_EDITION_STORIES, NEWS_COPY_VERSION, type NewsItem } from "../news/news-engine";
+import {
+  MAX_EDITION_STORIES,
+  NEWS_COPY_VERSION,
+  relevanceOf,
+  salienceOf,
+  type NewsItem,
+  type StoryKind,
+} from "../news/news-engine";
 
 /**
  * How many unsaved stories one career keeps.
@@ -39,6 +46,45 @@ export interface ArchivedNewsItem extends NewsItem {
   saved: boolean;
   read: boolean;
   edition: number;
+  /**
+   * How much this story is about what has just happened, as of this read.
+   *
+   * Re-computed on every read rather than stored, because it depends on which match is the latest one NOW -
+   * a story about the previous fixture stops being about the latest the moment the next one is logged. Shown
+   * with the story so the order the paper is in can be checked against the stories themselves.
+   */
+  relevance: number;
+}
+
+/**
+ * One stored row, scored the way the front page is ordered.
+ *
+ * `kind` comes back from the database as a string and is narrowed here and nowhere else: `relevanceOf`
+ * switches on it, and a value it does not recognise falls to the floor of its table rather than throwing, so
+ * a row written before a topic existed still prints.
+ *
+ * The ties are broken by edition and then by the desk's own order inside it, which keeps the order stable -
+ * two stories of equal salience hold their places between reads instead of swapping.
+ */
+function rankStored<
+  T extends { id: string; kind: string; weight: number; edition: number; sortIndex: number },
+>(rows: T[], matchEventIds: readonly string[]): { row: T; relevance: number; salience: number }[] {
+  return rows
+    .map((row) => {
+      const story = { id: row.id, kind: row.kind as StoryKind, weight: row.weight };
+      return {
+        row,
+        relevance: relevanceOf(story, matchEventIds),
+        salience: salienceOf(story, matchEventIds),
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.salience - left.salience ||
+        right.row.edition - left.row.edition ||
+        left.row.sortIndex - right.row.sortIndex ||
+        left.row.id.localeCompare(right.row.id)
+    );
 }
 
 export interface NewsPaper {
@@ -49,7 +95,12 @@ export interface NewsPaper {
   seasonNumber: number;
   inGameDate: string | null;
   matchesConsidered: number;
-  /** Newest edition first, and within an edition the order it was written in. */
+  /**
+   * In the order the front page is printed: most relevant first, and within that the desk's own order.
+   *
+   * Not newest first. That was the earlier rule and it is what put a piece about a wage bill at the top of
+   * the paper, because the top of the page was simply whatever the most recent read had happened to publish.
+   */
   items: ArchivedNewsItem[];
   /** How many stored stories nobody has looked at. */
   unseen: number;
@@ -78,8 +129,8 @@ export class NewsArchiveService {
     // Trimmed on EVERY read, not only when something was published: a career can cross the cap through
     // rows that arrived another way, and a trim that only runs on a new story would leave it over the limit
     // until the desk happened to have something to say.
-    await this.enforceLimit(careerId);
-    const items = await this.listItems(careerId);
+    await this.enforceLimit(careerId, edition.matchEventIds);
+    const items = await this.listItems(careerId, edition.matchEventIds);
     const unseen = items.filter((item) => !item.read).length;
     const editions = items.reduce((highest, item) => Math.max(highest, item.edition), 0);
     return {
@@ -210,24 +261,37 @@ export class NewsArchiveService {
       )
       .onConflictDoNothing();
 
-    await this.enforceLimit(edition.careerId);
+    await this.enforceLimit(edition.careerId, edition.matchEventIds);
     return fresh.length;
   }
   /**
-   * Overwrites the oldest unsaved stories once the cap is reached.
+   * Overwrites the LEAST RELEVANT unsaved stories once the cap is reached.
+   *
+   * Not the oldest, which is what this used to drop. The cap exists because the paper cannot grow without
+   * limit, and it has to choose what goes; choosing by age means the first thing thrown away is whatever has
+   * been on the page longest, which is the right rule for an archive and the wrong one for a newspaper. What
+   * a reader would drop is the story about nothing in particular, and relevance is the only thing here that
+   * can tell the difference between that and the report of the match.
    *
    * Saved rows are excluded from the count AND from the deletion, in that order: a manager who saves
    * everything must not end up with a paper that is mostly bookmarks and no room for news, so the limit
    * counts only what can be overwritten.
    */
-  private async enforceLimit(careerId: string): Promise<void> {
+  private async enforceLimit(careerId: string, matchEventIds: readonly string[]): Promise<void> {
     const unsaved = await db
-      .select({ id: newsItems.id })
+      .select({
+        id: newsItems.id,
+        kind: newsItems.kind,
+        weight: newsItems.weight,
+        edition: newsItems.edition,
+        sortIndex: newsItems.sortIndex,
+      })
       .from(newsItems)
-      .where(and(eq(newsItems.careerId, careerId), eq(newsItems.saved, false)))
-      .orderBy(desc(newsItems.edition), desc(newsItems.sortIndex), desc(newsItems.createdAt));
+      .where(and(eq(newsItems.careerId, careerId), eq(newsItems.saved, false)));
 
-    const doomed = unsaved.slice(NEWS_ARCHIVE_LIMIT).map((row) => row.id);
+    const doomed = rankStored(unsaved, matchEventIds)
+      .slice(NEWS_ARCHIVE_LIMIT)
+      .map((entry) => entry.row.id);
     if (doomed.length === 0) return;
     for (const id of doomed) {
       await db.delete(newsItems).where(and(eq(newsItems.careerId, careerId), eq(newsItems.id, id)));
@@ -235,36 +299,42 @@ export class NewsArchiveService {
   }
 
   /**
-   * The stored paper: newest edition first, in the order the desk wrote it.
+   * The stored paper, in the order a front page is printed.
    *
-   * THE PAPER IS A FRONT PAGE, so it carries one edition's worth of news rather than everything ever printed
+   * THE PAPER IS A FRONT PAGE, so it carries one page's worth of news rather than everything ever printed
    * for this career. Storage keeps more than this on purpose - a story that has been published is never
-   * written again, and the tombstones are what stop the desk churning - but a reader opening a newspaper does
-   * not get yesterday's front page stapled to today's.
+   * written again, and the tombstones are what stop the desk churning - but a reader opening a newspaper
+   * does not get yesterday's front page stapled to today's.
+   *
+   * WHAT MAKES THE PAGE is RELEVANCE rather than recency, and that is the change that matters: the stories
+   * shown are the ones most about what has just happened, not the ones written most recently. Ordering by
+   * edition made the front page an artefact of when the manager last opened the paper, which is how the
+   * report of the last match came to be stored but off the page, behind a squad note and two pieces about
+   * money.
    *
    * SAVED stories are the exception and are always shown, however old. A bookmark is the manager's and hiding
    * one to keep the page short would be taking something away from him to save space.
    */
-  private async listItems(careerId: string): Promise<ArchivedNewsItem[]> {
-    const rows = await db
-      .select()
-      .from(newsItems)
-      .where(eq(newsItems.careerId, careerId))
-      .orderBy(desc(newsItems.edition), asc(newsItems.sortIndex));
+  private async listItems(
+    careerId: string,
+    matchEventIds: readonly string[]
+  ): Promise<ArchivedNewsItem[]> {
+    const rows = await db.select().from(newsItems).where(eq(newsItems.careerId, careerId));
 
-    const shown: typeof rows = [];
+    const shown: { row: (typeof rows)[number]; relevance: number; salience: number }[] = [];
     let unsaved = 0;
-    for (const row of rows) {
-      if (row.saved) {
-        shown.push(row);
+    for (const entry of rankStored(rows, matchEventIds)) {
+      if (entry.row.saved) {
+        shown.push(entry);
         continue;
       }
       if (unsaved >= MAX_EDITION_STORIES) continue;
       unsaved += 1;
-      shown.push(row);
+      shown.push(entry);
     }
 
-    return shown.map((row) => {
+    return shown.map((entry) => {
+      const row = entry.row;
       const article = parseJsonArray(row.articleJson).filter(
         (paragraph): paragraph is string => typeof paragraph === "string"
       );
@@ -312,6 +382,7 @@ export class NewsArchiveService {
         saved: row.saved,
         read: row.readAt !== null,
         edition: row.edition,
+        relevance: entry.relevance,
       };
     });
   }

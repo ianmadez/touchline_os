@@ -14,7 +14,7 @@
  *
  *   npm run news:test
  */
-import { buildNews as buildEdition, foldName, roleGroup, typeOf, MAX_CONCERN_STORIES, MAX_EDITION_STORIES, type NewsAbsence, type NewsInput, type NewsMatch, type NewsPlayer } from "../src/lib/news/news-engine";
+import { buildNews as buildEdition, foldName, roleGroup, typeOf, relevanceOf, salienceOf, MAX_CONCERN_STORIES, MAX_EDITION_STORIES, type NewsAbsence, type NewsInput, type NewsMatch, type NewsPlayer } from "../src/lib/news/news-engine";
 import { mediaAskFor } from "../src/lib/news/media";
 import { allOutlets } from "../src/lib/news/outlets";
 import { momentOf, phasePhrase, seasonPhase } from "../src/lib/news/moment";
@@ -2409,6 +2409,51 @@ check(
   "and none of them repeats a figure from the card without adding to it",
   restatements.length === 0,
   restatements.slice(0, 3).join(" | ")
+);
+
+// ---------------------------------------------------------------------------------------------
+// Relevance: the paper is about what has just happened, not about what is biggest
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nthe paper is ordered by what has just happened");
+
+const recentIds = input().matches.map((entry) => entry.eventId);
+const oldestId = input().matches[input().matches.length - 1].eventId;
+const fullDeskOrder = buildNews(input());
+const frontPage = buildEdition(input());
+
+check(
+  "a story written from the latest match is worth more than the same story written from an older one",
+  relevanceOf({ id: `result-${recentIds[0]}`, kind: "MATCH" }, recentIds) >
+    relevanceOf({ id: `result-${oldestId}`, kind: "MATCH" }, recentIds)
+);
+
+check(
+  "and a small story about the match outranks a bigger one about nothing in particular",
+  salienceOf({ id: `result-${recentIds[0]}`, kind: "MATCH", weight: 60 }, recentIds) >
+    salienceOf({ id: "war-chest-3-0", kind: "FINANCE", weight: 56 }, recentIds)
+);
+
+check(
+  "the desk leads with its most relevant story",
+  fullDeskOrder.length > 0 &&
+    fullDeskOrder.every(
+      (item) => salienceOf(item, recentIds) <= salienceOf(fullDeskOrder[0], recentIds)
+    ),
+  fullDeskOrder[0]?.id
+);
+
+check(
+  "and the front page leads with the report of the match just played",
+  frontPage[0]?.id === `result-${recentIds[0]}`,
+  frontPage[0]?.id
+);
+
+check(
+  "and no story about money is filed under a football topic",
+  fullDeskOrder
+    .filter((item) => item.category === "FINANCE")
+    .every((item) => item.kind === "FINANCE")
 );
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
