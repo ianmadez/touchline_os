@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SubTabs } from "@/components/ui/sub-tabs";
+import { portal, useScrollLock } from "@/components/ui/portal";
 import { GroupDebriefPanel } from "@/components/ui/debrief/group-debrief-panel";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import type { ParsedCareerEvent } from "@/lib/services/event-service";
@@ -2027,17 +2028,19 @@ export function DebriefView({
                     key={evt.id}
                     className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800/80 space-y-2"
                   >                    {/*
-                      The club name WRAPS rather than truncating. A fixed `truncate` on the left half
-                      of a `justify-between` row loses to the score pill and the two action buttons
-                      beside it, so a longer club name read as "vs LUTO..." with no way to see the
-                      rest. Allowing the row to wrap means the name is always shown in full and the
-                      controls simply move below it when there is not room for both.
+                      The opponent gets its own line and the controls get the next one.
+
+                      They used to share a row, with the name on a `flex-1` and the controls on a `shrink-0`
+                      beside it. That holds only while the buttons fit: five controls, a star and a score pill
+                      come to a little over 290px of intrinsic width, and a `shrink-0` block that does not fit
+                      cannot wrap - it runs out of the card, and the card's own `overflow-y-auto` clips the
+                      last button off. A row per line cannot do that, and the controls wrap among themselves
+                      when the column is narrow.
                     */}
-                    <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 text-xs font-sub font-bold uppercase">
-                      <span className="min-w-[9rem] flex-1 break-words text-slate-900 dark:text-slate-100">
-                        vs {payload.opponent || "Unnamed opponent"}
-                      </span>
-                      <div className="flex shrink-0 items-center gap-1.5">
+                    <div className="text-xs font-sub font-bold uppercase break-words text-slate-900 dark:text-slate-100">
+                      vs {payload.opponent || "Unnamed opponent"}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => void toggleDebriefStar(evt.id)}
@@ -2106,7 +2109,6 @@ export function DebriefView({
                             Delete
                           </button>
                         )}
-                      </div>
                     </div>
 
                     <div className="text-[11px] font-sub text-slate-500 dark:text-slate-400 space-y-1">
@@ -2253,6 +2255,9 @@ function DebriefDetailModal({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
+  // The page behind the dialog is held still, so the record cannot be scrolled off the screen it was opened on.
+  useScrollLock(event !== null);
+
   if (!event) return null;
 
   let payload: DebriefHistory = {};
@@ -2302,9 +2307,9 @@ function DebriefDetailModal({
     },
   ];
 
-  return (
+  return portal(
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 p-4 backdrop-blur-sm animate-overlay-in sm:items-center"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm animate-overlay-in"
       role="dialog"
       aria-modal="true"
       aria-labelledby="debrief-detail-title"

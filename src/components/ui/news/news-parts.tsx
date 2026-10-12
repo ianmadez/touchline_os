@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useEffect } from "react";
-import { createPortal } from "react-dom";
 
+import { portal } from "@/components/ui/portal";
 import { PlayerFace } from "@/components/ui/squad/player-face";
 import type { NewsItem, NewsTone } from "@/lib/news/news-engine";
 
@@ -311,17 +311,8 @@ export function ClubCrest({
 }
 
 /**
- * Renders a dialog into the document body rather than where it was written.
- *
- * Learned the hard way: the paper's own root carries a CSS animation, and an animated (transformed) ancestor
- * becomes the containing block for `position: fixed`. The dialog was therefore placed relative to the paper
- * instead of the viewport, so opening a story while scrolled down put it off the top of the screen. A portal
- * removes the ancestor from the question entirely.
+ * The paper's dialogs are portalled by the shared helper, which owns both the reason and the scroll lock.
  */
-function portal(node: React.ReactNode) {
-  if (typeof document === "undefined") return null;
-  return createPortal(node, document.body);
-}
 
 /**
  * The story, opened.
