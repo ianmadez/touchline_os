@@ -4,7 +4,7 @@
  * Split out of the route so the route no longer reaches the database client directly, and so the
  * browser build can produce the same numbers from its own storage.
  */
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, and, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import {
   careers,
@@ -12,6 +12,7 @@ import {
   careerEvents,
   players,
   playerSnapshots,
+  worldPlayers,
 } from "../db/schema";
 
 /** Counts rows in a table, optionally scoped to one career. */
@@ -33,6 +34,15 @@ export interface DiagnosticsCounts {
   careerEvents: number;
   players: number;
   latestSnapshotNumber: number | null;
+  /**
+   * Players the save never named, kept out of every list, search and roster.
+   *
+   * Reported HERE and nowhere else, which is the point: it is a fact about the save's missing data
+   * rather than something a manager can act on mid-search, and a placeholder in a results table would
+   * look like a player with a strange name instead.
+   */
+  unresolvedPlayers: number;
+  unresolvedWorldPool: number;
 }
 
 export interface DiagnosticsData {
@@ -67,6 +77,23 @@ export async function collectDiagnostics(): Promise<DiagnosticsData> {
         .get()
     : undefined;
 
+  // Unnamed players, counted rather than shown: the squad and the academy for the active career, and
+  // the world pool it can be scouted from. A player the manager has named himself counts as named.
+  const unnamedSquad = activeCareer
+    ? await db
+        .select({ value: sql<number>`count(*)` })
+        .from(players)
+        .where(and(eq(players.careerId, activeCareer.id), eq(players.nameSource, "unresolved")))
+        .get()
+    : undefined;
+  const unnamedPool = activeCareer
+    ? await db
+        .select({ value: sql<number>`count(*)` })
+        .from(worldPlayers)
+        .where(and(eq(worldPlayers.careerId, activeCareer.id), eq(worldPlayers.nameResolved, false)))
+        .get()
+    : undefined;
+
   return {
     activeCareer,
     careerRows,
@@ -78,6 +105,8 @@ export async function collectDiagnostics(): Promise<DiagnosticsData> {
       careerEvents: await countRows(careerEvents),
       players: await countRows(players),
       latestSnapshotNumber: latestSnapshot?.snapshotNumber ?? null,
+      unresolvedPlayers: unnamedSquad?.value ?? 0,
+      unresolvedWorldPool: unnamedPool?.value ?? 0,
     },
   };
 }

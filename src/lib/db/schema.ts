@@ -1515,3 +1515,109 @@ export const worldPlayerOverrides = sqliteTable(
 );
 
 export type WorldPlayerOverrideRow = typeof worldPlayerOverrides.$inferSelect;
+
+// ============================================================================
+// PLAYER MATCH RATINGS (the save's own performance record, per match)
+// ============================================================================
+//
+// `career_playermatchratinghistory` is the only real performance record the save keeps: one row per
+// player per match, with a rating and the minutes played. It was decoded all along and thrown away, so
+// the app could show a player's overall rating and nothing about how he had actually played.
+//
+// SAVE fact throughout, and REWRITTEN on every sync rather than accumulated. The save owns this table:
+// a row the save no longer lists is a row that should disappear, and an upsert would leave it behind
+// forever. The natural key is the save's own `artificialkey`, which makes the rewrite idempotent.
+//
+// The rating is 0-10 as the save writes it. The meta declares `rangehigh="100"`, which is why it looks
+// like a percentage, but the reference save measures min 4, max 10 - so nothing is scaled on the way in
+// and nothing may be scaled on the way out.
+
+export const playerMatchRatings = sqliteTable(
+  "player_match_ratings",
+  {
+    id: text("id").primaryKey(), // `${careerId}_${artificialKey}`
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    /** `playerid` - the same id space `players.ea_player_id` uses, so a rating joins the squad. */
+    playerId: integer("player_id").notNull(),
+    /** `artificialkey`, the save's own row key. Carried so the row can be replaced in place. */
+    artificialKey: integer("artificial_key").notNull(),
+    /** YYYYMMDD the match was played, as an integer, exactly as the save records it. */
+    date: integer("date").notNull(),
+    /** 0-10. Straight from the save. */
+    rating: integer("rating").notNull(),
+    /** Minutes played, -1 when the save did not record them. */
+    minutes: integer("minutes").notNull(),
+    /** The raw 0-31 position code for that match. Null when the save omits it. */
+    position: integer("position"),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_player_match_ratings_career_id").on(table.careerId),
+    playerDateIdx: index("idx_player_match_ratings_career_player_date").on(
+      table.careerId,
+      table.playerId,
+      table.date
+    ),
+  })
+);
+
+export type PlayerMatchRatingRecord = typeof playerMatchRatings.$inferSelect;
+
+// ============================================================================
+// COMPETITION TEAMS (every division's real record, not just our zeroed one)
+// ============================================================================
+//
+// `leagueteamlinks` carries every club in every division. Our own division has its points and result
+// columns ZEROED by the save, which is why the app can only ever infer our position - but every OTHER
+// division is fully populated, and those are real SAVE facts nobody has been reading.
+//
+// The meta declares no flat wins/draws/losses/goalsfor/goalsagainst column. They arrive as HOME/AWAY
+// PAIRS - `homewins`/`awaywins`, `homedraws`/`awaydraws`, `homelosses`/`awaylosses`, `homegf`/`awaygf`,
+// `homega`/`awayga` - so the sync sums each pair before storing it. `points` is stored as the save
+// writes it rather than recomputed, because the two disagree for national teams.
+//
+// `order_basis` records HOW the table was ordered, which is the whole reason this table is honest:
+// 'SAVE' when `currenttableposition` is a clean 1..N permutation of the division, 'DERIVED' when it is
+// not and the order had to come from points, goal difference and goals for.
+
+export const competitionTeams = sqliteTable(
+  "competition_teams",
+  {
+    id: text("id").primaryKey(), // `${careerId}_${leagueId}_${teamId}`
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    /** `leagueteamlinks.leagueid`. No FK to `leagues`: that table has a composite key. */
+    leagueId: integer("league_id").notNull(),
+    /** `leagueteamlinks.teamid`. */
+    teamId: integer("team_id").notNull(),
+    name: text("name").notNull(),
+    played: integer("played"),
+    won: integer("won"),
+    drawn: integer("drawn"),
+    lost: integer("lost"),
+    goalsFor: integer("goals_for"),
+    goalsAgainst: integer("goals_against"),
+    points: integer("points"),
+    /** `currenttableposition`, stored as the save writes it - sparse, and sometimes shared. */
+    position: integer("position"),
+    /** 'SAVE' when the order above is the save's own 1..N, 'DERIVED' when points had to order it. */
+    orderBasis: text("order_basis").notNull().default("DERIVED"),
+    /** True for the manager's own division, whose record columns the save zeroes. */
+    isOwnLeague: integer("is_own_league", { mode: "boolean" }).notNull().default(false),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_competition_teams_career_id").on(table.careerId),
+    leagueIdx: index("idx_competition_teams_career_league").on(table.careerId, table.leagueId),
+    uniqueLeagueTeam: uniqueIndex("uq_competition_teams_career_league_team").on(
+      table.careerId,
+      table.leagueId,
+      table.teamId
+    ),
+  })
+);
+
+export type CompetitionTeamRow = typeof competitionTeams.$inferSelect;

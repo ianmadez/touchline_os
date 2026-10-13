@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/platform/api-client";
 import { NationFlag } from "./nation-flag";
@@ -105,32 +105,71 @@ export function YouthAcademyPanel({ careerId, query }: { careerId: string; query
   const [rows, setRows] = useState<Prospect[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [namingId, setNamingId] = useState<number | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    apiFetch(`/api/youth?careerId=${encodeURIComponent(careerId)}`, { cache: "no-store" })
-      .then(async (response) => {
-        const body = (await response.json()) as {
-          success?: boolean;
-          prospects?: Prospect[];
-          summary?: Summary;
-          error?: string;
-        };
-        if (cancelled) return;
-        if (!response.ok || !body.success) {
-          setError(body.error ?? `Could not read the academy (${response.status}).`);
-          return;
-        }
-        setRows(body.prospects ?? []);
-        setSummary(body.summary ?? null);
-      })
-      .catch((cause) => {
-        if (!cancelled) setError(String(cause));
+  const load = useCallback(async () => {
+    try {
+      const response = await apiFetch(`/api/youth?careerId=${encodeURIComponent(careerId)}`, {
+        cache: "no-store",
       });
-    return () => {
-      cancelled = true;
-    };
+      const body = (await response.json()) as {
+        success?: boolean;
+        prospects?: Prospect[];
+        summary?: Summary;
+        error?: string;
+      };
+      if (!response.ok || !body.success) {
+        setError(body.error ?? `Could not read the academy (${response.status}).`);
+        return;
+      }
+      setRows(body.prospects ?? []);
+      setSummary(body.summary ?? null);
+      setError(null);
+    } catch (cause) {
+      setError(String(cause));
+    }
   }, [careerId]);
+
+  // Deferred by a tick: setState must not run synchronously inside an effect body.
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  /**
+   * Names a prospect the save cannot.
+   *
+   * The academy is the ONE list where such a player stays visible, which makes this the one place the
+   * manager can do something about it: everywhere else he is absent rather than shown as a placeholder.
+   * Written through the same profile route the dossier uses, so the name is stored the same way and
+   * survives the sync that rewrites every academy row.
+   */
+  const saveName = async (playerId: number) => {
+    const displayName = nameDraft.trim().slice(0, 60);
+    if (displayName.length === 0) return;
+    setSavingName(true);
+    try {
+      const response = await apiFetch("/api/career", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ careerId, playerProfile: { eaPlayerId: playerId, displayName } }),
+      });
+      const body = (await response.json()) as { success?: boolean; error?: string };
+      if (!response.ok || !body.success) {
+        setError(body.error ?? `Could not save that name (${response.status}).`);
+        return;
+      }
+      setNamingId(null);
+      setNameDraft("");
+      await load();
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   if (error) {
     return (
@@ -216,6 +255,64 @@ export function YouthAcademyPanel({ careerId, query }: { careerId: string; query
                 {row.age !== null ? `Age ${row.age}` : "Age unknown"}
               </span>
             </div>
+
+            {/* The one place an unnamed player is still shown, and therefore the one place he can be
+                named. Every other list leaves him out, so "go here to add his name" has to be true. */}
+            {!row.displayName && !row.name && (
+              <div className="mt-3 rounded-xl border border-amber-300/70 bg-amber-50/70 p-3 dark:border-amber-500/40 dark:bg-amber-500/10">
+                {namingId === row.playerId ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="sr-only" htmlFor={`youth-name-${row.playerId}`}>
+                      Name for this prospect
+                    </label>
+                    <input
+                      id={`youth-name-${row.playerId}`}
+                      type="text"
+                      autoFocus
+                      maxLength={60}
+                      value={nameDraft}
+                      onChange={(event) => setNameDraft(event.target.value)}
+                      placeholder="Type his name"
+                      className="min-w-40 flex-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-sans text-xs text-slate-900 focus:border-[#E11D48] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    />
+                    <button
+                      type="button"
+                      disabled={savingName || nameDraft.trim().length === 0}
+                      onClick={() => void saveName(row.playerId)}
+                      className="cursor-pointer rounded-lg bg-[#E11D48] px-3 py-1.5 font-sub text-[10px] font-bold uppercase tracking-wider text-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {savingName ? "Saving" : "Save name"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNamingId(null);
+                        setNameDraft("");
+                      }}
+                      className="cursor-pointer rounded-lg px-2 py-1.5 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-sans text-[11px] leading-relaxed text-amber-900 dark:text-amber-200">
+                      Your save does not name him. Give him one here, and it is kept for this career.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNamingId(row.playerId);
+                        setNameDraft("");
+                      }}
+                      className="cursor-pointer rounded-lg border border-amber-500/60 bg-white px-2.5 py-1.5 font-sub text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:bg-slate-950/40 dark:text-amber-300"
+                    >
+                      Give him a name
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2">
               <span className="flex items-center gap-2">

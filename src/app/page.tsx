@@ -32,6 +32,8 @@ import { BridgePanel } from "@/components/ui/bridge/bridge-panel";
 import type { EnrichedPlayer } from "@/lib/services/squad-service";
 import type { PitchSlotAssignment, TacticalSystemState } from "@/lib/services/tactics-service";
 import type { CareerHydrationPayload, LeagueTeamSummary } from "@/lib/services/career-service";
+import type { PlayerPerformancePayload } from "@/lib/squad/performance";
+import type { OpponentSuggestion } from "@/lib/ui/opponent-suggest";
 import type { SeasonState } from "@/lib/services/season-service";
 import type { PlayerValuation } from "@/lib/services/value-service";
 import { currencySymbolFor } from "@/lib/ui/format";
@@ -248,6 +250,8 @@ export default function TouchlineApp() {
 
   const [seasonState, setSeasonState] = useState<SeasonState | null>(null);
   const [valuations, setValuations] = useState<Record<number, PlayerValuation>>({});
+  const [playerPerformance, setPlayerPerformance] = useState<PlayerPerformancePayload | null>(null);
+  const [suggestedOpponent, setSuggestedOpponent] = useState<OpponentSuggestion | null>(null);
 
   const applyHydration = useCallback((payload: Partial<CareerHydrationPayload>) => {
     if (Array.isArray(payload.players)) setSquad(payload.players);
@@ -257,6 +261,8 @@ export default function TouchlineApp() {
     if (Array.isArray(payload.leagueTeams)) setLeagueTeams(payload.leagueTeams);
     if (payload.seasonState) setSeasonState(payload.seasonState);
     if (payload.valuations) setValuations(payload.valuations);
+    if (payload.playerPerformance) setPlayerPerformance(payload.playerPerformance);
+    setSuggestedOpponent(payload.suggestedOpponent ?? null);
     if (typeof payload.formationId === "string" && payload.formationId) {
       setFormationId(payload.formationId);
     }
@@ -300,6 +306,8 @@ export default function TouchlineApp() {
     setLeagueTeams,
     setSeasonState,
     setValuations,
+    setPlayerPerformance,
+    setSuggestedOpponent,
     setFormationId,
     setFormations,
     setActiveFormationLabel,
@@ -1700,6 +1708,7 @@ export default function TouchlineApp() {
                 inGameDate={careerInfo?.inGameDate ?? null}
                 onSelectPlayer={(player) => setSelectedPlayer(player)}
                 currencySymbol={currencySymbolFor(appSettings?.currencySymbol)}
+                playerPerformance={playerPerformance}
               />
             )}
           </div>
@@ -1724,6 +1733,7 @@ export default function TouchlineApp() {
             players={squad}
             recentEvents={timeline}
             leagueTeams={leagueTeams}
+            suggestedOpponent={suggestedOpponent}
             clubName={careerInfo.clubName}
             inGameDate={careerInfo.inGameDate}
             seasonNumber={seasonState?.outlook?.seasonNumber ?? null}
@@ -1765,6 +1775,7 @@ export default function TouchlineApp() {
         key={selectedPlayer?.id ?? "no-player"}
         player={selectedPlayer}
         valuation={selectedPlayer ? valuations[selectedPlayer.eaPlayerId] : undefined}
+        performance={selectedPlayer ? (playerPerformance?.byPlayer[selectedPlayer.id] ?? null) : null}
         inGameDate={careerInfo?.inGameDate ?? null}
         onClose={() => setSelectedPlayer(null)}
         onSaveProfile={handleSavePlayerProfile}

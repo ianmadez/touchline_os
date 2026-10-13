@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import type { EnrichedPlayer } from "@/lib/services/squad-service";
+import type { PlayerPerformancePayload } from "@/lib/squad/performance";
 import { SubTabs, type SubTabOption } from "@/components/ui/sub-tabs";
 import { ScoutingMemoryPanel } from "@/components/ui/squad/scouting-memory-panel";
 import { IconSearch } from "@/components/ui/icons";
@@ -39,6 +40,7 @@ export function SquadView({
   inGameDate = null,
   onSelectPlayer,
   currencySymbol = "£",
+  playerPerformance = null,
 }: {
   careerId: string | null;
   players: EnrichedPlayer[];
@@ -46,6 +48,8 @@ export function SquadView({
   inGameDate?: string | null;
   onSelectPlayer: (player: EnrichedPlayer) => void;
   currencySymbol?: string;
+  /** The season's per-player match record, for the table's match-stats mode. */
+  playerPerformance?: PlayerPerformancePayload | null;
 }) {
   const [subTab, setSubTab] = useState<SquadSubTab>("SQUAD");
   const [query, setQuery] = useState("");
@@ -101,6 +105,7 @@ export function SquadView({
               players={visiblePlayers}
               inGameDate={inGameDate}
               onSelectPlayer={onSelectPlayer}
+              playerPerformance={playerPerformance}
             />
           </div>
         </>

@@ -110,10 +110,30 @@ export function DatePicker({
   const wrapper = useRef<HTMLDivElement | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
 
+  /**
+   * Whether the grid hangs below the field or above it.
+   *
+   * Decided WHEN IT OPENS rather than from a class, because whether there is room below depends on
+   * where the field is on screen at that moment. The dossier is the case that forced this: its panel is
+   * a scroll container, so a field near the bottom of it opened a calendar downwards into space that
+   * was not there, and the reader had to scroll to see a control they had just opened.
+   *
+   * The measurement happens in the click handler, not in an effect, which is also why this does not
+   * fight the rule against setting state inside one.
+   */
+  const [opensUpward, setOpensUpward] = useState(false);
+
   // Reopening lands on the month of the value, which is what a reader expects after picking one.
   const openCalendar = () => {
     const anchor = selected ?? today;
     setView({ year: anchor.year, month: anchor.month });
+    const rect = trigger.current?.getBoundingClientRect() ?? null;
+    if (rect) {
+      // The panel is about 24rem tall including its header and footer; below that and it will not fit.
+      const PANEL_HEIGHT = 384;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      setOpensUpward(spaceBelow < PANEL_HEIGHT && rect.top > spaceBelow);
+    }
     setOpen(true);
   };
 
@@ -205,7 +225,9 @@ export function DatePicker({
           role="dialog"
           aria-modal="false"
           aria-label="Choose a date"
-          className="animate-panel-in absolute left-0 top-[calc(100%+0.5rem)] z-50 w-[19rem] rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/95"
+          className={`animate-panel-in absolute left-0 z-50 w-[19rem] rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/95 ${
+            opensUpward ? "bottom-[calc(100%+0.5rem)]" : "top-[calc(100%+0.5rem)]"
+          }`}
         >
           {/* Header: the month, with a year that can be stepped on its own so a career can jump a season. */}
           <div className="flex items-center justify-between gap-1">

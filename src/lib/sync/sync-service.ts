@@ -17,6 +17,8 @@ import {
   transferDeals,
   worldPlayers,
   youthProspects,
+  playerMatchRatings,
+  competitionTeams,
 } from "../db/schema";
 import {
   SaveCandidate,
@@ -261,6 +263,28 @@ export class SyncService {
         ? leagueLinks.filter((link) => Number(link.leagueid) === ownLeagueId).length
         : null;
 
+    /**
+     * A finite number, or null. Declared here rather than inside the transaction because the
+     * background-division block below runs before the point where it used to be declared, and a
+     * `const` in the same scope is in its temporal dead zone until its own line executes.
+     */
+    const asNumber = (value: unknown): number | null =>
+      typeof value === "number" && Number.isFinite(value) ? value : null;
+
+    /**
+     * `teams.teamid` -> `teamname`, for every club the save names.
+     *
+     * Built ONCE and used by both the background-division block (which runs before the snapshot hash
+     * check) and the own-division block (which runs after it). A second copy of this loop would be a
+     * second place for the two to disagree about what a club is called.
+     */
+    const leagueTeamNames = new Map<number, string>();
+    for (const team of (rawData.extractedTables.teams || []) as Array<Record<string, unknown>>) {
+      const id = asNumber(team.teamid);
+      const name = typeof team.teamname === "string" ? team.teamname.trim() : "";
+      if (id !== null && name) leagueTeamNames.set(id, name);
+    }
+
     // 3. Execute atomic synchronous transaction through the storage port
     // The world pool's bands are fitted out here, not inside the transaction below.
     const worldPoolValues = await this.buildWorldPool(careerId, rawData.worldPlayers ?? []);
@@ -398,6 +422,133 @@ export class SyncService {
         for (let at = 0; at < worldPoolValues.length; at += CHUNK) {
           tx.insert(worldPlayers)
             .values(worldPoolValues.slice(at, at + CHUNK))
+            .run();
+        }
+      }
+
+      // --- Player match ratings (a SAVE fact, career-scoped) -----------------------------------
+      //
+      // The one real performance record in the file: one row per player per match. It was decoded all
+      // along and thrown away, so no screen could say how a player had actually been playing.
+      //
+      // Written in the SAME place as the league catalogue and the world pool, and for the same reason:
+      // it is reference data derived from the save, it creates no snapshot and emits no event, so an
+      // existing career self-heals on its next sync WITHOUT a SYNC_PIPELINE_VERSION bump. A bump folds
+      // into the payload hash and would force a new snapshot purely to populate a table.
+      //
+      // Rebuilt every sync rather than upserted. The save owns this list: a match the save no longer
+      // carries should disappear, and an upsert would leave it behind forever.
+      //
+      // DE-DUPLICATED BY KEY, because the same row can be decoded out of more than one database block -
+      // the same reason the world pool keeps the first occurrence of each player. The save's own
+      // `artificialkey` is the key when it decoded; when it did not (it reads 0), the row is keyed on
+      // the player, the date and the position it records instead, so two matches on one day stay two
+      // rows rather than one.
+      tx.delete(playerMatchRatings).where(eq(playerMatchRatings.careerId, careerId)).run();
+      const ratingRowsById = new Map<string, typeof playerMatchRatings.$inferInsert>();
+      for (const entry of rawData.playerMatchRatings ?? []) {
+        const suffix =
+          entry.artificialKey > 0
+            ? String(entry.artificialKey)
+            : `${entry.playerId}_${entry.date}_${entry.position ?? "x"}`;
+        ratingRowsById.set(`${careerId}_${suffix}`, {
+          id: `${careerId}_${suffix}`,
+          careerId,
+          playerId: entry.playerId,
+          artificialKey: entry.artificialKey,
+          date: entry.date,
+          rating: entry.rating,
+          minutes: entry.minutes,
+          position: entry.position,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      {
+        const ratingRows = [...ratingRowsById.values()];
+        const CHUNK = 30;
+        for (let at = 0; at < ratingRows.length; at += CHUNK) {
+          tx.insert(playerMatchRatings)
+            .values(ratingRows.slice(at, at + CHUNK))
+            .run();
+        }
+      }
+
+      // --- Every division's real record (a SAVE fact, career-scoped) ---------------------------
+      //
+      // `leagueteamlinks` carries every club in every division. Our OWN division has its points and
+      // result columns zeroed by the save, which is why the app can only ever infer our position - but
+      // every OTHER division is fully populated, and none of it has ever been read.
+      //
+      // Written before the hash check for the same reason as the two blocks above: reference data, no
+      // snapshot, no event, so an existing career self-heals with no pipeline bump.
+      //
+      // The statistics arrive as HOME/AWAY PAIRS, not flat columns - the meta has no `wins`, only
+      // `homewins` and `awaywins` - so each pair is SUMMED here. `points` is stored as the save writes
+      // it rather than recomputed from wins and draws: the two disagree for national teams, and the
+      // save's own figure is the one to stand behind.
+      //
+      // `order_basis` is what keeps the table honest. When `currenttableposition` forms a clean 1..N
+      // permutation of the division the order is the SAVE's own and says so; when it does not (4th,
+      // 8th, 15th, 18th and 20th each held by two clubs on the reference career) the order has to come
+      // from points and is marked DERIVED.
+      const catalogueLeagueIds = new Set(
+        rawData.leagueDirectory
+          .filter((league) => !league.isWomenCompetition || league.leagueId === ownLeagueForFilter)
+          .map((league) => league.leagueId)
+      );
+      if (catalogueLeagueIds.size > 0 && leagueLinks.length > 0) {
+        tx.delete(competitionTeams).where(eq(competitionTeams.careerId, careerId)).run();
+
+        const linksByLeague = new Map<number, Array<Record<string, unknown>>>();
+        for (const link of leagueLinks) {
+          const leagueId = asNumber(link.leagueid);
+          if (leagueId === null || !catalogueLeagueIds.has(leagueId)) continue;
+          const list = linksByLeague.get(leagueId) ?? [];
+          list.push(link);
+          linksByLeague.set(leagueId, list);
+        }
+
+        const competitionValues: (typeof competitionTeams.$inferInsert)[] = [];
+        for (const [leagueId, links] of linksByLeague) {
+          const positions = links
+            .map((link) => asNumber(link.currenttableposition))
+            .filter((value): value is number => value !== null && value > 0)
+            .sort((a, b) => a - b);
+          const clean =
+            positions.length === links.length &&
+            positions.every((value, index) => value === index + 1);
+
+          for (const link of links) {
+            const teamId = asNumber(link.teamid);
+            const name = teamId !== null ? leagueTeamNames.get(teamId) : undefined;
+            if (teamId === null || !name) continue;
+            const sum = (home: string, away: string): number =>
+              (asNumber(link[home]) ?? 0) + (asNumber(link[away]) ?? 0);
+            competitionValues.push({
+              id: `${careerId}_${leagueId}_${teamId}`,
+              careerId,
+              leagueId,
+              teamId,
+              name,
+              played: asNumber(link.nummatchesplayed),
+              won: sum("homewins", "awaywins"),
+              drawn: sum("homedraws", "awaydraws"),
+              lost: sum("homelosses", "awaylosses"),
+              goalsFor: sum("homegf", "awaygf"),
+              goalsAgainst: sum("homega", "awayga"),
+              points: asNumber(link.points),
+              position: asNumber(link.currenttableposition),
+              orderBasis: clean ? "SAVE" : "DERIVED",
+              isOwnLeague: leagueId === ownLeagueId,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        }
+
+        const CHUNK = 30;
+        for (let at = 0; at < competitionValues.length; at += CHUNK) {
+          tx.insert(competitionTeams)
+            .values(competitionValues.slice(at, at + CHUNK))
             .run();
         }
       }
@@ -902,8 +1053,6 @@ export class SyncService {
       // game's own best-plausible finish. Those are real SAVE facts about where we sit, and they
       // seed the position inference instead of making the manager guess from nothing.
       const ownLink = leagueLinks.find((link) => Number(link.teamid) === clubId);
-      const asNumber = (value: unknown): number | null =>
-        typeof value === "number" && Number.isFinite(value) ? value : null;
       const savePosition = ownLink ? asNumber(ownLink.currenttableposition) : null;
       if (savePosition !== null && savePosition > 0) {
         tx.insert(leaguePositions)
@@ -943,12 +1092,7 @@ export class SyncService {
       // Recording it is what lets the debrief screen offer the actual clubs the manager plays
       // against rather than a free-text box, and lets a picked club carry a stable id into the
       // record instead of whichever spelling was typed.
-      const teamNames = new Map<number, string>();
-      for (const team of (rawData.extractedTables.teams || []) as Array<Record<string, unknown>>) {
-        const id = asNumber(team.teamid);
-        const name = typeof team.teamname === "string" ? team.teamname.trim() : "";
-        if (id !== null && name) teamNames.set(id, name);
-      }
+      const teamNames = leagueTeamNames;
 
       if (typeof ownLeagueId === "number") {
         for (const link of leagueLinks) {

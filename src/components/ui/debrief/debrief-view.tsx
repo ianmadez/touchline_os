@@ -11,6 +11,7 @@ import type { LeagueTeamSummary } from "@/lib/services/career-service";
 import { resultLabel, venueLabel } from "@/lib/ui/labels";
 import { ordinal } from "@/lib/ui/format";
 import { OPPONENT_SORT_ORDERS, orderTeams } from "@/lib/ui/opponent-list";
+import type { OpponentSuggestion } from "@/lib/ui/opponent-suggest";
 import { MatchContribution } from "@/lib/events/types";
 import { POSITION_GROUP_ORDER, positionGroupOf } from "@/lib/tactics/roles";
 import {
@@ -45,6 +46,11 @@ interface DebriefViewProps {
   recentEvents: ParsedCareerEvent[];
   /** The clubs in the manager's own division, so an opponent can be picked rather than typed. */
   leagueTeams?: LeagueTeamSummary[];
+  /**
+   * The club most likely to be next, worked out from the debriefs already logged. Offered as a
+   * suggestion only: the save carries no fixture list, so the manager can always change it.
+   */
+  suggestedOpponent?: OpponentSuggestion | null;
   /** Our own club name, so the scoreline can name both sides. */
   clubName?: string;
   /** The save's current in-game date, used to seed the match date. */
@@ -331,6 +337,7 @@ export function DebriefView({
   players,
   recentEvents,
   leagueTeams = NO_LEAGUE_TEAMS,
+  suggestedOpponent = null,
   clubName = "",
   inGameDate = null,
   seasonNumber = null,
@@ -339,6 +346,13 @@ export function DebriefView({
   const [subTab, setSubTab] = useState<DebriefSubTab>("MATCH");
   const [opponent, setOpponent] = useState("");
   const [opponentTeamId, setOpponentTeamId] = useState<string>("");
+  /**
+   * The suggestion already acted on, so it is offered once and never re-applied.
+   *
+   * The pre-fill below only ever fills an EMPTY, unedited form: a suggestion that came back after the
+   * manager had picked a club, or cleared the field on purpose, must not overwrite him.
+   */
+  const appliedSuggestion = useRef<number | null>(null);
   // Scores are held as typed text so the boxes can be empty. See `ScoreBox`.
   const [ourScoreInput, setOurScoreInput] = useState("");
   const [theirScoreInput, setTheirScoreInput] = useState("");
@@ -605,6 +619,32 @@ export function DebriefView({
   const orderedTeams = orderTeams(selectableTeams, opponentSort);
 
   const selectedTeam = selectableTeams.find((team) => String(team.teamId) === opponentTeamId);
+
+  /**
+   * The suggestion is offered once, into an empty form.
+   *
+   * Deferred by a tick because a synchronous setState inside an effect body is a lint error in this
+   * codebase, and because the payload that carries the suggestion can land after this form has already
+   * mounted: a manager who opens Debrief first would otherwise never be offered it. It never overwrites
+   * an existing pick, and it is remembered in a ref so clearing the field on purpose does not bring the
+   * suggestion back.
+   */
+  useEffect(() => {
+    if (!suggestedOpponent) return;
+    if (appliedSuggestion.current === suggestedOpponent.teamId) return;
+    if (editingId !== null || opponentTeamId !== "") {
+      appliedSuggestion.current = suggestedOpponent.teamId;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      appliedSuggestion.current = suggestedOpponent.teamId;
+      setOpponentTeamId(String(suggestedOpponent.teamId));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [suggestedOpponent, editingId, opponentTeamId]);
+
+  const showingSuggestion =
+    suggestedOpponent !== null && opponentTeamId === String(suggestedOpponent.teamId);
   // A typed name wins, so a club outside the division can still be recorded.
   const typedOpponent = opponent.trim();
   const opponentLabel = resolveOpponentName(typedOpponent, leagueTeams, opponentTeamId);
@@ -1304,6 +1344,13 @@ export function DebriefView({
                   onChange={(e) => setOpponent(e.target.value)}
                   className="mt-2 w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#E11D48]"
                 />
+              )}
+              {showingSuggestion && suggestedOpponent && (
+                <p className="mt-1.5 font-sans text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
+                  Suggested: {suggestedOpponent.name}, {suggestedOpponent.reason}. Worked out from the
+                  debriefs you have logged, because your save carries no fixture list - change it if it
+                  is wrong.
+                </p>
               )}
             </div>
 

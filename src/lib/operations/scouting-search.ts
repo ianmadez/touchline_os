@@ -139,7 +139,6 @@ export async function searchScoutPool(
       position: params.get("position") || null,
       strategy,
       query: params.get("query") ?? "",
-      includeUnnamed: params.get("includeUnnamed") === "true",
       minRating: number("minRating"),
       maxAge: number("maxAge"),
       page: number("page") ?? 0,

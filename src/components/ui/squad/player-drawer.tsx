@@ -14,6 +14,10 @@ import { PlayerFace } from "./player-face";
 import { NationFlag } from "./nation-flag";
 import { AttributeBars } from "./attribute-bars";
 import type { PlayerValuation } from "@/lib/services/value-service";
+import type { PlayerPerformance } from "@/lib/squad/performance";
+import { MIN_RATINGS_FOR_TREND } from "@/lib/squad/performance";
+import { RatingBadge, RatingSparkline } from "./rating-sparkline";
+import { venueLabel } from "@/lib/ui/labels";
 import { formatMoney, formatMoneyExact } from "@/lib/ui/format";
 import {
   INJURY_DURATION_PRESETS,
@@ -29,6 +33,12 @@ interface PlayerDrawerProps {
    * estimated from agreed transfer fees in this career and is labelled as an estimate on the card.
    */
   valuation?: PlayerValuation;
+  /**
+   * This season's record for him: the save's own match ratings, and the goals and assists the manager
+   * logged. Absent when the career predates the feature, which reads as "nothing recorded yet" rather
+   * than as zeroes.
+   */
+  performance?: PlayerPerformance | null;
   /** The save's own clock, which every injury return date is measured against. */
   inGameDate?: string | null;
   onClose: () => void;
@@ -51,6 +61,7 @@ interface PlayerDrawerProps {
 export function PlayerDrawer({
   player,
   valuation,
+  performance = null,
   inGameDate = null,
   onClose,
   onSaveProfile,
@@ -618,6 +629,123 @@ export function PlayerDrawer({
               </div>
             </div>
           </div>
+
+          {/*
+            The match record, above the raw attributes: what he has actually done this season is the
+            thing a manager opens a dossier to find out, and the face stats below it are reference.
+            The save supplies the ratings; the manager supplies the goals and assists, because the save
+            records no scorer for anything.
+          */}
+          {performance ? (
+            <section className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+              <div className="mb-3 flex items-baseline justify-between gap-2">
+                <h3 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
+                  Match record
+                </h3>
+                {performance.appearances > 0 && (
+                  <span className="font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    {performance.appearances} rated {performance.appearances === 1 ? "match" : "matches"} ·{" "}
+                    {performance.minutes} mins
+                  </span>
+                )}
+              </div>
+
+              {performance.ratings.length >= MIN_RATINGS_FOR_TREND ? (
+                <RatingSparkline ratings={performance.ratings} />
+              ) : (
+                <p className="font-sans text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                  {performance.ratings.length === 0
+                    ? "Your save has not rated him in a match yet."
+                    : `${performance.ratings.length} rated ${performance.ratings.length === 1 ? "match" : "matches"} so far. Three is where a run of form becomes readable, so no line is drawn yet.`}
+                </p>
+              )}
+
+              <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+                <div>
+                  <dt className="font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Average
+                  </dt>
+                  <dd className="mt-1">
+                    {performance.averageRating === null ? (
+                      <span className="font-sub text-xs text-slate-400 dark:text-slate-500">-</span>
+                    ) : (
+                      <RatingBadge rating={performance.averageRating} />
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt
+                    className="font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                    title="Goals you logged in a match debrief. The save records no scorer."
+                  >
+                    Goals
+                  </dt>
+                  <dd className="mt-1 font-heading text-lg tabular-nums text-slate-900 dark:text-slate-100">
+                    {performance.goals}
+                  </dd>
+                </div>
+                <div>
+                  <dt
+                    className="font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                    title="Assists you logged in a match debrief."
+                  >
+                    Assists
+                  </dt>
+                  <dd className="mt-1 font-heading text-lg tabular-nums text-slate-900 dark:text-slate-100">
+                    {performance.assists}
+                  </dd>
+                </div>
+              </dl>
+
+              {performance.recentMatches.length > 0 && (
+                <ul className="mt-3 space-y-1.5 border-t border-slate-200 pt-3 dark:border-slate-800">
+                  {performance.recentMatches.map((match) => (
+                    <li
+                      key={`${match.date}-${match.rating}`}
+                      className="flex items-center justify-between gap-3"
+                    >
+                      <span className="min-w-0 font-sans text-xs text-slate-700 dark:text-slate-200">
+                        <span className="tabular-nums text-slate-500 dark:text-slate-400">
+                          {match.date}
+                        </span>{" "}
+                        <span className="truncate">
+                          {match.opponent ?? "Opponent not logged"}
+                        </span>
+                        {match.venue && (
+                          <span className="ml-1.5 font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                            {venueLabel(match.venue)}
+                          </span>
+                        )}
+                        {match.scoreline && (
+                          <span className="ml-1.5 font-sub text-[10px] tabular-nums text-slate-400 dark:text-slate-500">
+                            {match.scoreline}
+                          </span>
+                        )}
+                      </span>
+                      <RatingBadge rating={match.rating} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {performance.recentMatches.some((match) => match.opponent === null) && (
+                <p className="mt-2 font-sans text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
+                  A match the save rated but you did not log shows the rating on its own, because the
+                  opponent, the venue and the score exist only in a debrief.
+                </p>
+              )}
+            </section>
+          ) : (
+            <section className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+              <h3 className="mb-2 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
+                Match record
+              </h3>
+              <p className="font-sans text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                Nothing recorded for him this season yet. Your save supplies the match ratings; your own
+                debriefs supply the goals and assists.
+              </p>
+            </section>
+          )}
 
           {/* Every face stat, grouped as the game groups them, BELOW the notebook. The card is what
               the manager acts on; the numbers are reference he consults after it. Read from the

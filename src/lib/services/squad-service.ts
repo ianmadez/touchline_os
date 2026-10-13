@@ -32,6 +32,16 @@ export interface EnrichedPlayer {
   wage: number;
   wageProvenance: Provenance;
   /**
+   * The save's own name provenance, and whether a usable name exists at all.
+   *
+   * `nameResolved` is false only when the save never named him AND the manager has not named him
+   * either. Every list, search and roster treats a false here as "not a player you can be shown", so
+   * the two have to be read together rather than from `name` alone - a placeholder name is a string
+   * like any other.
+   */
+  nameSource: string | null;
+  nameResolved: boolean;
+  /**
    * Player match form, read directly from save `teamplayerlinks.form`.
    *
    * SAVE fact. The schema declares this field 0-5 (`rangehigh="5"`), and 0 means the game recorded
@@ -190,6 +200,11 @@ export class SquadService {
       return {
         ...player,
         form: player.form,
+        // A placeholder name (`#12345`) is a string like any other, so "does he have a name" cannot be
+        // answered by looking at `name`. The save's own flag decides it, and a name the manager typed
+        // counts exactly as much as one the save carried.
+        nameSource: player.nameSource,
+        nameResolved: player.nameSource !== "unresolved" || Boolean(profile?.displayName),
         // A user override wins, then the derived role. Falls back to UNKNOWN (not SUB) so an
         // unmapped code stays visible and fixable instead of masquerading as a real substitute.
         primaryPosition: profile?.primaryPosition || player.primaryPosition || UNKNOWN_POSITION,
@@ -264,6 +279,10 @@ export class SquadService {
       nationality: p.nationality,
       wage: p.wage,
       wageProvenance: p.wageProvenance as Provenance,
+      // A snapshot carries the name it was synced with. `name_source` travels on the row for the same
+      // reason, so a historical squad answers "did the save name him" the same way the live one does.
+      nameSource: p.nameSource,
+      nameResolved: p.nameSource !== "unresolved",
       form: p.form,
       contractValidUntil: p.contractValidUntil,
       injury: p.injury,

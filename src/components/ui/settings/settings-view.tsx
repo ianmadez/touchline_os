@@ -50,6 +50,9 @@ export interface Diagnostics {
     careerEvents: number;
     players: number;
     latestSnapshotNumber: number | null;
+    /** Players your save never named. Kept out of every list and search; shown here as a count. */
+    unresolvedPlayers: number;
+    unresolvedWorldPool: number;
   };
   careers: Array<{
     careerId: string;
@@ -551,6 +554,28 @@ export function SettingsView({
                   <dt className="text-slate-500 dark:text-slate-400">Snapshot rows</dt>
                   <dd className="font-bold text-slate-900 dark:text-slate-100 tabular-nums">
                     {diagnostics.counts.playerSnapshots}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                  <dt
+                    className="text-slate-500 dark:text-slate-400"
+                    title="Your save carries no name for these players, so they are left out of every list, search and roster. The count is here rather than on the screen they were left out of."
+                  >
+                    Unnamed in your squad
+                  </dt>
+                  <dd className="font-bold text-slate-900 dark:text-slate-100 tabular-nums">
+                    {diagnostics.counts.unresolvedPlayers}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-1.5">
+                  <dt
+                    className="text-slate-500 dark:text-slate-400"
+                    title="Players in the scouting pool whose name your save does not hold. Only the name is missing - ratings, club, age and the full dossier are intact."
+                  >
+                    Unnamed in your save
+                  </dt>
+                  <dd className="font-bold text-slate-900 dark:text-slate-100 tabular-nums">
+                    {diagnostics.counts.unresolvedWorldPool}
                   </dd>
                 </div>
                 <div className="sm:col-span-2 font-mono text-[10px] text-slate-500 dark:text-slate-400 break-all">

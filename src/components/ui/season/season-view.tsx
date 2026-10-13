@@ -8,6 +8,7 @@ import { SeasonPanel } from "@/components/ui/dashboard/season-panel";
 import { SeasonVaultView } from "./season-vault-view";
 import { TrophyCabinet } from "./trophy-cabinet";
 import { BoardObjectivesPanel } from "./board-objectives-panel";
+import { DivisionTablesPanel } from "./division-tables-panel";
 
 import { apiFetch } from "@/lib/platform/api-client";
 interface SeasonViewProps {
@@ -202,6 +203,16 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
             />
             <PointsBySeasonChart seasons={completedSeasons} current={outlook} />
             <FinishBySeasonChart seasons={completedSeasons} />
+            {/* Background divisions last: the charts above are the manager's own season, and these are
+                what the rest of the world was doing at the same moment. */}
+            {careerId ? (
+              <DivisionTablesPanel careerId={careerId} />
+            ) : (
+              <EmptyCard
+                title="No career synced yet"
+                body="Sync a save from the Portal and the other divisions in it appear here."
+              />
+            )}
           </div>
         )}
 

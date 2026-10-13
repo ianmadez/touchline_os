@@ -545,6 +545,34 @@ export interface PresignedDeal {
   isExchangePlayer: boolean;
 }
 
+/**
+ * One row of the save's per-player match rating history (`career_playermatchratinghistory`).
+ *
+ * This is the only real performance record the save keeps, and until now it was decoded and thrown
+ * away. Every value is a SAVE fact read straight from the file:
+ *
+ *   - `rating` is measured on a 0-10 scale, NOT 0-100. The meta declares `rangehigh="100"`, which is
+ *     why it looks like a percentage, but the reference save holds min 4, max 10, mean 6.64. Nothing
+ *     is converted on the way in.
+ *   - `minutes` runs -1 to 140. A row under 15 minutes is a cameo, so any form reading needs a floor.
+ *   - `position` is the raw 0-31 EA position code, the same space `players.position` uses.
+ *   - `date` is YYYYMMDD, the in-game day the match was played.
+ */
+export interface PlayerMatchRatingRow {
+  /** `artificialkey`, the save's own primary key for the row. Stable across syncs. */
+  artificialKey: number;
+  /** `playerid` - the same id space `players` and `world_players` use. */
+  playerId: number;
+  /** YYYYMMDD the match was played, as the save records it. */
+  date: number;
+  /** 0-10, straight from the save. Never scaled. */
+  rating: number;
+  /** Minutes played, -1 when the save did not record them. */
+  minutes: number;
+  /** The raw 0-31 position code for that match. */
+  position: number | null;
+}
+
 export interface ParseOptions {
   /** Contents of the meta XML, already read. Absent means names/fields decode as unknown. */
   metaXml?: string | null;
@@ -610,6 +638,14 @@ export interface SpikeCareerData extends RawCareerData {
   leagueDirectory: LeagueEntry[];
   /** Agreed transfers across the whole save - the evidence base for any value estimate. */
   presignedDeals: PresignedDeal[];
+  /**
+   * The save's per-player match rating history.
+   *
+   * Deliberately NOT part of `extractedTables`: that object is folded into the sync payload hash, so
+   * carrying it there would make hashing do work it has no reason to do - the same reason the world
+   * pool is handed back rather than stored.
+   */
+  playerMatchRatings: PlayerMatchRatingRow[];
   warnings: string[];
   parseMs: number;
 }

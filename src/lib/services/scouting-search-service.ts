@@ -172,15 +172,6 @@ export interface ScoutSearchQuery {
   position: string | null;
   strategy: ScoutStrategy;
   query: string;
-  /**
-   * Include players whose name is not stored in the save.
-   *
-   * OFF by default, and that default is the product decision: a name search cannot find them at all,
-   * and a results table where rows read "name not in this save" looks broken rather than useful. They
-   * remain a legitimate thing to want - a 93-rated 20-year-old with no name is still a real player -
-   * so they are one explicit toggle away rather than gone.
-   */
-  includeUnnamed: boolean;
   minRating: number | null;
   maxAge: number | null;
   page: number;
@@ -360,21 +351,15 @@ export class ScoutingSearchService {
     const trimmed = input.query.trim();
     if (trimmed) {
       filters.push(like(worldPlayers.name, `%${trimmed}%`));
-      // Enforced in SQL rather than filtered afterwards, so the count is honest. A text query can
-      // never match an unnamed player, so this applies whether or not unnamed rows are enabled.
-      filters.push(eq(worldPlayers.nameResolved, true));
-      notes.push(
-        "Matching names only. Players whose name is not stored in the save cannot match a name search - every other filter still finds them."
-      );
-    } else if (input.includeUnnamed) {
-      notes.push(
-        "Including players whose name is not stored in the save. Only the name is missing for them - rating, club, age and the full dossier are intact."
-      );
-    } else {
-      filters.push(eq(worldPlayers.nameResolved, true));
-      notes.push(
-        "Players whose name is not stored in the save are excluded. Turn on \"Show unnamed players\" to include them."
-      );
+    }
+    // Enforced in SQL rather than filtered afterwards, so the count in the header is honest, and
+    // applied whether or not a text query was given: a row whose name the save does not hold is a
+    // placeholder where a name should be, and a results table is a list of players to act on. The
+    // number left out is reported in diagnostics rather than here, because it is a fact about the
+    // save's missing data, not about this search.
+    filters.push(eq(worldPlayers.nameResolved, true));
+    if (trimmed) {
+      notes.push("Matching names only, and only players your save actually names.");
     }
 
     if (input.budget !== null && input.budget > 0) {

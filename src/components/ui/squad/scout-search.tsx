@@ -133,7 +133,6 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
   const [strategy, setStrategy] = useState<ScoutStrategy>("BALANCED");
   const [budgetInput, setBudgetInput] = useState("");
   const [position, setPosition] = useState("");
-  const [includeUnnamed, setIncludeUnnamed] = useState(false);
   const [minRating, setMinRating] = useState("");
   const [maxAge, setMaxAge] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -162,7 +161,6 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
       if (budgetInput.trim() !== "") params.set("budget", budgetInput.trim());
       if (position) params.set("position", position);
       if (query.trim()) params.set("query", query.trim());
-      if (includeUnnamed) params.set("includeUnnamed", "true");
       if (minRating.trim()) params.set("minRating", minRating.trim());
       if (maxAge.trim()) params.set("maxAge", maxAge.trim());
 
@@ -185,7 +183,7 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
     } finally {
       setLoading(false);
     }
-  }, [careerId, strategy, page, budgetInput, position, query, includeUnnamed, minRating, maxAge]);
+  }, [careerId, strategy, page, budgetInput, position, query, minRating, maxAge]);
 
   // Deferred by a tick: setState must not run synchronously inside an effect body.
   useEffect(() => {
@@ -200,7 +198,7 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
   useEffect(() => {
     const timer = window.setTimeout(() => setPage(0), 0);
     return () => window.clearTimeout(timer);
-  }, [strategy, budgetInput, position, query, includeUnnamed, minRating, maxAge]);
+  }, [strategy, budgetInput, position, query, minRating, maxAge]);
 
   const openDossier = useCallback(
     async (eaPlayerId: number) => {
@@ -446,23 +444,9 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
             </div>
           )}
 
-          {/* Off by default: a table of rows reading "name not in this save" looks broken, and a
-              name search cannot find them anyway. Opt in only when digging for them deliberately. */}
-          <label className="flex cursor-pointer items-start gap-2.5 border-t border-slate-200 pt-3 dark:border-slate-800">
-            <input
-              type="checkbox"
-              checked={includeUnnamed}
-              onChange={(event) => setIncludeUnnamed(event.target.checked)}
-              className="mt-0.5 h-3.5 w-3.5 cursor-pointer accent-[#E11D48]"
-            />
-            <span className="font-sans text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
-              Show unnamed players
-              <span className="mt-0.5 block text-[10px] text-slate-500 dark:text-slate-400">
-                Some players in the save have no name stored. They are real players with full ratings
-                and attributes, but a name search can never find them.
-              </span>
-            </span>
-          </label>
+        {/* A player whose name the save does not hold is not offered here at all. A results table is a
+            list of players to act on, and a row reading "name not in this save" is a placeholder where
+            a name should be. How many were left out is reported in diagnostics instead. */}
         </section>
 
         {/* ---- Results ------------------------------------------------------------------ */}

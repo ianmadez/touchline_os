@@ -26,6 +26,7 @@ import {
   type LeagueEntry,
   type MatchResult,
   type ParseOptions,
+  type PlayerMatchRatingRow,
   type Row,
   type SaveCandidate,
   type SaveFact,
@@ -2985,7 +2986,33 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       });
     }
 
+    /**
+     * The per-match rating history, handed back rather than left in `extractedTables`.
+     *
+     * Decoded once, far above, because the in-game date needs its `date` column. A row is dropped only
+     * when it names no player, carries no date, or carries no rating - each of which makes it
+     * unusable downstream. The minutes are kept exactly as the save wrote them, including the `-1`
+     * the meta allows, so the "this was a cameo" floor is applied by the reader that knows what it is
+     * reading rather than being silently rewritten here.
+     */
+    const playerMatchRatings: PlayerMatchRatingRow[] = [];
+    for (const row of ratings) {
+      const playerId = num(row, "playerid");
+      const date = num(row, "date");
+      const rating = num(row, "rating");
+      if (playerId === null || date === null || rating === null) continue;
+      playerMatchRatings.push({
+        artificialKey: num(row, "artificialkey") ?? 0,
+        playerId,
+        date,
+        rating,
+        minutes: num(row, "minsplayed") ?? -1,
+        position: num(row, "position"),
+      });
+    }
+
     const rated = squadSample.filter((entry) => entry.overall !== null);
+
     facts.push({
       provenance: SAVE_PROVENANCE,
       source: "teamplayerlinks (teamid = club)",
@@ -3205,6 +3232,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       seasonHistory,
       leagueDirectory,
       presignedDeals,
+      playerMatchRatings,
       warnings,
       parseMs: Math.round(performance.now() - startedAt),
     };

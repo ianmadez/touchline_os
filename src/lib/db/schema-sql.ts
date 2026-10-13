@@ -705,6 +705,49 @@ export const SCHEMA_DDL = `
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE UNIQUE INDEX IF NOT EXISTS uq_world_player_overrides_career_player ON world_player_overrides(career_id, ea_player_id);
+
+    -- 24. PLAYER MATCH RATINGS (the save's per-match rating history - SAVE fact, rewritten per sync)
+    -- The only real performance record in the file. Rebuilt from the save on every sync, never
+    -- accumulated, because a row the save no longer lists should disappear rather than linger.
+    CREATE TABLE IF NOT EXISTS player_match_ratings (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      player_id INTEGER NOT NULL,
+      artificial_key INTEGER NOT NULL,
+      date INTEGER NOT NULL,
+      rating INTEGER NOT NULL,
+      minutes INTEGER NOT NULL,
+      position INTEGER,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_player_match_ratings_career_id ON player_match_ratings(career_id);
+    CREATE INDEX IF NOT EXISTS idx_player_match_ratings_career_player_date ON player_match_ratings(career_id, player_id, date);
+
+    -- 25. COMPETITION TEAMS (every division's real record - SAVE fact, rewritten per sync)
+    -- Our own division is zeroed by the save; every other division is fully populated. The home/away
+    -- stat pairs are summed by the sync before they land here. order_basis says whether the order
+    -- came from the save's own 1..N currenttableposition or had to be derived from points.
+    CREATE TABLE IF NOT EXISTS competition_teams (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      league_id INTEGER NOT NULL,
+      team_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      played INTEGER,
+      won INTEGER,
+      drawn INTEGER,
+      lost INTEGER,
+      goals_for INTEGER,
+      goals_against INTEGER,
+      points INTEGER,
+      position INTEGER,
+      order_basis TEXT NOT NULL DEFAULT 'DERIVED',
+      is_own_league INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_competition_teams_career_id ON competition_teams(career_id);
+    CREATE INDEX IF NOT EXISTS idx_competition_teams_career_league ON competition_teams(career_id, league_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_competition_teams_career_league_team ON competition_teams(career_id, league_id, team_id);
   `;
 
 export const SCHEMA_MIGRATIONS: string[] = [
@@ -823,4 +866,14 @@ export const SCHEMA_MIGRATIONS: string[] = [
     // After the ALTERs above, never in the DDL block: an existing database skips the CREATE TABLE there, so
     // an index on a brand new column has to come after the column exists.
     "CREATE INDEX IF NOT EXISTS idx_player_user_profiles_injury ON player_user_profiles(career_id, injury_until);",
+    // Two brand new tables. `SCHEMA_DDL` runs on every open, so an existing database already has them by
+    // the time these run; they are repeated here so the new tables appear in the migration list beside
+    // everything else, and every statement is `IF NOT EXISTS` so the repeat is a no-op.
+    "CREATE TABLE IF NOT EXISTS player_match_ratings (id TEXT PRIMARY KEY, career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE, player_id INTEGER NOT NULL, artificial_key INTEGER NOT NULL, date INTEGER NOT NULL, rating INTEGER NOT NULL, minutes INTEGER NOT NULL, position INTEGER, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
+    "CREATE INDEX IF NOT EXISTS idx_player_match_ratings_career_id ON player_match_ratings(career_id);",
+    "CREATE INDEX IF NOT EXISTS idx_player_match_ratings_career_player_date ON player_match_ratings(career_id, player_id, date);",
+    "CREATE TABLE IF NOT EXISTS competition_teams (id TEXT PRIMARY KEY, career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE, league_id INTEGER NOT NULL, team_id INTEGER NOT NULL, name TEXT NOT NULL, played INTEGER, won INTEGER, drawn INTEGER, lost INTEGER, goals_for INTEGER, goals_against INTEGER, points INTEGER, position INTEGER, order_basis TEXT NOT NULL DEFAULT 'DERIVED', is_own_league INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
+    "CREATE INDEX IF NOT EXISTS idx_competition_teams_career_id ON competition_teams(career_id);",
+    "CREATE INDEX IF NOT EXISTS idx_competition_teams_career_league ON competition_teams(career_id, league_id);",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_competition_teams_career_league_team ON competition_teams(career_id, league_id, team_id);",
   ];
