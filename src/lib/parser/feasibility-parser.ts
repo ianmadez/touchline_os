@@ -2655,6 +2655,29 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       if (name) editedByPlayer.set(id, name);
     }
 
+    /**
+     * The three history tables, decoded HERE so the in-game date can see them.
+     *
+     * `DATE_SOURCES` has always listed all four tables and the loop below has always been short of three of
+     * them: `career_playermatchratinghistory`, `career_presignedcontract` and `persistent_events` were decoded
+     * hundreds of lines further down, so only `career_playercontract` could actually feed `latestDate`. The
+     * result was a header reading 2026-11-08 while the save's own newest dated row is 2026-11-14.
+     *
+     * Moved rather than duplicated: a second `decodeTable` call would decode the table twice and re-register it,
+     * and the row objects would be rebuilt for nothing.
+     *
+     * `completedate` is deliberately NOT a date source even though it sits in a table that is admitted now. On
+     * the reference save it holds 2027-01-01 on all 51 rows, because it is when a deal COMPLETES rather than
+     * when anything happened, and admitting a scheduled date would run the career clock forward by months.
+     */
+    const ratings = decodeTable("career_playermatchratinghistory", {
+      limit: Math.max(this.options.rowLimit * 4, 600),
+    });
+    const presigned = decodeTable("career_presignedcontract", {
+      limit: Math.max(this.options.rowLimit * 2, 240),
+    });
+    decodeTable("persistent_events", { limit: Math.max(this.options.rowLimit, 200) });
+
     // The in-game date is the newest dated row in the save. It is needed as the reference for age
     // derivation, so it must be computed BEFORE the squad sample is built. It used to be derived
     // afterwards, which forced age to fall back to a season-number guess.
@@ -3013,12 +3036,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       });
     }
 
-    const ratings = decodeTable("career_playermatchratinghistory", {
-      limit: Math.max(this.options.rowLimit * 2, 200),
-    });
-    const presigned = decodeTable("career_presignedcontract", {
-      limit: Math.max(this.options.rowLimit, 120),
-    });
+    // Decoded ABOVE, before `latestDate`, so the in-game date can see it. `presigned` is used here too.
     // Decoded and then thrown away until now. These agreed fees are the only real market evidence
     // in the file: the game writes no player value anywhere, so any estimate has to be fitted on
     // what the world actually paid rather than on an invented price table.
@@ -3052,18 +3070,11 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         } satisfies PresignedDeal;
       })
       .filter((deal): deal is PresignedDeal => deal !== null);
-    // The save's own dated event log: 4 rows in the save we hold, so NOT empty, and not the
-    // `mlop`/`mrni` fixture ledger (those are the blob readers below, which return null here). The
-    // rows - `eventid`, `eventdate`, `team1id`, `team2id`, `player1id` - are a candidate feed for
-    // the Timeline and are unused today, so this notes them rather than removing the decode: the
-    // call is what registers the table in the feasibility report.
-    //
-    // It is also NOT a date source in practice, whatever `DATE_SOURCES` says: the in-game date is
-    // computed further up (see `latestDate`), and `career_playermatchratinghistory`,
-    // `career_presignedcontract` and this table are all decoded below that point, so today only
-    // `career_playercontract.last_status_change_date` can feed it.
-    decodeTable("persistent_events", { limit: Math.max(this.options.rowLimit, 200) });
-
+    // `persistent_events` is decoded ABOVE, before `latestDate`, so its `eventdate` can feed the in-game
+    // date. It is still the case that this table is NOT the `mlop`/`mrni` fixture ledger: those are the blob
+    // readers below, which return null on every save held. The rows - `eventid`, `eventdate`, `team1id`,
+    // `team2id`, `player1id` - are a candidate feed for the Timeline and are otherwise unused, which is why
+    // the decode is kept rather than removed: the call is what registers the table in the feasibility report.
     facts.push({
       provenance: SAVE_PROVENANCE,
       source: "career_playermatchratinghistory",

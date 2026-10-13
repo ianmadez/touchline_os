@@ -274,6 +274,18 @@ export const playerUserProfiles = sqliteTable(
     injuryNote: text("injury_note"),
     /** The day the manager filed it, which is the news story's dateline: a report is written once. */
     injuryReportedOn: text("injury_reported_on"),
+    /**
+     * A name the manager typed for a player the save cannot name.
+     *
+     * The academy holds one prospect whose name resolves from nowhere: `playernames`, the id table that covers
+     * the low half of the nameid space, is absent from the career save and from every Squads file on the
+     * machine, so no amount of decoding will produce it. The manager can see the player, so he can name him,
+     * and this column is his answer rather than a guess.
+     *
+     * It lives HERE rather than on `youth_prospects` because the sync DELETES every academy row and rewrites it
+     * on each parse. A name typed into that table would last exactly one sync.
+     */
+    displayName: text("display_name"),
     provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
     updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   },

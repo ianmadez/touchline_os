@@ -42,6 +42,8 @@ interface PlayerDrawerProps {
     /** Return date, or null when he is fit again. */
     injuryUntil: string | null;
     injuryNote: string | null;
+    /** The manager's own name for a player the save cannot name. Null clears it. */
+    displayName: string | null;
   }) => void;
 }
 
@@ -74,6 +76,7 @@ export function PlayerDrawer({
     player?.userProfile?.injury.until ?? null
   );
   const [injuryNote, setInjuryNote] = useState<string>(player?.userProfile?.injury.note ?? "");
+  const [displayName, setDisplayName] = useState<string>(player?.userProfile?.displayName ?? "");
 
   // This drawer is keyed by player id in `page.tsx`, so selecting a different player remounts the
   // component and every field below re-initialises from props. A sync effect here would be
@@ -118,6 +121,7 @@ export function PlayerDrawer({
       primaryPosition: positionOverride || null,
       injuryUntil,
       injuryNote: injuryNote.trim() || null,
+      displayName: displayName.trim() || null,
     });
     onClose();
   };
@@ -137,7 +141,7 @@ export function PlayerDrawer({
                 Player Profile Dossier
               </span>
               <h2 className="font-heading text-xl text-slate-900 dark:text-slate-100">
-                {player.name}
+                {displayName.trim() || player.name}
               </h2>
             </div>
             <button
@@ -558,6 +562,31 @@ export function PlayerDrawer({
                         <option value="ROTATION">Rotation</option>
                         <option value="SURPLUS">Surplus to Requirements</option>
                       </select>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block font-sub text-[11px] text-slate-600 dark:text-slate-300 font-semibold">
+                          Name
+                        </label>
+                        <span className="text-[10px] font-sub text-slate-400">
+                          {displayName.trim().length > 0 ? "yours" : "from the save"}
+                        </span>
+                      </div>
+                      {/*
+                        For a player the save cannot name. One academy prospect resolves from nowhere, because the
+                        id table covering the low half of the nameid space is absent from the career save and from
+                        every Squads file on this machine. The manager can see him, so he can name him, and this is
+                        stored on his own profile rather than on the academy row, which the sync rewrites.
+                      */}
+                      <input
+                        type="text"
+                        maxLength={60}
+                        placeholder={player.name ?? "Type the name you know him by"}
+                        value={displayName}
+                        onChange={(e) => setDisplayName(e.target.value)}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700/80 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-amber-500 dark:focus:border-amber-400"
+                      />
                     </div>
 
                     <div>

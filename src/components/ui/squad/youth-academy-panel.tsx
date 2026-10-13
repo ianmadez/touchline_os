@@ -28,6 +28,13 @@ import { NationFlag } from "./nation-flag";
 
 interface Prospect {
   playerId: number;
+  /**
+   * The name the manager typed, which outranks the save's own when the save has none.
+   *
+   * Set from the player dossier's Notebook, reached from the squad table's YOUTH filter. Null when he has not
+   * named the player yet.
+   */
+  displayName?: string | null;
   name: string | null;
   nameSource: string;
   primaryPosition: string | null;
@@ -180,7 +187,7 @@ export function YouthAcademyPanel({ careerId, query }: { careerId: string; query
             <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-heading text-sm text-slate-900 dark:text-slate-100">
-                  {row.name ?? "Name not stored in the save"}
+                  {row.displayName || row.name || "Name not stored in the save"}
                 </span>
                 <span className="rounded bg-slate-200 px-1.5 py-0.5 font-sub text-label font-bold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                   {row.primaryPosition || "—"}

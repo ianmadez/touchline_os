@@ -819,6 +819,7 @@ export const SCHEMA_MIGRATIONS: string[] = [
     "ALTER TABLE player_user_profiles ADD COLUMN injury_until TEXT;",
     "ALTER TABLE player_user_profiles ADD COLUMN injury_note TEXT;",
     "ALTER TABLE player_user_profiles ADD COLUMN injury_reported_on TEXT;",
+    "ALTER TABLE player_user_profiles ADD COLUMN display_name TEXT;",
     // After the ALTERs above, never in the DDL block: an existing database skips the CREATE TABLE there, so
     // an index on a brand new column has to come after the column exists.
     "CREATE INDEX IF NOT EXISTS idx_player_user_profiles_injury ON player_user_profiles(career_id, injury_until);",

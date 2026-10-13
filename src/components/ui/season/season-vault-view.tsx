@@ -672,13 +672,28 @@ function NotObservedPanel() {
 
 /** The manager's own record of a season - the part the save never holds. */
 /**
- * A list only earns a scroll container once there is enough in it to scroll: one entry should not be
- * boxed behind its own scrollbar. Matches the trait used by the dashboard and finance lists.
+ * Four rows, then the list scrolls inside its own box.
+ *
+ * ONE RULE FOR EVERY LIST IN THE DIGEST: the box shows four rows and grows a scrollbar rather than the card
+ * growing without limit. A list of four or fewer is left alone, because boxing two lines behind their own
+ * scrollbar is worse than letting them be.
+ *
+ * The heights are named rather than computed, and each one is a LITERAL class string. Tailwind scans source
+ * text, so a class assembled at runtime from a number would never be generated and the box would simply never
+ * cap. The four shapes differ because a table row, a chip, a bullet and a quotation are four different heights.
  */
-const scrollWhenMultiple = (count: number): string =>
-  count >= 2
-    ? "max-h-[280px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700"
-    : "";
+const SCROLL_BOX =
+  "overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700";
+const capToRows = (count: number, shape: "table" | "chips" | "bullets" | "quotes"): string => {
+  if (count <= 4) return "";
+  const heights = {
+    table: "max-h-[168px]",
+    chips: "max-h-[140px]",
+    bullets: "max-h-[112px]",
+    quotes: "max-h-[196px]",
+  } as const;
+  return `${heights[shape]} ${SCROLL_BOX}`;
+};
 
 function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
   const contributors = digest.scorers.filter((s) => s.goals > 0 || s.assists > 0);
@@ -705,7 +720,7 @@ function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
           <div className="text-[11px] font-sub font-bold uppercase text-slate-400">
             Goals and assists you recorded
           </div>
-          <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800/80">
+          <div className={`overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800/80 ${capToRows(contributors.length, "table")}`}>
             <table className="w-full text-left text-xs font-sub">
               <thead className="bg-slate-50 text-[10px] uppercase text-slate-500 dark:bg-slate-950/60 dark:text-slate-400">
                 <tr>
@@ -740,7 +755,7 @@ function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
           <div className="text-[11px] font-sub font-bold uppercase text-slate-400">
             Players you singled out
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className={`flex flex-wrap gap-2 ${capToRows(digest.standouts.length, "chips")}`}>
             {digest.standouts.map((standout) => (
               <span
                 key={standout.name}
@@ -760,7 +775,7 @@ function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {groupedWeaknesses.length > 0 && (
           <Cardlet title="Weaknesses you named">
-            <ul className="space-y-1">
+            <ul className={`space-y-1 ${capToRows(groupedWeaknesses.length, "bullets")}`}>
               {groupedWeaknesses.map((entry) => (
                 <li key={entry.note} className="text-xs font-sub text-slate-600 dark:text-slate-300">
                   <span className="mr-1.5 text-slate-400">·</span>
@@ -778,7 +793,7 @@ function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
 
         {(venues.length > 0 || digest.competitions.length > 0) && (
           <Cardlet title="How your logged matches split">
-            <div className="flex flex-wrap gap-2">
+            <div className={`flex flex-wrap gap-2 ${capToRows(venues.length + digest.competitions.length, "chips")}`}>
               {venues.map((venue) => (
                 <Chip key={venue.label} label={venue.label} value={venue.value} />
               ))}
@@ -798,7 +813,7 @@ function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
           <div className="text-[11px] font-sub font-bold uppercase text-slate-400">
             In your words
           </div>
-          <ul className={`space-y-2 ${scrollWhenMultiple(digest.reflections.length)}`}>
+          <ul className={`space-y-2 ${capToRows(digest.reflections.length, "quotes")}`}>
             {digest.reflections.map((reflection, index) => (
               <li
                 key={`${reflection.matchDate ?? "undated"}-${index}`}
@@ -821,7 +836,7 @@ function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
           <div className="text-[11px] font-sub font-bold uppercase text-slate-400">
             Questions you answered
           </div>
-          <ul className={`space-y-2 ${scrollWhenMultiple(digest.prompts.length)}`}>
+          <ul className={`space-y-2 ${capToRows(digest.prompts.length, "quotes")}`}>
             {digest.prompts.map((prompt, index) => (
               <li
                 key={`${prompt.question}-${index}`}

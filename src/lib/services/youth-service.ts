@@ -14,7 +14,18 @@
 
 import { eq } from "drizzle-orm";
 import { db } from "../db/client";
-import { youthProspects, type YouthProspectEntry } from "../db/schema";
+import { playerUserProfiles, youthProspects, type YouthProspectEntry } from "../db/schema";
+
+/** An academy row plus the name the manager typed for it, when the save could not supply one. */
+export interface YouthRow extends YouthProspectEntry {
+  /**
+   * The manager's own name for the player, or null.
+   *
+   * Read from `player_user_profiles` rather than from the academy row, because the sync deletes every academy
+   * row on each parse and would take a name typed onto it with it.
+   */
+  displayName: string | null;
+}
 
 export interface YouthSummary {
   total: number;
@@ -33,18 +44,38 @@ export class YouthService {
    * Sorted in memory rather than in SQL: the academy is a handful of rows, and `NULLS LAST` differs
    * between SQLite versions while a comparator does not.
    */
-  async list(careerId: string): Promise<YouthProspectEntry[]> {
+  async list(careerId: string): Promise<YouthRow[]> {
     const rows = await db
       .select()
       .from(youthProspects)
       .where(eq(youthProspects.careerId, careerId));
 
-    return [...rows].sort(
-      (a, b) =>
-        (b.potentialRating ?? -1) - (a.potentialRating ?? -1) ||
-        (b.overallRating ?? -1) - (a.overallRating ?? -1) ||
-        a.playerId - b.playerId
+    // One extra read for the whole academy rather than a lookup per prospect, and matched on the same id shape
+    // the profile service writes: `careerId_playerId`.
+    const profiles = await db
+      .select({
+        playerId: playerUserProfiles.playerId,
+        displayName: playerUserProfiles.displayName,
+      })
+      .from(playerUserProfiles)
+      .where(eq(playerUserProfiles.careerId, careerId));
+    const nameByPlayer = new Map(
+      profiles.map((profile) => [profile.playerId, profile.displayName] as const)
     );
+
+    return [...rows]
+      .sort(
+        (a, b) =>
+          (b.potentialRating ?? -1) - (a.potentialRating ?? -1) ||
+          (b.overallRating ?? -1) - (a.overallRating ?? -1) ||
+          a.playerId - b.playerId
+      )
+      .map((row) => ({
+        ...row,
+        // The save's own `player_id` is not an EA id, so the profile key is built the same way the writer
+        // builds it. A miss is simply no override, never a thrown lookup.
+        displayName: nameByPlayer.get(`${careerId}_${row.playerId}`) ?? null,
+      }));
   }
 
   summarise(rows: readonly YouthProspectEntry[]): YouthSummary {

@@ -88,6 +88,14 @@ export interface EnrichedPlayer {
      * by itself and nothing has to be cleared by hand.
      */
     injury: { until: string | null; note: string | null; reportedOn: string | null };
+    /**
+     * The manager's own name for a player the save cannot name.
+     *
+     * One academy prospect resolves from nowhere: the id table covering the low half of the nameid space is
+     * absent from the career save and from every Squads file on this machine. The manager can see the player,
+     * so he can name him. Null means he has not.
+     */
+    displayName: string | null;
   };
 }
 
@@ -197,6 +205,7 @@ export class SquadService {
               importanceMarker: profile.importanceMarker,
               userNotes: profile.userNotes,
               positionOverride: profile.primaryPosition,
+              displayName: profile.displayName,
               injury,
             }
           : undefined,

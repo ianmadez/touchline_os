@@ -22,6 +22,13 @@ export interface SetPlayerProfileInput {
   injuryNote?: string | null;
   /** The save's own in-game date when he filed it, which is the report's dateline. */
   injuryReportedOn?: string | null;
+  /**
+   * A name the manager typed for a player the save cannot name.
+   *
+   * An empty string clears it, which is what puts the player back to whatever the save resolved. `undefined`
+   * leaves it untouched.
+   */
+  displayName?: string | null;
 }
 
 /**
@@ -73,6 +80,7 @@ export class UserProfileService {
           injuryNote: input.injuryNote !== undefined ? input.injuryNote : existing.injuryNote,
           injuryReportedOn:
             input.injuryReportedOn !== undefined ? input.injuryReportedOn : existing.injuryReportedOn,
+          displayName: input.displayName !== undefined ? input.displayName : existing.displayName,
           updatedAt: new Date().toISOString(),
         })
         .where(eq(playerUserProfiles.id, existing.id));
@@ -90,6 +98,7 @@ export class UserProfileService {
         injuryUntil: input.injuryUntil ?? null,
         injuryNote: input.injuryNote ?? null,
         injuryReportedOn: input.injuryReportedOn ?? null,
+        displayName: input.displayName ?? null,
         provenance: "USER",
       });
     }

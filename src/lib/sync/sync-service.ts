@@ -119,8 +119,17 @@ export interface SyncResult {
  *      which is what made a corrected direction look wrong on a row no re-sync could ever reach.
  *      Evidence, re-runnable on any save: the club named on a deal for a player we are signing is always
  *      the club he is registered to, and `scripts/probe-presigned-deals.ts` prints the raw rows.
+ *
+ * 17 - THE IN-GAME DATE. `career_playermatchratinghistory`, `career_presignedcontract` and
+ *      `persistent_events` were decoded hundreds of lines BELOW the loop that computes `latestDate`, so
+ *      three of the four declared date sources could never contribute and only `career_playercontract`
+ *      did. On the 2026-10-10 save that put the app's clock at 2026-11-08 while the newest dated row in
+ *      the file was 2026-11-25, and because age is DERIVED from that date and persisted, four players
+ *      were carrying an age a year out. The decodes moved above the loop and the two history decode
+ *      limits were raised, which is what this bump forces to re-run. It is the DATE that needs it, not
+ *      the tables Phase A will add later.
  */
-export const SYNC_PIPELINE_VERSION = "16";
+export const SYNC_PIPELINE_VERSION = "17";
 
 export class SyncService {
   /**
@@ -305,7 +314,22 @@ export class SyncService {
       // derived career state, so an unchanged save still gets it written and an existing database
       // self-heals on its next sync. That is also why this needs no SYNC_PIPELINE_VERSION bump - it
       // creates no snapshot and emits no event, so the NO_CHANGE invariant is untouched.
+      //
+      // WOMEN'S COMPETITIONS ARE DROPPED HERE, and this is the narrowest place that can do it. The app has no
+      // women's career mode, and the save's own `leagues.iswomencompetition` flag is reliable and complete for
+      // this table: of the seven it flags, three (_England WSL_, _USA NWSL_, the French division) carry no
+      // women's word in their name at all, so a name rule alone would leave them in. Measured on the reference
+      // save before relying on it, and it agrees with `teams.gender` and `players.gender`.
+      //
+      // THE MANAGED CLUB'S OWN COMPETITION IS NEVER FILTERED, whichever flag it carries. A manager who IS
+      // running a women's side must still resolve the name of the division he is actually in, and dropping his
+      // own row would leave the app unable to name the league it is showing him.
+      const ownLeagueForFilter = ownLeagueId;
+      const excludedLeagues = rawData.leagueDirectory.filter(
+        (league) => league.isWomenCompetition && league.leagueId !== ownLeagueForFilter
+      );
       for (const league of rawData.leagueDirectory) {
+        if (league.isWomenCompetition && league.leagueId !== ownLeagueForFilter) continue;
         tx.insert(leagues)
           .values({
             careerId,
@@ -331,7 +355,16 @@ export class SyncService {
           .run();
       }
 
-      // Check latest snapshot hash
+      // Reported as a fact on the sync result so the exclusion is visible rather than silent. A boundary rule
+      // that quietly deletes rows is the class of change that is hardest to notice going wrong.
+      if (excludedLeagues.length > 0) {
+        rawData.warnings.push(
+          `Excluded ${excludedLeagues.length} women's ${excludedLeagues.length === 1 ? "competition" : "competitions"} from the league catalogue: ${excludedLeagues
+            .slice(0, 4)
+            .map((league) => league.name ?? `league ${league.leagueId}`)
+            .join(", ")}${excludedLeagues.length > 4 ? `, and ${excludedLeagues.length - 4} more` : ""}.`
+        );
+      }
       const latestSnapshot = tx
         .select()
         .from(careerSnapshots)

@@ -36,6 +36,13 @@ interface PatchCareerRequest {
      */
     injuryUntil?: string | null;
     injuryNote?: string | null;
+    /**
+     * A name for a player the save cannot name, in the manager's words.
+     *
+     * Trimmed and length-capped here rather than trusted: this string is shown wherever the player appears, and
+     * a paragraph pasted into it would push every screen it touches out of shape. An empty string clears it.
+     */
+    displayName?: string | null;
   };
 }
 
@@ -145,6 +152,10 @@ export async function patchCareer(body: unknown): Promise<OperationResult<unknow
         primaryPosition,
         injuryUntil: validInjuryUntil,
         injuryNote: request.playerProfile.injuryNote,
+        displayName:
+          request.playerProfile.displayName === undefined
+            ? undefined
+            : (request.playerProfile.displayName ?? "").trim().slice(0, 60) || null,
         // The save's own date is the dateline, so a report written today is dated the day the manager is in,
         // not the day the machine is. Filed once and then left alone, which is what makes it a report.
         injuryReportedOn:

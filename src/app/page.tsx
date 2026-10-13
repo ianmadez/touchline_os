@@ -1074,6 +1074,8 @@ export default function TouchlineApp() {
     /** Absent when the manager only edited a note; null means he is fit again. */
     injuryUntil?: string | null;
     injuryNote?: string | null;
+    /** The manager's own name for a player the save cannot name; null clears it. */
+    displayName?: string | null;
   }) => {
     setSquad((prev) =>
       prev.map((p) => {
@@ -1082,12 +1084,19 @@ export default function TouchlineApp() {
             ...p,
             // Apply the override optimistically so the table updates without a refetch.
             primaryPosition: profileData.primaryPosition ?? p.primaryPosition,
+            /*
+             * The name he typed, applied to the row straight away. `undefined` means the field was not part of
+             * this save, so the existing override is kept rather than cleared; a blank string is the manager
+             * deliberately removing one, which is why the two are treated differently.
+             */
+            name: profileData.displayName === undefined ? p.name : profileData.displayName || p.name,
             userProfile: {
               assignedRole: profileData.assignedRole,
               trustLevel: profileData.trustLevel,
               importanceMarker: profileData.importanceMarker,
               userNotes: profileData.userNotes,
               positionOverride: profileData.primaryPosition,
+              displayName: profileData.displayName ?? p.userProfile?.displayName ?? null,
               injury: {
                 until:
                   profileData.injuryUntil !== undefined
