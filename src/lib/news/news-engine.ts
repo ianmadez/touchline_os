@@ -47,7 +47,7 @@ import { momentOf, phasePhrase, seasonPhase, type SeasonProgress } from "./momen
  * stories exactly as they were. The number is here, beside the copy it describes, because "the desk was
  * rewritten" is an editorial call that cannot be computed from the code.
  */
-export const NEWS_COPY_VERSION = 10;
+export const NEWS_COPY_VERSION = 11;
 
 /** How a story's subject colours the card. Not a red/green light: a paper has good and bad news. */
 export type NewsTone = "GOOD" | "NEUTRAL" | "CONCERN";
@@ -3526,14 +3526,14 @@ function matchReportBody(
         "headline"
       ),
       body: badRun
-        ? `${straightLosses} defeats in a row is not a blip, it is a pattern, and patterns are a manager's problem. The argument that the squad is not his does not survive a third season in charge: at some point the team on the pitch is the one he built. None of this is a demand for anybody's head. It is an observation that the case for patience has to be argued now rather than assumed.`
+        ? `${straightLosses} defeats in a row is not a blip, it is a pattern, and patterns are a manager's problem. The argument that the squad is not his does not survive a ${ordinalWord(input.seasonNumber)} season in charge: at some point the team on the pitch is the one he built. None of this is a demand for anybody's head. It is an observation that the case for patience has to be argued now rather than assumed.`
         : `The record is ${formWords(recent)}, and it is worth saying plainly that a manager's work is not measured over ${recent.length} ${plural(recent.length, "match", "matches")}. It is measured over seasons, and the only honest place to stand is a few paces back. That is not a defence of anybody. It is what the evidence supports, and the evidence is all anybody outside the club actually has.`,
       article: [
         pick(
           badRun
             ? [
                 `There is a version of this where the manager is right and the results are wrong, and it is the version that ends with everybody out of work. The harder question is not whether he is a good manager but whether the same problems keep arriving, week after week, in the same place.`,
-                `It is worth remembering that this is the third season of a project rather than the third month of one. Projects are allowed to be judged, and they are not allowed to be exempt.`,
+                `It is worth remembering that this is the ${ordinalWord(input.seasonNumber)} season of a project rather than the ${ordinalWord(input.seasonNumber)} month of one. Projects are allowed to be judged, and they are not allowed to be exempt.`,
               ]
             : [
                 `What is knowable is small: a run of results, the squad he has, and how long he has been here. What is not knowable is anything happening inside the training ground at half past nine on a Tuesday, which is where most of this is actually decided.`,

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { DatePicker } from "@/components/ui/date-picker";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import { KNOWN_POSITION_ROLES, UNKNOWN_POSITION } from "@/lib/parser/interface";
 import {
@@ -439,11 +440,10 @@ export function PlayerDrawer({
                             </div>
                           ) : (
                             /* No save clock to count from, so the date is asked for plainly. */
-                            <input
-                              type="date"
-                              value={injuryUntil ?? ""}
-                              onChange={(e) => setInjuryUntil(e.target.value || null)}
-                              className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs text-slate-900 focus:border-amber-500 focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                            <DatePicker
+                              value={injuryUntil}
+                              onChange={setInjuryUntil}
+                              placeholder="Pick the return date"
                             />
                           )}
 

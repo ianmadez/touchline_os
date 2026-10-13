@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SubTabs } from "@/components/ui/sub-tabs";
+import { DatePicker } from "@/components/ui/date-picker";
 import { portal, useScrollLock } from "@/components/ui/portal";
 import { GroupDebriefPanel } from "@/components/ui/debrief/group-debrief-panel";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
@@ -1314,12 +1315,11 @@ export function DebriefView({
               >
                 Match date
               </label>
-              <input
+              <DatePicker
                 id="debrief-date"
-                type="date"
                 value={matchDate}
-                onChange={(e) => setMatchDate(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#E11D48] tabular-nums"
+                onChange={(next) => setMatchDate(next ?? "")}
+                placeholder="Pick the day you played"
               />
             </div>
 

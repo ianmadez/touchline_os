@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { DatePicker } from "@/components/ui/date-picker";
 import { formatMoney, formatMoneyExact } from "@/lib/ui/format";
 import type { FinanceRulesReport, RuleStatus, RuleVerdict } from "@/lib/services/finance-rules-service";
 import type { LedgerEntry, TransferLedger } from "@/lib/services/transfer-ledger-service";
@@ -384,12 +385,7 @@ function AddDealForm({
           />
         </Field>
         <Field label="Date (optional)">
-          <input
-            type="date"
-            value={movedOn}
-            onChange={(event) => setMovedOn(event.target.value)}
-            className={inputClass}
-          />
+          <DatePicker value={movedOn || null} onChange={(next) => setMovedOn(next ?? "")} />
         </Field>
       </div>
 
