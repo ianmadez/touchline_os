@@ -23,8 +23,6 @@ import {
   PlayerPerformanceService,
 } from "./player-performance-service";
 import type { PlayerPerformancePayload } from "../squad/performance";
-import { suggestNextOpponent, type OpponentSuggestion } from "../ui/opponent-suggest";
-import { seasonStartFor } from "../squad/season-scope";
 import { FORMATIONS_REGISTRY } from "../tactics/formations";
 import { StorylineItem, DomainEvent } from "../events/types";
 import {
@@ -141,14 +139,6 @@ export interface CareerHydrationPayload extends CareerSummary {
    * would be one round trip per row of the table.
    */
   playerPerformance: PlayerPerformancePayload;
-  /**
-   * The club most likely to be next, derived from the debriefs already logged this season.
-   *
-   * DERIVED, and offered as a suggestion rather than a fixture: the save carries no upcoming-fixture
-   * list at all. Null when there is no division to choose from, or nothing has been logged yet and
-   * every club is equally likely.
-   */
-  suggestedOpponent: OpponentSuggestion | null;
 }
 
 /** One club in the division, as the save describes it. */
@@ -247,17 +237,6 @@ export class CareerService {
     const valuations = await this.valueService.valueSquad(careerId, players);
     // One read for the whole squad: the save's rating history joined to the manager's logged debriefs.
     const playerPerformance = await this.playerPerformanceService.load(careerId, career.inGameDate);
-    // The clubs already faced this season, from the manager's own debriefs.
-    const suggestedOpponent = await this.suggestOpponent(
-      careerId,
-      career.inGameDate,
-      leagueTeamRows.map((row) => ({
-        teamId: row.teamId,
-        name: row.name,
-        form: row.form,
-        isOwnClub: row.isOwnClub,
-      }))
-    );
 
     return {
       careerId: career.id,
@@ -276,7 +255,6 @@ export class CareerService {
       seasonState,
       valuations,
       playerPerformance,
-      suggestedOpponent,
       leagueTeams: leagueTeamRows
         .map((row) => ({
           teamId: row.teamId,
@@ -304,47 +282,6 @@ export class CareerService {
           }
         : null,
     };
-  }
-
-  /**
-   * The club the manager is most likely to play next.
-   *
-   * Read from his own debriefs rather than from the save, because the save HAS no fixture list: the two
-   * blob sections that would carry one read in no save we hold, which is why anything here is a
-   * suggestion the debrief can overwrite rather than a stated fixture.
-   *
-   * Only the season in progress counts, so the suggestion resets with the second round of fixtures
-   * instead of drifting into a list of clubs nobody has played for two years.
-   */
-  private async suggestOpponent(
-    careerId: string,
-    inGameDate: string | null,
-    teams: LeagueTeamSummary[]
-  ): Promise<OpponentSuggestion | null> {
-    const seasonStart = seasonStartFor(inGameDate);
-    const rows = await db
-      .select({ payloadJson: careerEvents.payloadJson })
-      .from(careerEvents)
-      .where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "MATCH_DEBRIEF")))
-      .orderBy(asc(careerEvents.timestamp));
-
-    const faced: number[] = [];
-    for (const row of rows) {
-      let payload: { opponentTeamId?: unknown; matchDate?: unknown };
-      try {
-        payload = JSON.parse(row.payloadJson) as typeof payload;
-      } catch {
-        continue;
-      }
-      if (typeof payload.opponentTeamId !== "number") continue;
-      if (seasonStart !== null) {
-        const matchDate = typeof payload.matchDate === "string" ? payload.matchDate : null;
-        if (matchDate === null || matchDate < seasonStart) continue;
-      }
-      faced.push(payload.opponentTeamId);
-    }
-
-    return suggestNextOpponent(teams, faced);
   }
 
   async upsertOnboarding(careerId: string, input: OnboardingInput): Promise<void> {

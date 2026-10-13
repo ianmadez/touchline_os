@@ -6,6 +6,7 @@ import { FORMATIONS_REGISTRY, getFormationById } from "@/lib/tactics/formations"
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import { PitchSlotAssignment, TacticalSystemState } from "@/lib/services/tactics-service";
 import { describeTimeOut, isInjured } from "@/lib/squad/injury";
+import { PlayerFace } from "./player-face";
 
 type BenchSort = "POSITION" | "OVERALL" | "POTENTIAL" | "AGE" | "NAME";
 
@@ -424,6 +425,14 @@ export function Pitch2D({
                       : "border-dashed border-amber-500/60 bg-amber-950/20"
                   }`}
                 >
+                  {/* A head above the name, which is how a team sheet is read: you recognise the man
+                      before you read the label. Absent for an empty slot, so a blank position stays
+                      visibly blank rather than wearing a stranger's face. */}
+                  {slotPlayer && (
+                    <div className="mb-1 flex justify-center">
+                      <PlayerFace eaPlayerId={slotPlayer.eaPlayerId} name={slotPlayer.name} size={30} />
+                    </div>
+                  )}
                   <div className="flex items-center justify-between px-1 mb-0.5">
                     <span className="text-[10px] font-sub font-bold text-amber-400 uppercase">
                       {slotDef.label}
@@ -562,7 +571,11 @@ export function Pitch2D({
                   : ""
               }`}
             >
-              <div>
+              {/* The face leads the row, at a size that reads as a thumbnail rather than a portrait:
+                  the bench is scanned for a name, and a head makes the row findable without making
+                  the list twice as tall. */}
+              <PlayerFace eaPlayerId={player.eaPlayerId} name={player.name} size={26} />
+              <div className="min-w-0 flex-1 pl-2">
                 <div className="flex items-center gap-2">
                   <span className="font-heading text-xs text-emerald-700 dark:text-emerald-400 font-bold">
                     {player.overallRating}

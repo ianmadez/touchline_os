@@ -28,6 +28,7 @@ import { saveFootOverride, searchScoutPool } from "../operations/scouting-search
 import { deleteScoutTarget, readScoutingBoard, saveScoutTarget } from "../operations/scouting";
 import { deleteTargetBlock, readTargetBlocks, saveTargetBlock } from "../operations/season-blocks";
 import { readSeasonDossier } from "../operations/season-dossier";
+import { readDivisionTables } from "../operations/season-divisions";
 import { readSeasonState, recordSeason } from "../operations/season";
 import { patchSettings, readSettings } from "../operations/settings";
 import { readTrophyCabinet, recordTrophyWin, removeTrophyWin } from "../operations/trophies";
@@ -158,6 +159,8 @@ async function dispatch(call: Call): Promise<OperationResult<unknown>> {
 
     case "GET /api/season/dossier":
       return readSeasonDossier(params.get("careerId"), params.get("season"));
+    case "GET /api/season/divisions":
+      return readDivisionTables(params.get("careerId"), params.get("leagueId"));
     case "GET /api/season":
       return readSeasonState(params.get("careerId"));
     case "POST /api/season": {

@@ -37,6 +37,14 @@ const SUB_TAB_LABELS: Record<SubTab, string> = {
   VAULT: "Season Vault",
 };
 
+/** The inner switch inside the trends tab: the manager's own season, or everyone else's. */
+type TrendsTab = "SEASON" | "DIVISIONS";
+
+const TRENDS_TABS: ReadonlyArray<{ id: TrendsTab; label: string }> = [
+  { id: "SEASON", label: "This season" },
+  { id: "DIVISIONS", label: "Divisions" },
+];
+
 // Two independent sample-size gates, deliberately not the same number or the same name as the
 // league model's own MIN_OBSERVATIONS_FOR_MODEL: that one governs the position-inference band,
 // this one only governs whether a season-over-season chart has enough points to draw a trend.
@@ -48,6 +56,7 @@ const MATCHES_PER_BLOCK = 5;
 
 export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab }: SeasonViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>(focusSubTab ?? "OUTLOOK");
+  const [trendsTab, setTrendsTab] = useState<TrendsTab>("SEASON");
   const [selectedVaultSeason, setSelectedVaultSeason] = useState<number | null>(null);
 
   // Arriving from a storyline card carries the inner tab with it. Deferred through a timeout rather
@@ -197,22 +206,56 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
 
         {activeSubTab === "CHARTS" && (
           <div className="space-y-6">
-            <MatchdayTrajectoryChart
-              progressSeries={seasonState?.progressSeries ?? []}
-              targetSeries={targetSeries}
-            />
-            <PointsBySeasonChart seasons={completedSeasons} current={outlook} />
-            <FinishBySeasonChart seasons={completedSeasons} />
-            {/* Background divisions last: the charts above are the manager's own season, and these are
-                what the rest of the world was doing at the same moment. */}
-            {careerId ? (
-              <DivisionTablesPanel careerId={careerId} />
-            ) : (
-              <EmptyCard
-                title="No career synced yet"
-                body="Sync a save from the Portal and the other divisions in it appear here."
-              />
+            {/*
+              An inner switch inside the trends tab, rather than another panel stacked below the
+              charts. The charts are about ONE season - the manager's own - and the divisions are about
+              what every other competition was doing at the same moment; stacking them made the tab read
+              as one long scroll with no end. Nothing here reaches the outer sub-tab list, because a
+              manager looking at his own season should not have to walk past forty other tables.
+            */}
+            <div
+              role="tablist"
+              aria-label="Trends"
+              className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 dark:border-slate-800 dark:bg-slate-950"
+            >
+              {TRENDS_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={trendsTab === tab.id}
+                  onClick={() => setTrendsTab(tab.id)}
+                  className={`cursor-pointer rounded-lg px-4 py-2 font-sub text-xs font-bold uppercase tracking-wider transition-[background-color,color,box-shadow] duration-200 ease-[var(--ease-brand)] ${
+                    trendsTab === tab.id
+                      ? "bg-[#E11D48] text-white shadow-sm shadow-rose-600/20"
+                      : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {trendsTab === "SEASON" && (
+              <div className="space-y-6">
+                <MatchdayTrajectoryChart
+                  progressSeries={seasonState?.progressSeries ?? []}
+                  targetSeries={targetSeries}
+                />
+                <PointsBySeasonChart seasons={completedSeasons} current={outlook} />
+                <FinishBySeasonChart seasons={completedSeasons} />
+              </div>
             )}
+
+            {trendsTab === "DIVISIONS" &&
+              (careerId ? (
+                <DivisionTablesPanel careerId={careerId} />
+              ) : (
+                <EmptyCard
+                  title="No career synced yet"
+                  body="Sync a save from the Portal and the other divisions in it appear here."
+                />
+              ))}
           </div>
         )}
 
