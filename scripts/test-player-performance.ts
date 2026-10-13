@@ -9,8 +9,10 @@
  *   npx tsx scripts/test-player-performance.ts
  */
 import {
+  MIN_LOGGED_MATCHES_FOR_TREND,
   MIN_MINUTES_FOR_FORM,
   MIN_RATINGS_FOR_TREND,
+  RECENT_MATCH_LIMIT,
   countsTowardForm,
   formatRating,
   ratingBand,
@@ -65,6 +67,18 @@ check("a rating is one decimal", formatRating(7), "7.0");
 check("a half is kept", formatRating(7.55), "7.5");
 check("an average keeps its precision", formatRating(6.64), "6.6");
 check("three ratings is the trend floor", MIN_RATINGS_FOR_TREND, 3);
+
+/*
+ * The form line is drawn from the manager's OWN logged matches, not from the save's ratings.
+ *
+ * The distinction is the whole point: a save supplies fifteen ratings for a player the manager has never
+ * written a line about, and a curve built from those is a curve whose every point reads "opponent not
+ * logged". The gate is therefore counted on debriefs, and it applies to the LINE, not to the figures.
+ */
+console.log("the form line's own gate");
+check("three logged matches is the floor for a line", MIN_LOGGED_MATCHES_FOR_TREND, 3);
+check("and one more than the lowest useful run", MIN_LOGGED_MATCHES_FOR_TREND > MIN_RATINGS_FOR_TREND - 1, true);
+check("the list is capped for display, not the line's data", RECENT_MATCH_LIMIT, 12);
 
 console.log(`\n${checks - failures}/${checks} passed`);
 if (failures > 0) process.exit(1);

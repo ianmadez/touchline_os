@@ -15,6 +15,13 @@ interface SquadTableProps {
   inGameDate?: string | null;
   onSelectPlayer: (player: EnrichedPlayer) => void;
   /**
+   * Opening a player from the match-stats table, where the dossier should also show his form.
+   *
+   * A separate callback rather than a second argument, so the squad list cannot pass "show his form" by
+   * accident and keeps its one simple contract.
+   */
+  onSelectPlayerFromStats?: (player: EnrichedPlayer) => void;
+  /**
    * The season's per-player record: the save's ratings and the manager's logged goals and assists.
    *
    * Optional so the table still renders on a hydration payload that predates it, in which case the
@@ -97,6 +104,7 @@ export function SquadTable({
   players,
   inGameDate = null,
   onSelectPlayer,
+  onSelectPlayerFromStats,
   playerPerformance = null,
 }: SquadTableProps) {
   const [filterRole, setFilterRole] = useState<string>("ALL");
@@ -342,7 +350,7 @@ export function SquadTable({
               {statsRows.map(({ player, record }) => (
                 <tr
                   key={player.id}
-                  onClick={() => onSelectPlayer(player)}
+                  onClick={() => (onSelectPlayerFromStats ?? onSelectPlayer)(player)}
                   className="group hover:bg-slate-100/80 dark:hover:bg-slate-800/40 cursor-pointer transition-colors duration-150"
                 >
                   <td className="py-3 px-4 font-bold text-slate-900 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">

@@ -41,7 +41,6 @@ interface LoggedMatch {
   venue: string | null;
   scoreline: string | null;
 }
-
 export class PlayerPerformanceService {
   async load(careerId: string, inGameDate: string | null): Promise<PlayerPerformancePayload> {
     const seasonStart = seasonStartFor(inGameDate);
@@ -135,16 +134,23 @@ export class PlayerPerformanceService {
     const byPlayer: Record<string, PlayerPerformance> = {};
     for (const [playerId, entry] of totals) {
       const ratings = entry.ratings.sort((left, right) => right.date.localeCompare(left.date));
-      const recentMatches: PlayerRecentMatch[] = ratings.slice(0, RECENT_MATCH_LIMIT).map((point) => {
-        const match = loggedByDate.get(point.date) ?? null;
-        return {
+      /**
+       * The matches he has a RATING for AND the manager logged. Both halves are needed: the save says how
+       * he played, the debrief says who against and what the score was, and a point with only the first
+       * half is a number with no match attached to it.
+       */
+      const logged = ratings
+        .map((point) => ({ point, match: loggedByDate.get(point.date) ?? null }))
+        .filter((row): row is { point: PlayerRatingPoint; match: LoggedMatch } => row.match !== null);
+      const recentMatches: PlayerRecentMatch[] = logged
+        .slice(0, RECENT_MATCH_LIMIT)
+        .map(({ point, match }) => ({
           date: point.date,
           rating: point.rating,
-          opponent: match?.opponent ?? null,
-          venue: match?.venue ?? null,
-          scoreline: match?.scoreline ?? null,
-        };
-      });
+          opponent: match.opponent ?? "Opponent not recorded",
+          venue: match.venue,
+          scoreline: match.scoreline,
+        }));
 
       byPlayer[playerId] = {
         playerId,
@@ -161,6 +167,7 @@ export class PlayerPerformanceService {
         loggedMatches: entry.loggedMatches,
         ratings,
         recentMatches,
+        loggedMatchCount: logged.length,
       };
     }
 

@@ -47,7 +47,7 @@ import { momentOf, phasePhrase, seasonPhase, type SeasonProgress } from "./momen
  * stories exactly as they were. The number is here, beside the copy it describes, because "the desk was
  * rewritten" is an editorial call that cannot be computed from the code.
  */
-export const NEWS_COPY_VERSION = 11;
+export const NEWS_COPY_VERSION = 12;
 
 /** How a story's subject colours the card. Not a red/green light: a paper has good and bad news. */
 export type NewsTone = "GOOD" | "NEUTRAL" | "CONCERN";
@@ -999,6 +999,320 @@ export function roleGroup(role: string | null): "GK" | "DEF" | "MID" | "ATT" | n
 
 const WINDOW = 5;
 
+/**
+ * The player angles a desk runs because a paper likes a running joke.
+ *
+ * Everything here is built from the manager's own logged debriefs - who scored, who made one, who he picked
+ * out - plus the squad's role and age, which the save supplies. NOTHING here claims anything about a player's
+ * life, his mood, his car or his Twitter, because the desk has no source for any of that and a newspaper that
+ * makes it up about a named man is not funny, it is a liability. The jokes are all football jokes: a keeper
+ * who scored, a centre-half who has forgotten where he is supposed to stand, a teenager doing it anyway, the
+ * professional who does the work nobody applauds.
+ *
+ * The register is deliberate. A real desk keeps three or four of these running all season, and the reason the
+ * paper reads as a paper rather than as a feed is that it will happily spend a paragraph on the goalkeeper
+ * scoring while still being entirely straight about it. Nothing here is sarcastic AT the player; the joke is
+ * always on the situation.
+ *
+ * Each one is keyed on the latest match so the novelty rotation in `rank` demotes it next edition, which is
+ * what keeps a running joke from turning into the same running joke five days in a row.
+ */
+function playerColourStories(input: NewsInput, recent: NewsMatch[]): StoryDraft[] {
+  const items: StoryDraft[] = [];
+  if (recent.length < 3 || input.squad.length === 0) return items;
+
+  const latest = recent[0];
+  const on = latest.matchDate;
+  const goalsOf = (name: string): number => goalsIn(recent, name);
+  const assistsOf = (name: string): number => assistsIn(recent, name);
+  const praisedIn = (name: string): number =>
+    recent.filter((match) => match.standouts.some((pick) => sameName(pick, name))).length;
+  /** Matches he appears in at all, so copy can say "involved" without claiming he started anything. */
+  const involvedIn = (name: string, extra: (match: NewsMatch) => boolean): number =>
+    recent.filter(
+      (match) =>
+        extra(match) ||
+        match.scorers.some((scorer) => sameName(scorer, name)) ||
+        match.assisters.some((assister) => sameName(assister, name)) ||
+        match.standouts.some((pick) => sameName(pick, name))
+    ).length;
+
+  const pickBy = <T>(rows: T[], score: (row: T) => number): T | null => {
+    const sorted = [...rows].sort((left, right) => score(right) - score(left));
+    const best = sorted[0];
+    return best && score(best) > 0 ? best : null;
+  };
+
+  // ---- The goalkeeper who scored -------------------------------------------------------------
+  const keeperScorer = pickBy(
+    input.squad.filter((player) => roleGroup(player.role) === "GK"),
+    (player) => goalsOf(player.name)
+  );
+  if (keeperScorer) {
+    const tally = goalsOf(keeperScorer.name);
+    items.push({
+      id: `keeper-goal-${keeperScorer.name}-${latest.eventId}`,
+      kind: "PLAYER",
+      category: "PLAYER FOCUS",
+      tone: "GOOD",
+      headline: pick(
+        [
+          `${keeperScorer.name} Has Scored, and the Press Box Has Questions`,
+          `A Goalkeeper Scored: ${keeperScorer.name}`,
+          `${keeperScorer.name} Is Never Going Back in Goal`,
+          `Nobody in the Ground Could Quite Believe ${keeperScorer.name}`,
+        ],
+        `${keeperScorer.name}${latest.eventId}`,
+        "headline"
+      ),
+      body: `${keeperScorer.name} is a goalkeeper and has ${tally} ${plural(tally, "goal")} in the last ${recent.length} ${plural(recent.length, "match", "matches")}. The desk has checked this twice and it stands. Somebody in the office has already claimed credit for picking him.`,
+      evidence: [
+        `Goalkeeper by position`,
+        `${tally} ${plural(tally, "goal")} in ${recent.length} matches`,
+      ],
+      playerNames: [keeperScorer.name],
+      publishedOn: on,
+      weight: 76,
+      quote: null,
+    });
+  }
+
+  // ---- The defender who has stopped defending ------------------------------------------------
+  const scorerDefender = pickBy(
+    input.squad.filter(
+      (player) => roleGroup(player.role) === "DEF" && goalsOf(player.name) >= 2
+    ),
+    (player) => goalsOf(player.name)
+  );
+  if (scorerDefender) {
+    const tally = goalsOf(scorerDefender.name);
+    const role = positionWords(scorerDefender.role);
+    items.push({
+      id: `defender-goals-${scorerDefender.name}-${latest.eventId}`,
+      kind: "PLAYER",
+      category: "PLAYER FOCUS",
+      tone: "GOOD",
+      headline: pick(
+        [
+          `${scorerDefender.name} Has ${tally} and No Intention of Stopping`,
+          `The ${capitalise(role)} Who Forgot to Stay Back`,
+          `${scorerDefender.name} Is Doing Somebody Else's Job`,
+          `${tally} Goals From a ${capitalise(role)}`,
+        ],
+        `${scorerDefender.name}-defender-${latest.eventId}`,
+        "headline"
+      ),
+      body: `${tally} ${plural(tally, "goal")} in the last ${recent.length} ${plural(recent.length, "match", "matches")} from a ${role}. ${source(latest.eventId, "defender-source")} have noticed that nobody has asked him to stop.`,
+      evidence: [
+        `${role} by position`,
+        `${tally} ${plural(tally, "goal")} in ${recent.length} matches`,
+      ],
+      playerNames: [scorerDefender.name],
+      publishedOn: on,
+      weight: 70,
+      quote: null,
+    });
+  }
+
+  // ---- The teenager doing it anyway -----------------------------------------------------------
+  const kid = pickBy(
+    input.squad.filter(
+      (player) => player.age !== null && player.age <= 20 && goalsOf(player.name) >= 1
+    ),
+    (player) => goalsOf(player.name)
+  );
+  if (kid && kid.age !== null) {
+    const tally = goalsOf(kid.name);
+    items.push({
+      id: `kid-scoring-${kid.name}-${latest.eventId}`,
+      kind: "PLAYER",
+      category: "PLAYER FOCUS",
+      tone: "GOOD",
+      headline: pick(
+        [
+          `${kid.age} Years Old, and Scoring`,
+          `Nobody Told ${kid.name} to Be Nervous`,
+          `${kid.name} in ${ageBand(kid.age)} and Playing Like It`,
+          `The Youngest Thing in the Building Scored`,
+        ],
+        `${kid.name}-kid-${latest.eventId}`,
+        "headline"
+      ),
+      body: `${kid.name} is ${kid.age}. He has ${tally} ${plural(tally, "goal")} in the last ${recent.length} ${plural(recent.length, "match", "matches")}, and the coaching staff have spent the week telling anyone who will listen not to make a fuss of him.`,
+      evidence: [
+        `Age ${kid.age}`,
+        `${tally} ${plural(tally, "goal")} in ${recent.length} matches`,
+      ],
+      playerNames: [kid.name],
+      publishedOn: on,
+      weight: 66,
+      quote: null,
+    });
+  }
+
+  // ---- The one who has been here the whole time ------------------------------------------------
+  const veteran = pickBy(
+    input.squad.filter(
+      (player) =>
+        player.age !== null && player.age >= 33 && (goalsOf(player.name) >= 1 || praisedIn(player.name) >= 2)
+    ),
+    (player) => goalsOf(player.name) * 2 + praisedIn(player.name)
+  );
+  if (veteran && veteran.age !== null) {
+    const tally = goalsOf(veteran.name);
+    items.push({
+      id: `veteran-${veteran.name}-${latest.eventId}`,
+      kind: "PLAYER",
+      category: "PLAYER FOCUS",
+      tone: "GOOD",
+      headline: pick(
+        [
+          `${veteran.age} and Still Doing It`,
+          `${veteran.name} Has Heard All of This Before`,
+          `No Rebuild Required While ${veteran.name} Is Here`,
+          `${veteran.name} in ${ageBand(veteran.age)} and Setting the Standard`,
+        ],
+        `${veteran.name}-veteran-${latest.eventId}`,
+        "headline"
+      ),
+      body:
+        tally > 0
+          ? `${veteran.name} is ${veteran.age} and has ${tally} ${plural(tally, "goal")} in the last ${recent.length} ${plural(recent.length, "match", "matches")}. The desk has been predicting his decline for a while now, and the desk would like that on the record.`
+          : `${veteran.name} is ${veteran.age}, and the manager has picked him out ${praisedIn(veteran.name)} times in the last ${recent.length} ${plural(recent.length, "match", "matches")}. Whatever is being rebuilt here is being built around him.`,
+      evidence: [
+        `Age ${veteran.age}`,
+        tally > 0
+          ? `${tally} ${plural(tally, "goal")} in ${recent.length} matches`
+          : `${praisedIn(veteran.name)} standout mentions in ${recent.length} matches`,
+      ],
+      playerNames: [veteran.name],
+      publishedOn: on,
+      weight: 68,
+      quote: null,
+    });
+  }
+
+  // ---- The one who does the work nobody applauds -----------------------------------------------
+  const unsung = pickBy(
+    input.squad.filter(
+      (player) => praisedIn(player.name) >= 2 && goalsOf(player.name) === 0 && assistsOf(player.name) === 0
+    ),
+    (player) => praisedIn(player.name)
+  );
+  if (unsung) {
+    const mentions = praisedIn(unsung.name);
+    items.push({
+      id: `unsung-${unsung.name}-${latest.eventId}`,
+      kind: "PLAYER",
+      category: "PLAYER FOCUS",
+      tone: "GOOD",
+      headline: pick(
+        [
+          `${unsung.name} Has Not Scored. He Has Not Stopped Either`,
+          `The Work Nobody Applauds, by ${unsung.name}`,
+          `${unsung.name} Is the One the Manager Mentions`,
+          `No Goals, No Assists, No Arguments`,
+        ],
+        `${unsung.name}-unsung-${latest.eventId}`,
+        "headline"
+      ),
+      body: `No goals and no assists in the last ${recent.length} ${plural(recent.length, "match", "matches")}, and ${mentions} mentions from the manager anyway. ${source(latest.eventId, "unsung-source")} describe him as the first name on the sheet and the last name in the write-up.`,
+      evidence: [
+        `${mentions} standout mentions in ${recent.length} matches`,
+        `No goals and no assists in the window`,
+      ],
+      playerNames: [unsung.name],
+      publishedOn: on,
+      weight: 64,
+      quote: null,
+    });
+  }
+
+  // ---- The two who arrive together --------------------------------------------------------------
+  const together = new Map<string, { first: string; second: string; count: number }>();
+  for (const match of recent) {
+    for (let left = 0; left < match.standouts.length; left += 1) {
+      for (let right = left + 1; right < match.standouts.length; right += 1) {
+        const a = match.standouts[left];
+        const b = match.standouts[right];
+        const pair = [foldName(a), foldName(b)].sort();
+        const key = pair.join("|");
+        const existing = together.get(key);
+        if (existing) existing.count += 1;
+        else together.set(key, { first: a, second: b, count: 1 });
+      }
+    }
+  }
+  const duo = pickBy([...together.values()], (entry) => entry.count);
+  if (duo && duo.count >= 3) {
+    const both = [duo.first, duo.second].sort((left, right) => left.localeCompare(right));
+    items.push({
+      id: `duo-${both[0]}-${both[1]}-${latest.eventId}`,
+      kind: "PLAYER",
+      category: "PLAYER FOCUS",
+      tone: "GOOD",
+      headline: pick(
+        [
+          `You Cannot Have One Without the Other`,
+          `${both[0]} and ${both[1]} Arrive Together`,
+          `${both[0]}, ${both[1]}, and the Same Sentence Every Week`,
+          `The Pair the Manager Keeps Naming Together`,
+        ],
+        `${both[0]}${both[1]}${latest.eventId}`,
+        "headline"
+      ),
+      body: `${both[0]} and ${both[1]} have both been picked out by the manager in ${duo.count} of the last ${recent.length} ${plural(recent.length, "match", "matches")}. The desk has started writing their names as one entry in the notebook.`,
+      evidence: [
+        `Named together in ${duo.count} of ${recent.length} matches`,
+        `${both[0]} and ${both[1]}`,
+      ],
+      playerNames: [both[0], both[1]],
+      publishedOn: on,
+      weight: 74,
+      quote: null,
+    });
+  }
+
+  // ---- The one who did both ---------------------------------------------------------------------
+  const doubleAct = pickBy(
+    input.squad.filter((player) =>
+      recent.some(
+        (match) =>
+          match.scorers.some((scorer) => sameName(scorer, player.name)) &&
+          match.assisters.some((assister) => sameName(assister, player.name))
+      )
+    ),
+    (player) => involvedIn(player.name, () => false)
+  );
+  if (doubleAct) {
+    items.push({
+      id: `double-act-${doubleAct.name}-${latest.eventId}`,
+      kind: "PLAYER",
+      category: "PLAYER FOCUS",
+      tone: "GOOD",
+      headline: pick(
+        [
+          `${doubleAct.name} Scored One and Made One`,
+          `Do It Yourself: ${doubleAct.name}`,
+          `${doubleAct.name} Has Stopped Waiting for Help`,
+          `A Goal, an Assist, and a Very Long Walk Back`,
+        ],
+        `${doubleAct.name}-double-${latest.eventId}`,
+        "headline"
+      ),
+      body: `${doubleAct.name} has both scored and set one up inside the same ninety minutes. The desk would like to point out that this is two jobs, and that he appears to have done them himself.`,
+      evidence: [`Scored and assisted in the same match`],
+      playerNames: [doubleAct.name],
+      publishedOn: on,
+      weight: 66,
+      quote: null,
+    });
+  }
+
+  return items;
+}
+
+
 // ---------------------------------------------------------------------------------------------
 // The stories
 // ---------------------------------------------------------------------------------------------
@@ -1916,6 +2230,11 @@ function matchReportBody(
       });
     }
   }
+
+  // ---- 8b. The angles a paper runs because it likes a running joke ----------------------------
+  // Declared in their own function rather than inlined here: there are seven of them, they are all the
+  // same shape, and the note above `playerColourStories` explains what they will and will not say.
+  items.push(...playerColourStories(input, recent));
 
   // ---- 9. The weakness the manager keeps naming ---------------------------------------------
   if (recent.length >= 2) {
@@ -4650,6 +4969,15 @@ const STORY_TYPES = [
   "scorer",
   "assists",
   "standout",
+  // The colour pieces: the running-joke angles on a single player. Registered so the novelty rotation
+  // treats each as its own type rather than lumping them together as "player".
+  "keeper-goal",
+  "defender-goals",
+  "kid-scoring",
+  "veteran",
+  "unsung",
+  "duo",
+  "double-act",
   "goals",
   "leak",
   "haul",

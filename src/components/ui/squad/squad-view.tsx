@@ -39,6 +39,7 @@ export function SquadView({
   players,
   inGameDate = null,
   onSelectPlayer,
+  onSelectPlayerFromStats,
   currencySymbol = "£",
   playerPerformance = null,
 }: {
@@ -47,6 +48,8 @@ export function SquadView({
   /** The save's own clock, so an injury that has expired reads as fit by itself. */
   inGameDate?: string | null;
   onSelectPlayer: (player: EnrichedPlayer) => void;
+  /** Opening a player from the match-stats table, which also shows his form in the dossier. */
+  onSelectPlayerFromStats?: (player: EnrichedPlayer) => void;
   currencySymbol?: string;
   /** The season's per-player match record, for the table's match-stats mode. */
   playerPerformance?: PlayerPerformancePayload | null;
@@ -105,6 +108,7 @@ export function SquadView({
               players={visiblePlayers}
               inGameDate={inGameDate}
               onSelectPlayer={onSelectPlayer}
+              onSelectPlayerFromStats={onSelectPlayerFromStats}
               playerPerformance={playerPerformance}
             />
           </div>

@@ -250,6 +250,13 @@ export default function TouchlineApp() {
   const [seasonState, setSeasonState] = useState<SeasonState | null>(null);
   const [valuations, setValuations] = useState<Record<number, PlayerValuation>>({});
   const [playerPerformance, setPlayerPerformance] = useState<PlayerPerformancePayload | null>(null);
+  /**
+   * Whether the open dossier should show the player's form.
+   *
+   * True only when he was opened from the match-stats table. The form line is a reading of the manager's
+   * own logged matches, and it belongs to the mode he switched into rather than to every glance at a name.
+   */
+  const [selectedPlayerShowForm, setSelectedPlayerShowForm] = useState(false);
 
   const applyHydration = useCallback((payload: Partial<CareerHydrationPayload>) => {
     if (Array.isArray(payload.players)) setSquad(payload.players);
@@ -1702,7 +1709,14 @@ export default function TouchlineApp() {
                 careerId={careerId}
                 players={squad}
                 inGameDate={careerInfo?.inGameDate ?? null}
-                onSelectPlayer={(player) => setSelectedPlayer(player)}
+                onSelectPlayer={(player) => {
+                  setSelectedPlayerShowForm(false);
+                  setSelectedPlayer(player);
+                }}
+                onSelectPlayerFromStats={(player) => {
+                  setSelectedPlayerShowForm(true);
+                  setSelectedPlayer(player);
+                }}
                 currencySymbol={currencySymbolFor(appSettings?.currencySymbol)}
                 playerPerformance={playerPerformance}
               />
@@ -1771,6 +1785,7 @@ export default function TouchlineApp() {
         player={selectedPlayer}
         valuation={selectedPlayer ? valuations[selectedPlayer.eaPlayerId] : undefined}
         performance={selectedPlayer ? (playerPerformance?.byPlayer[selectedPlayer.id] ?? null) : null}
+        showMatchRecord={selectedPlayerShowForm}
         inGameDate={careerInfo?.inGameDate ?? null}
         onClose={() => setSelectedPlayer(null)}
         onSaveProfile={handleSavePlayerProfile}

@@ -160,27 +160,32 @@ export class NewsArchiveService {
    *     leaving one story in the old voice,
    *   - a DISMISSED story, which has a tombstone and no row at all, so it cannot come back,
    *   - and its tombstone is removed only alongside a row that exists, which is what keeps the two in step.
+   *
+   * The clear is ONE statement carrying the staleness predicate, rather than a select followed by deletes by
+   * id. Two reads of the same career arrive together - the app fires a second one the moment the first lands
+   * - and a select-then-delete let the second read delete a row the first had already rewritten in the new
+   * voice, taking the tombstone with it. Scoping the delete to the version being retired means a row written
+   * at the current version is not a candidate for it, whatever else is running.
    */
   private async reprintOutdatedCopy(careerId: string): Promise<number> {
-    const stale = await db
-      .select({ id: newsItems.id })
-      .from(newsItems)
+    const cleared = await db
+      .delete(newsItems)
       .where(
         and(
           eq(newsItems.careerId, careerId),
           eq(newsItems.saved, false),
           lt(newsItems.copyVersion, NEWS_COPY_VERSION)
         )
-      );
+      )
+      .returning({ id: newsItems.id });
 
-    for (const row of stale) {
-      await db.delete(newsItems).where(and(eq(newsItems.careerId, careerId), eq(newsItems.id, row.id)));
+    for (const row of cleared) {
       await db
         .delete(newsPublished)
         .where(and(eq(newsPublished.careerId, careerId), eq(newsPublished.id, row.id)));
     }
 
-    return stale.length;
+    return cleared.length;
   }
 
   /**
@@ -203,7 +208,16 @@ export class NewsArchiveService {
       .from(newsPublished)
       .where(eq(newsPublished.careerId, edition.careerId));
     const known = new Set([...archived.map((row) => row.id), ...tombstoned.map((row) => row.id)]);
-    const fresh = edition.items.filter((item) => !known.has(item.id));
+    /**
+     * Deduplicated by id, then filtered against what is on file.
+     *
+     * `id` is the primary key, so two drafts sharing one could not both be stored and the second insert would
+     * abort the whole edition rather than skip one story. The desk's ids are built to be unique, and this is
+     * the guard that keeps a duplicate an editorial accident rather than a 500.
+     */
+    const fresh = [...new Map(edition.items.map((item) => [item.id, item])).values()].filter(
+      (item) => !known.has(item.id)
+    );
     if (fresh.length === 0) {
       return 0;
     }
@@ -218,8 +232,10 @@ export class NewsArchiveService {
 
     // `sortIndex` records the order the desk put the paper in, so the interleaving it worked out (no two
     // neighbouring stories of the same kind) survives storage instead of being re-derived on read.
-    await db.insert(newsItems).values(
-      fresh.map((item, index) => ({
+    const stored = await db
+      .insert(newsItems)
+      .values(
+        fresh.map((item, index) => ({
         id: item.id,
         careerId: edition.careerId,
         category: item.category,
@@ -245,7 +261,12 @@ export class NewsArchiveService {
         edition: nextEdition,
         createdAt: new Date().toISOString(),
       }))
-    );
+    )
+      // A second read of the same career can reach this line holding the same ids. The tombstone insert below
+      // has always ignored conflicts; this one did not, which turned a harmless overlap into an error page.
+      // `returning` therefore counts what was really stored rather than what was offered.
+      .onConflictDoNothing()
+      .returning({ id: newsItems.id });
 
     // Tombstoned in the same pass, so a crash between the two writes cannot leave a story printable twice:
     // the tombstone is the cheaper and safer of the two to have written first, and the id is the primary key
@@ -262,7 +283,7 @@ export class NewsArchiveService {
       .onConflictDoNothing();
 
     await this.enforceLimit(edition.careerId, edition.matchEventIds);
-    return fresh.length;
+    return stored.length;
   }
   /**
    * Overwrites the LEAST RELEVANT unsaved stories once the cap is reached.

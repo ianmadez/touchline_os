@@ -15,7 +15,6 @@ import { NationFlag } from "./nation-flag";
 import { AttributeBars } from "./attribute-bars";
 import type { PlayerValuation } from "@/lib/services/value-service";
 import type { PlayerPerformance } from "@/lib/squad/performance";
-import { MIN_RATINGS_FOR_TREND } from "@/lib/squad/performance";
 import { RatingBadge, RatingSparkline } from "./rating-sparkline";
 import { venueLabel } from "@/lib/ui/labels";
 import { formatMoney, formatMoneyExact } from "@/lib/ui/format";
@@ -39,6 +38,14 @@ interface PlayerDrawerProps {
    * than as zeroes.
    */
   performance?: PlayerPerformance | null;
+  /**
+   * Whether this dossier was opened from the match-stats table rather than from the squad list.
+   *
+   * The match record is a READING of the manager's own logged matches, and it belongs to the mode he
+   * deliberately switched into rather than to every glance at a squad list. Opening a player to set his
+   * assigned role does not need a form line in the way.
+   */
+  showMatchRecord?: boolean;
   /** The save's own clock, which every injury return date is measured against. */
   inGameDate?: string | null;
   onClose: () => void;
@@ -62,6 +69,7 @@ export function PlayerDrawer({
   player,
   valuation,
   performance = null,
+  showMatchRecord = false,
   inGameDate = null,
   onClose,
   onSaveProfile,
@@ -636,29 +644,26 @@ export function PlayerDrawer({
             The save supplies the ratings; the manager supplies the goals and assists, because the save
             records no scorer for anything.
           */}
-          {performance ? (
+          {showMatchRecord && performance && (
             <section className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-950/40">
               <div className="mb-3 flex items-baseline justify-between gap-2">
                 <h3 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
-                  Match record
+                  Form
                 </h3>
                 {performance.appearances > 0 && (
-                  <span className="font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    {performance.appearances} rated {performance.appearances === 1 ? "match" : "matches"} ·{" "}
-                    {performance.minutes} mins
+                  <span className="font-sub text-[10px] uppercase tracking-wider tabular-nums text-slate-500 dark:text-slate-400">
+                    {performance.appearances} rated · {performance.minutes} mins
                   </span>
                 )}
               </div>
 
-              {performance.ratings.length >= MIN_RATINGS_FOR_TREND ? (
-                <RatingSparkline ratings={performance.ratings} />
-              ) : (
-                <p className="font-sans text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                  {performance.ratings.length === 0
-                    ? "Your save has not rated him in a match yet."
-                    : `${performance.ratings.length} rated ${performance.ratings.length === 1 ? "match" : "matches"} so far. Three is where a run of form becomes readable, so no line is drawn yet.`}
-                </p>
-              )}
+              {/* The line is built from the manager's own logged matches, so every point on it is a match
+                  he can name. See `RatingSparkline`: it says plainly when there are not three of those yet
+                  rather than drawing an axis with nothing on it. */}
+              <RatingSparkline
+                matches={performance.recentMatches}
+                className="font-sans text-xs leading-relaxed text-slate-600 dark:text-slate-300"
+              />
 
               <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
                 <div>
@@ -698,19 +703,14 @@ export function PlayerDrawer({
               </dl>
 
               {performance.recentMatches.length > 0 && (
-                <ul className="mt-3 space-y-1.5 border-t border-slate-200 pt-3 dark:border-slate-800">
+                <ul className="mt-3 space-y-1 border-t border-slate-200 pt-3 dark:border-slate-800">
                   {performance.recentMatches.map((match) => (
                     <li
                       key={`${match.date}-${match.rating}`}
                       className="flex items-center justify-between gap-3"
                     >
                       <span className="min-w-0 font-sans text-xs text-slate-700 dark:text-slate-200">
-                        <span className="tabular-nums text-slate-500 dark:text-slate-400">
-                          {match.date}
-                        </span>{" "}
-                        <span className="truncate">
-                          {match.opponent ?? "Opponent not logged"}
-                        </span>
+                        <span className="truncate">{match.opponent}</span>
                         {match.venue && (
                           <span className="ml-1.5 font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
                             {venueLabel(match.venue)}
@@ -721,6 +721,9 @@ export function PlayerDrawer({
                             {match.scoreline}
                           </span>
                         )}
+                        <span className="ml-1.5 tabular-nums text-slate-400 dark:text-slate-500">
+                          {match.date}
+                        </span>
                       </span>
                       <RatingBadge rating={match.rating} />
                     </li>
@@ -728,21 +731,9 @@ export function PlayerDrawer({
                 </ul>
               )}
 
-              {performance.recentMatches.some((match) => match.opponent === null) && (
-                <p className="mt-2 font-sans text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
-                  A match the save rated but you did not log shows the rating on its own, because the
-                  opponent, the venue and the score exist only in a debrief.
-                </p>
-              )}
-            </section>
-          ) : (
-            <section className="mt-6 rounded-2xl border border-slate-200 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-950/40">
-              <h3 className="mb-2 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
-                Match record
-              </h3>
-              <p className="font-sans text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                Nothing recorded for him this season yet. Your save supplies the match ratings; your own
-                debriefs supply the goals and assists.
+              <p className="mt-3 font-sans text-[10px] leading-relaxed text-slate-400 dark:text-slate-500">
+                The ratings are your save&apos;s own; the opponent, the venue and the score are what you
+                logged. A match you did not log is not on the line, because it is not a match you can name.
               </p>
             </section>
           )}

@@ -19,8 +19,19 @@ export const MIN_MINUTES_FOR_FORM = 15;
 /** Fewer than this many ratings and there is no trend to draw, only noise. */
 export const MIN_RATINGS_FOR_TREND = 3;
 
+/**
+ * How many of HIS OWN logged matches are needed before a form line is drawn.
+ *
+ * Deliberately counted on the manager's debriefs rather than on the save's ratings. A save will happily
+ * supply fifteen ratings for a squad player the manager has never written a line about, and a graph built
+ * from those is a graph with no opponent, no venue and no score on any point of it - which is exactly what
+ * the first version printed, a row of "Opponent not logged" beside a number. Three logged matches is the
+ * point at which the line is about a run the manager actually watched.
+ */
+export const MIN_LOGGED_MATCHES_FOR_TREND = 3;
+
 /** How many recent matches the dossier lists. Enough to read a run of form, short enough to scan. */
-export const RECENT_MATCH_LIMIT = 8;
+export const RECENT_MATCH_LIMIT = 12;
 
 /** The lowest and highest rating the sparkline's axis covers, so two players' lines are comparable. */
 export const RATING_AXIS_MIN = 4;
@@ -90,8 +101,14 @@ export interface PlayerRatingPoint {
 export interface PlayerRecentMatch {
   date: string;
   rating: number;
-  /** From the debrief logged for that date, when one was. Null when the match was never logged. */
-  opponent: string | null;
+  /**
+   * What the manager's own debrief recorded for that match.
+   *
+   * Not nullable, and that is the point of this type: a match only appears here when a debrief exists for
+   * it, so the opponent is always known. A rating with no debrief behind it is a figure from the save with
+   * no match attached to it, and printing "Opponent not logged" beside a number is not a match record.
+   */
+  opponent: string;
   venue: string | null;
   scoreline: string | null;
 }
@@ -113,8 +130,15 @@ export interface PlayerPerformance {
   loggedMatches: number;
   /** Every counted rating, newest first. */
   ratings: PlayerRatingPoint[];
-  /** The most recent counted matches, newest first, with whatever the debrief knows about them. */
+  /**
+   * The matches the manager logged that ALSO carry a rating, newest first and capped for display.
+   *
+   * This is the only series the form line and the match list are built from, because it is the only one
+   * where every point is a match he actually reported: opponent, venue and score on all of them.
+   */
   recentMatches: PlayerRecentMatch[];
+  /** How many logged-and-rated matches there are in total, before the display cap. */
+  loggedMatchCount: number;
 }
 
 export interface PlayerPerformancePayload {

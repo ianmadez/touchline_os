@@ -377,6 +377,143 @@ const onceOnly = buildNews(
 );
 check("named once, it is not", !has(onceOnly, "weakness-"));
 
+// ---------------------------------------------------------------------------------------------
+// 3b. The colour pieces: a running joke about one player
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nthe colour pieces about a single player");
+
+/** A match whose only notable names are the ones a check puts in it. */
+function colourMatch(eventId: string, date: string, overrides: Partial<NewsMatch> = {}): NewsMatch {
+  return match({
+    eventId,
+    matchDate: date,
+    opponent: "Rovers",
+    scorers: [],
+    assisters: [],
+    standouts: [],
+    ...overrides,
+  });
+}
+
+/** Five wins with nothing in them, so only the story under test can fire. */
+function quietRun(overrides: Array<Partial<NewsMatch>>): NewsMatch[] {
+  const dates = ["2026-10-17", "2026-10-10", "2026-10-03", "2026-09-26", "2026-09-19"];
+  return dates.map((date, index) => colourMatch(`evt-q${index}`, date, overrides[index] ?? {}));
+}
+
+const withAges = (ages: Record<string, number>): NewsPlayer[] =>
+  SQUAD.map((player) => (ages[player.name] === undefined ? player : { ...player, age: ages[player.name] }));
+
+const colourA = buildNews(
+  input({
+    squad: withAges({ "Danny Whitlock": 19 }),
+    matches: quietRun([
+      { scorers: ["Marcus Bell", "Callum Reid"] },
+      { scorers: ["Callum Reid"] },
+      { scorers: ["Danny Whitlock"] },
+      {},
+      {},
+    ]),
+  })
+);
+check(
+  "a goalkeeper who scored gets his own piece",
+  colourA.find((item) => item.id.startsWith("keeper-goal-"))?.playerNames.includes("Marcus Bell") === true
+);
+check(
+  "a defender with two goals gets one too",
+  colourA.find((item) => item.id.startsWith("defender-goals-"))?.playerNames.includes("Callum Reid") === true
+);
+check(
+  "and a teenager who scored gets a third",
+  colourA.find((item) => item.id.startsWith("kid-scoring-"))?.playerNames.includes("Danny Whitlock") === true
+);
+check(
+  "the goalkeeper piece is filed as a player focus rather than as a report",
+  colourA.find((item) => item.id.startsWith("keeper-goal-"))?.category === "PLAYER FOCUS"
+);
+const keeperPiece = colourA.find((item) => item.id.startsWith("keeper-goal-"));
+check(
+  "and it claims nothing about him beyond the goal",
+  keeperPiece !== undefined && !/\b(wife|family|nightclub|twitter|agent)\b/i.test(keeperPiece.body),
+  keeperPiece?.body ?? "no piece"
+);
+
+const colourB = buildNews(
+  input({
+    squad: withAges({ "Jonas Berg": 34 }),
+    matches: quietRun([
+      { scorers: ["Jonas Berg"], standouts: ["Sam Okafor", "Luca Amato"] },
+      { standouts: ["Sam Okafor", "Luca Amato"] },
+      { standouts: ["Sam Okafor", "Luca Amato"] },
+      {},
+      {},
+    ]),
+  })
+);
+check(
+  "a veteran still doing it gets his own piece",
+  colourB.find((item) => item.id.startsWith("veteran-"))?.playerNames.includes("Jonas Berg") === true
+);
+const duoPiece = colourB.find((item) => item.id.startsWith("duo-"));
+check(
+  "two players the manager names together, three matches running, get one too",
+  duoPiece !== undefined &&
+    duoPiece.playerNames.length === 2 &&
+    duoPiece.playerNames.includes("Sam Okafor") &&
+    duoPiece.playerNames.includes("Luca Amato")
+);
+check(
+  "and the piece is about the pair rather than about one of them",
+  duoPiece?.playerNames.length === 2 && duoPiece.body.includes("Sam Okafor") && duoPiece.body.includes("Luca Amato")
+);
+
+/*
+ * The colour pieces share one category, so an edition carries at most three. That is the point of them: a
+ * paper that ran all seven on the same afternoon would be a list of running jokes rather than a newspaper, so
+ * the rest wait for another edition and the novelty rotation brings them round.
+ */
+check("the category cap keeps the edition to three of them", !has(colourB, "unsung-"));
+
+const colourC = buildNews(
+  input({
+    matches: quietRun([{ standouts: ["Sam Okafor"] }, { standouts: ["Sam Okafor"] }, { standouts: ["Sam Okafor"] }, {}, {}]),
+  })
+);
+const unsungPiece = colourC.find((item) => item.id.startsWith("unsung-"));
+check(
+  "a player with no goals and no assists but two mentions is its own story",
+  unsungPiece?.playerNames.includes("Sam Okafor") === true
+);
+check(
+  "and it says plainly that he has not scored",
+  unsungPiece !== undefined && /no goals/i.test(unsungPiece.body),
+  unsungPiece?.body ?? "no piece"
+);
+
+const colourD = buildNews(
+  input({ matches: quietRun([{ scorers: ["Jordan Pike"], assisters: ["Jordan Pike"] }, {}, {}, {}, {}]) })
+);
+check(
+  "scoring and setting one up in the same match is a story",
+  colourD.find((item) => item.id.startsWith("double-act-"))?.playerNames.includes("Jordan Pike") === true
+);
+
+for (const [label, items] of [
+  ["a goalkeeper scoring", colourA],
+  ["a veteran scoring", colourB],
+  ["an unsung regular", colourC],
+  ["a one-man double act", colourD],
+] as const) {
+  check(
+    `every colour piece names only real squad members (${label})`,
+    items
+      .filter((item) => item.category === "PLAYER FOCUS")
+      .every((item) => item.playerNames.every((name) => SQUAD.some((player) => foldName(player.name) === foldName(name))))
+  );
+}
+
 const heavyLatest = buildNews(
   input({ matches: [{ ...MATCHES[0], goalsFor: 5, goalsAgainst: 0 }, ...MATCHES.slice(1)] })
 );
