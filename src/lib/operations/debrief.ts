@@ -50,11 +50,17 @@ export interface MatchDebriefPayload {
   concededMinutes?: number[] | null;
   /**
    * What the manager observed after the match: shots, shots inside the box, big chances, possession and
-   * passes completed.
+   * passes completed, plus the game's own expected goals when he read it off the Match Facts screen.
    *
    * Stored as entered and nothing else. Expected goals and the finishing figure are worked out on read,
    * from the shared model in `events/match-stats`, so a tweak to a weight cannot leave a stored figure
-   * contradicting the one the screen now shows.
+   * contradicting the one the screen now shows. The reported figure is the exception and is stored,
+   * because it is an observation rather than a derivation: the game's number cannot be recomputed from
+   * anything the app holds.
+   *
+   * Provenance stays USER either way. A scanned figure is the manager photographing what the game told
+   * him and accepting it, which is his record of what he saw, not the app's read of a save file. The
+   * optional `capture` marker records only the method, and its absence means the manager typed it.
    */
   matchStats?: MatchStats | null;
   /**

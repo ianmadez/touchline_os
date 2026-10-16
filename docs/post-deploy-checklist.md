@@ -25,6 +25,10 @@ That is the whole reason item 3 below is not optional.
 - [ ] `npx eslint src` is at the known baseline (currently 1 error, 2 warnings — both pre-existing).
 - [ ] `npm run build:browser` exits 0.
 - [ ] `npm run bridge:build` exits 0 and `public/bridge/touchline-bridge.zip` exists.
+- [ ] The screenshot reader's runtime is complete: `public/ocr/worker.min.js`, the six
+      `public/ocr/core/tesseract-core*.wasm.js` builds and `public/ocr/lang/eng.traineddata.gz` all exist.
+      The worker and the core are staged by the build and the model is committed, so a missing one of the
+      three is a build that will fail in front of a manager rather than here.
 
 ## After uploading
 
@@ -52,6 +56,11 @@ That is the whole reason item 3 below is not optional.
 7. [ ] **Bridge download works.** `…/bridge/touchline-bridge.zip` downloads and extracts to four files.
 8. [ ] **Unpaired state is honest.** With no bridge running and nothing paired, the panel offers the
    download and the file picker still works.
+9. [ ] **The screenshot reader works on the deployed origin.** Open a debrief, switch Match figures to
+   Screenshot, and add a capture of the game's Match Facts screen. Expect the figures to land in the boxes
+   and the picture to sit beside them. This is the only check that proves the worker, the wasm core and the
+   language model are all served from the deployment rather than from a CDN, because a scan makes no other
+   request at all. A refusal names its reason instead of failing silently, and the Manual pane still works.
 
 ## Once the production domain is known
 

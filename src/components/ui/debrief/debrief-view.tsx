@@ -8,8 +8,23 @@ import { GroupDebriefPanel } from "@/components/ui/debrief/group-debrief-panel";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import type { ParsedCareerEvent } from "@/lib/services/event-service";
 import type { LeagueTeamSummary } from "@/lib/services/career-service";
-import { resultLabel, venueLabel } from "@/lib/ui/labels";
-import { ordinal } from "@/lib/ui/format";
+import { resultLabel, venueLabel, matchStatLabel, captureLabel } from "@/lib/ui/labels";
+import { ordinal, formatExpectedGoals } from "@/lib/ui/format";
+import {
+  EMPTY_MATCH_STATS,
+  MANUAL_STAT_FIELDS,
+  MATCH_STAT_KEYS,
+  STAT_BOX_CLASS,
+  emptySources,
+  hasAnyMatchStat,
+  sanitiseCount,
+  sanitiseDecimal,
+  statNumberOf,
+  type MatchStatDraft,
+  type MatchStatKey,
+  type StatSource,
+} from "@/lib/ui/match-figures";
+import dynamic from "next/dynamic";
 import { OPPONENT_SORT_ORDERS, orderTeams } from "@/lib/ui/opponent-list";
 import { MatchContribution } from "@/lib/events/types";
 import { POSITION_GROUP_ORDER, positionGroupOf } from "@/lib/tactics/roles";
@@ -18,13 +33,15 @@ import {
   DebriefHistoryPayload,
 } from "@/lib/events/debrief-anomalies";
 import {
-  expectedGoals,
+  effectiveExpectedGoals,
   finishingEdge,
   finishingVerdict,
   keptCleanSheet,
   overperformanceAlert,
+  reportedXgUsed,
   shotsOutsideBox,
   type AlertInput,
+  type CaptureMethod,
   type MatchStats,
 } from "@/lib/events/match-stats";
 
@@ -57,6 +74,29 @@ interface DebriefViewProps {
 import type { CompetitionContext } from "@/lib/services/competition-service";
 
 type DebriefSubTab = "MATCH" | "GROUP";
+
+/**
+ * How the match figures get in.
+ *
+ * Two panes over one set of boxes. The Screenshot pane is the scanner and is loaded only when it is asked for,
+ * so nothing about it is downloaded, parsed or run on a visit that never opens it, and that includes the reader
+ * itself: the pipeline is behind a further import inside the pane.
+ */
+type StatsPane = "MANUAL" | "SCREENSHOT";
+
+const STATS_PANES: ReadonlyArray<{ id: StatsPane; label: string }> = [
+  { id: "MANUAL", label: "Manual" },
+  { id: "SCREENSHOT", label: "Screenshot" },
+];
+
+const ScanPanel = dynamic(() => import("@/components/ui/debrief/scan-panel").then((m) => m.ScanPanel), {
+  ssr: false,
+  loading: () => (
+    <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400" aria-live="polite">
+      Loading the reader.
+    </p>
+  ),
+});
 
 /**
  * Shape of a stored MATCH_DEBRIEF payload. Tolerant of the earlier single-standout shape so a
@@ -124,46 +164,13 @@ interface DebriefDraft {
 }
 
 /**
- * The five observable figures, held as text.
+ * The figures, held as text and shared with the screenshot pane.
  *
  * Text for the same reason the score boxes are: an empty box is a real state and means "not recorded",
  * which is a different thing from zero. A keeper who made no saves is not the same as one nobody counted.
+ * The shape and the rules live in `@/lib/ui/match-figures`, because the pane that fills these boxes and the
+ * draft writer that persists them both need the same list.
  */
-type MatchStatDraft = Record<
-  "shots" | "shotsInsideBox" | "bigChances" | "possession" | "passesCompleted",
-  string
->;
-
-const EMPTY_MATCH_STATS: MatchStatDraft = {
-  shots: "",
-  shotsInsideBox: "",
-  bigChances: "",
-  possession: "",
-  passesCompleted: "",
-};
-
-/** The boxes in the order they are shown, each with the hint that says exactly what to count. */
-const MATCH_STAT_FIELDS: ReadonlyArray<{ key: keyof MatchStatDraft; label: string; hint: string }> = [
-  { key: "shots", label: "Shots", hint: "Every shot, including the ones blocked or off target." },
-  { key: "shotsInsideBox", label: "Inside box", hint: "Shots taken from inside the penalty area." },
-  { key: "bigChances", label: "Big chances", hint: "Chances you would have expected to be scored." },
-  { key: "possession", label: "Possession %", hint: "Your share of the ball, 0 to 100." },
-  { key: "passesCompleted", label: "Passes", hint: "Passes you completed." },
-];
-
-/** A box's text as a number, or null when it is empty or not a number. Never turns blank into zero. */
-function statNumberOf(value: string | undefined): number | null {
-  const trimmed = (value ?? "").trim();
-  if (trimmed === "") return null;
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-/** True when any stat box holds something. */
-function hasAnyMatchStat(stats: Partial<MatchStatDraft> | undefined): boolean {
-  if (!stats) return false;
-  return Object.values(stats).some((value) => typeof value === "string" && value.trim() !== "");
-}
 
 /** The single debrief's draft surface. A group debrief keys by block id instead. */
 const MATCH_DRAFT_SURFACE = "MATCH";
@@ -370,6 +377,24 @@ export function DebriefView({
   const [concededMinutes, setConcededMinutes] = useState<string[]>([]);
   // The observable post-match figures. Empty is a real state here too, so they are stored as text.
   const [matchStats, setMatchStats] = useState<MatchStatDraft>(EMPTY_MATCH_STATS);
+  /**
+   * Which of the two panes the Match figures block is showing.
+   *
+   * Component state and deliberately not a setting: it changes how the figures get into the boxes and never
+   * where they live or what a debrief records, so a manager who never touches it gets exactly the panel that
+   * was there before. Manual is where it lands every time, with whatever is already in the boxes.
+   */
+  const [statsPane, setStatsPane] = useState<StatsPane>("MANUAL");
+  /**
+   * Where each figure's current text came from.
+   *
+   * Not persisted as its own thing: the draft keeps the figures and this keeps their method, so after a reload
+   * the values survive and their chips do not. That is stated in the pane rather than hidden, and it is the
+   * right trade because the chips describe a read the manager has already reviewed.
+   */
+  const [statSources, setStatSources] = useState<Record<MatchStatKey, StatSource>>(emptySources);
+  /** The layout profile that last read a figure, for the capture marker on save. */
+  const [scanLayout, setScanLayout] = useState<string | null>(null);
   //
   // Neither side's placing is prefilled, on purpose. The save's `currenttableposition` is not a
   // league table: in this division the 24 clubs carry values with ties (two 4ths, two 8ths, two
@@ -577,7 +602,8 @@ export function DebriefView({
   /*
     The derived figures. Every one of these is worked out from the manager's own entries, so they are
     DERIVED and the screen labels them that way; nothing here is read from the save, which carries no
-    match events at all.
+    match events at all. The one exception is the game's own expected goals, which is an observation
+    rather than a derivation and is preferred wherever the model's estimate would have been used.
   */
   const enteredStats: MatchStats = {
     shots: statNumberOf(matchStats.shots),
@@ -585,12 +611,32 @@ export function DebriefView({
     bigChances: statNumberOf(matchStats.bigChances),
     possession: statNumberOf(matchStats.possession),
     passesCompleted: statNumberOf(matchStats.passesCompleted),
+    expectedGoalsReported: statNumberOf(matchStats.expectedGoalsReported),
   };
-  const expected = expectedGoals(enteredStats);
+  const expected = effectiveExpectedGoals(enteredStats);
+  const fromTheGame = reportedXgUsed(enteredStats);
   const finishing = finishingEdge(enteredStats, ourScore);
   const finishingWord = finishingVerdict(finishing);
   const outsideBox = shotsOutsideBox(enteredStats);
   const cleanSheet = keptCleanSheet(theirScore);
+
+  /**
+   * The method of every figure a read produced, for the record.
+   *
+   * Only the figures a scan touched are listed, so an absent entry means the manager typed it. That is the same
+   * meaning an absent marker has always had, which is why nothing has to be rewritten for debriefs logged
+   * before the scanner existed.
+   */
+  const captureFigures = Object.fromEntries(
+    MATCH_STAT_KEYS.filter((key) => statSources[key] !== "NONE").map((key) => [
+      key,
+      statSources[key] as CaptureMethod,
+    ])
+  ) as Record<string, CaptureMethod>;
+  const savedStats: Record<string, unknown> =
+    scanLayout !== null && Object.keys(captureFigures).length > 0
+      ? { ...matchStats, capture: { layout: scanLayout, figures: captureFigures } }
+      : matchStats;
 
   // Only our own club is filtered out. The rest are offered in the order the manager has chosen, and
   // the order is a global preference, read from the shared store rather than held here as component
@@ -866,6 +912,9 @@ export function DebriefView({
     setGoalMinutes([]);
     setConcededMinutes([]);
     setMatchStats(EMPTY_MATCH_STATS);
+    setStatSources(emptySources());
+    setScanLayout(null);
+    setStatsPane("MANUAL");
     setWeaknessIdentified("");
     setManagerReflection("");
     setDynamicAnswers({});
@@ -874,6 +923,47 @@ export function DebriefView({
     setContributionPlayerId("");
     setContributionGoals(1);
     setContributionAssists(0);
+  };
+
+  /**
+   * One figure, as the manager left it.
+   *
+   * The method follows the text rather than being set by the caller, so the two panes behave identically and
+   * there is one place that knows the rule: a figure a read produced and the manager then changed is marked as
+   * edited, and a figure he typed himself carries no marker at all, because "typed" is what an absent marker
+   * means everywhere else in this payload.
+   *
+   * The text is cleaned here for the same reason. Both panes accept integers, and the game's expected goals is
+   * the one figure that is genuinely a decimal, so the rule about which characters a box takes lives in one
+   * place rather than in each caller's `onChange`.
+   */
+  const changeStat = (key: MatchStatKey, raw: string) => {
+    const value = key === "expectedGoalsReported" ? sanitiseDecimal(raw) : sanitiseCount(raw);
+    setMatchStats((current) => {
+      if (current[key] === value) return current;
+      return { ...current, [key]: value };
+    });
+    setStatSources((current) => {
+      if (value.trim() === "") return { ...current, [key]: "NONE" };
+      return { ...current, [key]: current[key] === "SCAN" ? "EDITED" : "NONE" };
+    });
+  };
+
+  /**
+   * What a read produced, placed in its boxes.
+   *
+   * The pane has already applied the overwrite rule and only hands over the figures that passed it, so this
+   * writes them and records their method. Nothing else here is writing: the event's own provenance stays USER,
+   * because a figure the manager photographed off his own screen and accepted is his record of what he saw.
+   */
+  const applyScan = (values: Partial<Record<MatchStatKey, string>>, layout: string) => {
+    setMatchStats((current) => ({ ...current, ...values }));
+    setStatSources((current) => {
+      const next = { ...current };
+      for (const key of Object.keys(values) as MatchStatKey[]) next[key] = "SCAN";
+      return next;
+    });
+    setScanLayout(layout);
   };
 
   /**
@@ -919,12 +1009,24 @@ export function DebriefView({
     setGoalMinutes((stored.goalMinutes ?? []).map((minute) => String(minute)));
     setConcededMinutes((stored.concededMinutes ?? []).map((minute) => String(minute)));
     const storedStats = stored.matchStats ?? {};
-    setMatchStats({
-      shots: text(storedStats.shots),
-      shotsInsideBox: text(storedStats.shotsInsideBox),
-      bigChances: text(storedStats.bigChances),
-      possession: text(storedStats.possession),
-      passesCompleted: text(storedStats.passesCompleted),
+    // Iterated over the known field list rather than copied key by key, so a figure added later cannot be
+    // silently dropped on the round trip through an edit and save.
+    setMatchStats(
+      Object.fromEntries(
+        MATCH_STAT_KEYS.map((key) => [key, text(storedStats[key])])
+      ) as MatchStatDraft
+    );
+    // The stored marker is read back so an edited figure keeps saying so, and a value that arrived from a scan
+    // still shows its method when the debrief is opened again.
+    const storedCapture = stored.matchStats?.capture ?? null;
+    setScanLayout(storedCapture?.layout ?? null);
+    setStatSources(() => {
+      const next = emptySources();
+      for (const key of MATCH_STAT_KEYS) {
+        const method = storedCapture?.figures?.[key];
+        next[key] = method === "SCAN" || method === "EDITED" ? method : "NONE";
+      }
+      return next;
     });
     setMessage("Editing that debrief. Save to apply the changes.");
   };
@@ -992,8 +1094,9 @@ export function DebriefView({
           // that has since been corrected cannot travel with the debrief.
           goalMinutes: goalMinutes.slice(0, goalSlots),
           concededMinutes: concededMinutes.slice(0, concededSlots),
-          // Sent as typed and validated server side, in the one place that owns those rules.
-          matchStats,
+          // Sent as typed and validated server side, in the one place that owns those rules. The capture
+          // marker rides along when a scan produced any of the figures, and is absent otherwise.
+          matchStats: savedStats,
           weaknessIdentified,
           managerReflection,
           dynamicPrompts,
@@ -1484,8 +1587,12 @@ export function DebriefView({
 
           {/*
             What you saw after the match. Entirely optional, and entirely yours: the save holds no match
-            events at all, so this is the only possible source. The four figures under the boxes are
-            worked out from what is entered here plus the scoreline, and nothing else.
+            events at all, so this is the only possible source. The figures under the boxes are worked out
+            from what is entered here plus the scoreline, and nothing else.
+
+            The strip switches HOW the figures get in and never where they live: both panes write the same
+            state, so the manual boxes stay the destination and the scanner is an extra way to reach them.
+            Manual is where every visit starts, and its markup is untouched by the scanner.
           */}
           <div data-tour="debrief-match-stats" className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1496,49 +1603,70 @@ export function DebriefView({
                 optional · yours
               </span>
             </div>
+
+            <SubTabs
+              tabs={STATS_PANES}
+              active={statsPane}
+              onChange={setStatsPane}
+              tour="debrief-match-stats-pane"
+            />
+
             <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
-              What you can see for yourself after the match. Hover a box to see exactly what to count.
-              The more you fill in, the more the figures below can say.
+              {statsPane === "MANUAL"
+                ? "What you can see for yourself after the match. Hover a box to see exactly what to count. The more you fill in, the more the figures below can say."
+                : "Photograph or copy the Match Facts screen the game shows after the match, and the reader fills the boxes below from it. You check every figure before anything is saved."}
             </p>
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-              {MATCH_STAT_FIELDS.map((field) => (
-                <label key={field.key} className="block" title={field.hint}>
-                  <span className="block font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    {field.label}
-                  </span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="–"
-                    value={matchStats[field.key]}
-                    onChange={(event) =>
-                      setMatchStats((current) => ({
-                        ...current,
-                        [field.key]: event.target.value.replace(/\D/g, "").slice(0, 4),
-                      }))
-                    }
-                    className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white text-center font-sub text-sm font-bold tabular-nums text-slate-900 placeholder:font-normal placeholder:text-slate-300 focus:outline-none focus:border-[#E11D48] focus:ring-2 focus:ring-[#E11D48]/20 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-600"
-                  />
-                </label>
-              ))}
-            </div>
+            {statsPane === "MANUAL" ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                {MANUAL_STAT_FIELDS.map((field) => (
+                  <label key={field.key} className="block" title={field.hint}>
+                    <span className="block font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      {matchStatLabel(field.key)}
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="–"
+                      value={matchStats[field.key]}
+                      onChange={(event) => changeStat(field.key, event.target.value)}
+                      className={STAT_BOX_CLASS}
+                    />
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <ScanPanel
+                draft={matchStats}
+                sources={statSources}
+                venue={venue}
+                ourClub={clubName ?? ""}
+                opponent={opponentLabel}
+                goalsFor={ourScoreInput === "" ? null : ourScore}
+                onChange={changeStat}
+                onApply={applyScan}
+              />
+            )}
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <StatReadout
                 label="Expected goals"
-                value={expected === null ? "—" : expected.toFixed(2)}
+                value={expected === null ? "—" : formatExpectedGoals(expected)}
                 note={
                   expected === null
                     ? "Needs inside box and big chances"
-                    : "TouchlineOS model, not a save figure"
+                    : fromTheGame
+                      ? "From the game, read off your screenshot"
+                      : "TouchlineOS model, not a save figure"
                 }
               />
               <StatReadout
                 label="Finishing"
                 value={finishing === null ? "—" : `${finishing > 0 ? "+" : ""}${finishing.toFixed(2)}`}
                 note={
-                  finishingWord === null ? "Goals minus expected goals" : `${finishingWord.label} · goals minus expected goals`
+                  finishingWord === null
+                    ? "Goals minus expected goals"
+                    : `${finishingWord.label} · goals minus ${fromTheGame ? "the game's expected goals" : "expected goals"}`
                 }
               />
               <StatReadout
@@ -1563,10 +1691,15 @@ export function DebriefView({
               />
             </div>
 
+            {/*
+              The overlap note is about the model's two terms, so it only appears when the model is what is
+              being shown. With the game's own figure in the card above there is nothing to explain, and leaving
+              the paragraph in would describe a calculation that did not happen.
+            */}
             <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
-              A big chance is usually also a shot from inside the box, so the two terms overlap and
-              expected goals reads a little high. Counting only big chances would understate a side that
-              creates a lot of ordinary box shots, which is the more common manager.
+              {fromTheGame
+                ? "That expected goals figure is the game's own, read from your screenshot, so it is not one of our estimates."
+                : "A big chance is usually also a shot from inside the box, so the two terms overlap and expected goals reads a little high. Counting only big chances would understate a side that creates a lot of ordinary box shots, which is the more common manager."}
             </p>
           </div>
 
@@ -2274,6 +2407,21 @@ function DebriefDetailModal({
       : [];
   const contributions = payload.contributions ?? [];
   const stats = payload.matchStats ?? null;
+  const capture = stats?.capture ?? null;
+  /**
+   * Which figures a screenshot produced, and whether the manager changed any of them afterwards.
+   *
+   * One row rather than a note on each figure, because the interesting fact is that a read was involved at all.
+   * The value stays the manager's: reading a figure off his own screen and accepting it is his observation, which
+   * is why this says where it came from and never who owns it.
+   */
+  const scannedList = MATCH_STAT_KEYS.filter((key) => {
+    const method = capture?.figures?.[key];
+    return method === "SCAN" || method === "EDITED";
+  }).map((key) => {
+    const method = capture?.figures?.[key];
+    return `${matchStatLabel(key)}: ${captureLabel(method ?? "SCAN").toLowerCase()}`;
+  });
   const rows: Array<{ label: string; value: string }> = [
     { label: "Match date", value: payload.matchDate ?? "not recorded" },
     { label: "Competition", value: payload.competition ?? "not recorded" },
@@ -2304,6 +2452,19 @@ function DebriefDetailModal({
     {
       label: "Possession",
       value: typeof stats?.possession === "number" ? `${stats.possession}%` : "not recorded",
+    },
+    {
+      // The game's own figure, and only when a screenshot was read: the manager cannot count this one, so a
+      // blank here means nobody scanned it rather than "not recorded".
+      label: "Expected goals",
+      value:
+        typeof stats?.expectedGoalsReported === "number"
+          ? formatExpectedGoals(stats.expectedGoalsReported)
+          : "not scanned",
+    },
+    {
+      label: "Read from a screenshot",
+      value: scannedList.length > 0 ? scannedList.join(", ") : "none",
     },
   ];
 

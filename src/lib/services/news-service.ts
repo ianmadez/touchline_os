@@ -509,6 +509,7 @@ function toMatch(
     shots: stats ? asNumber(stats.shots) : null,
     shotsInsideBox: stats ? asNumber(stats.shotsInsideBox) : null,
     bigChances: stats ? asNumber(stats.bigChances) : null,
+    expectedGoalsReported: stats ? asNumber(stats.expectedGoalsReported) : null,
     comment: comments.get(eventId)?.comment ?? null,
     commentRefused: comments.get(eventId)?.refused ?? false,
   };

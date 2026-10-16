@@ -107,6 +107,42 @@ export function severityLabel(severity: string): string {
 }
 
 /**
+ * How a match figure got into the boxes, as a word.
+ *
+ * The stored values are "SCAN" and "EDITED", and neither is shown raw. The wording is the manager's own
+ * situation rather than the app's mechanism: he did not scan anything, he photographed a screen and accepted
+ * what came back. "TYPED" is the absence of a marker and is not in the map, because every figure entered by
+ * hand reads better with no chip at all than with one that says nothing useful.
+ */
+const CAPTURE_LABELS: Record<string, string> = {
+  SCAN: "Read from a screenshot",
+  EDITED: "Read, then changed by you",
+};
+
+export function captureLabel(method: string): string {
+  return CAPTURE_LABELS[method] ?? humanise(method);
+}
+
+/**
+ * The figures a debrief records, as names for the screen.
+ *
+ * Kept here rather than in the debrief view because the scan pane, the detail view and the news note all name
+ * the same keys, and a second spelling of "Inside box" somewhere else is how two screens end up disagreeing.
+ */
+const MATCH_STAT_LABELS: Record<string, string> = {
+  shots: "Shots",
+  shotsInsideBox: "Inside box",
+  bigChances: "Big chances",
+  possession: "Possession %",
+  passesCompleted: "Passes",
+  expectedGoalsReported: "Expected goals",
+};
+
+export function matchStatLabel(field: string): string {
+  return MATCH_STAT_LABELS[field] ?? humanise(field);
+}
+
+/**
  * Where a storyline's card should take you, based on what it is actually about.
  *
  * A card that cannot be acted on is decoration, so every category resolves to the screen where the

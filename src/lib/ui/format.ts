@@ -57,3 +57,22 @@ export function ordinal(value: number): string {
       return `${value}th`;
   }
 }
+
+/**
+ * The precision the game reports its own expected goals to.
+ *
+ * Two places, and it is the game's number rather than a rounded one, so trimming it to one would be inventing a
+ * figure the manager never saw.
+ */
+export const EXPECTED_GOALS_PLACES = 2;
+
+/**
+ * The game's own expected goals, at its own precision.
+ *
+ * One function rather than `.toFixed(2)` at each of the four places the figure appears, so the readout card, the
+ * detail view, the scan pane and the news evidence line cannot drift apart on how many places the same number
+ * has.
+ */
+export function formatExpectedGoals(value: number): string {
+  return value.toFixed(EXPECTED_GOALS_PLACES);
+}

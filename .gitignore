@@ -24,6 +24,13 @@
 # is committed in public/parse-resources/ - see the README there for its provenance and licensing.
 /public/sql-wasm.wasm
 
+# The OCR runtime. The worker and the six tesseract.js-core builds are copied from node_modules by
+# scripts/stage-ocr-assets.mjs on every dev and build, so they are build output and not source. The English
+# language model in public/ocr/lang/ is NOT ignored: a fresh clone has to build a complete app offline, which
+# is the same reason public/parse-resources/ is committed. See public/ocr/README.md.
+/public/ocr/worker.min.js
+/public/ocr/core/
+
 # The local build's face cache: one file per player sprite, fetched from the CDN for whoever's save is
 # open. This is per-career artwork, not part of the product - committing it shipped one manager's squad
 # to every clone, and it was committed until 2026-10-11. The browser target never reads this folder (it

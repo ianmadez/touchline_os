@@ -78,10 +78,28 @@ function stageBrowserAssets() {
 
 if (target === "browser") stageBrowserAssets();
 
-const nextBin = path.join(root, "node_modules", "next", "dist", "bin", "next");
-const child = spawn(process.execPath, [nextBin, ...args], {
+/**
+ * The OCR runtime is staged for BOTH targets.
+ *
+ * `sql-wasm.wasm` and the parser datasheets are browser-only concerns. The screenshot scanner is not: it runs
+ * in the page on the local build too, so `public/ocr/` has to be complete before either target is served or
+ * built. The staging itself lives in its own script because the plain `dev` and `build` scripts need it as
+ * well, through `predev` and `prebuild`.
+ */
+const ocrStage = spawn(process.execPath, [path.join(root, "scripts", "stage-ocr-assets.mjs")], {
   stdio: "inherit",
-  env: { ...process.env, TOUCHLINE_TARGET: target },
+});
+ocrStage.on("exit", (code) => {
+  if (code !== 0) process.exit(code ?? 1);
+  runNext();
 });
 
-child.on("exit", (code) => process.exit(code ?? 0));
+function runNext() {
+  const nextBin = path.join(root, "node_modules", "next", "dist", "bin", "next");
+  const child = spawn(process.execPath, [nextBin, ...args], {
+    stdio: "inherit",
+    env: { ...process.env, TOUCHLINE_TARGET: target },
+  });
+
+  child.on("exit", (code) => process.exit(code ?? 0));
+}

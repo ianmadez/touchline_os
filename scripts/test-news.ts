@@ -79,6 +79,7 @@ function match(overrides: Partial<NewsMatch> & { eventId: string }): NewsMatch {
     shots: null,
     shotsInsideBox: null,
     bigChances: null,
+    expectedGoalsReported: null,
     comment: null,
     commentRefused: false,
     ...overrides,
@@ -336,6 +337,88 @@ check(
   "a result inside a goal of expectation is not a story",
   !has(narrow, "finishing-"),
   "1 goal from 1 shot inside the box is 0.15 expected, inside the threshold"
+);
+
+/*
+  The game's own expected goals, when a scan picked it up.
+
+  Four cases, because the two figures are not interchangeable and the story has to be honest about which one it
+  argued from: the game's figure on its own, the model on its own, both present with the game's winning, and a
+  reported figure that turns a story off that the model alone would have printed.
+*/
+const reportedOnly = buildNews(
+  input({
+    matches: [
+      { ...MATCHES[0], shotsInsideBox: null, bigChances: null, expectedGoalsReported: 1 },
+      ...MATCHES.slice(1),
+    ],
+  })
+);
+const reportedStory = reportedOnly.find((item) => item.id.startsWith("finishing-"));
+check(
+  "the game's figure alone can carry the finishing story, with no box shots or big chances",
+  reportedStory !== undefined
+);
+check(
+  "and the record names the game rather than the model",
+  reportedStory?.evidence.some((line) => /game's own expected goals/.test(line)) === true,
+  reportedStory?.evidence.join(" | ")
+);
+check(
+  "nothing claims the model was involved",
+  reportedStory?.evidence.some((line) => /worth/.test(line)) === false
+);
+
+const estimateOnly = rich.find((item) => item.id.startsWith("finishing-"));
+check(
+  "and with no reported figure the model is named instead",
+  estimateOnly?.evidence.some((line) => /app's model made that worth/.test(line)) === true,
+  estimateOnly?.evidence.join(" | ")
+);
+
+const bothPresent = buildNews(
+  input({
+    matches: [
+      { ...MATCHES[0], expectedGoalsReported: 1 },
+      ...MATCHES.slice(1),
+    ],
+  })
+);
+check(
+  "when both figures exist the game's is the one the story argues from",
+  bothPresent
+    .find((item) => item.id.startsWith("finishing-"))
+    ?.evidence.some((line) => /game's own expected goals/.test(line)) === true
+);
+check(
+  "and the model's figure does not appear beside it",
+  bothPresent
+    .find((item) => item.id.startsWith("finishing-"))
+    ?.evidence.some((line) => /worth/.test(line)) === false
+);
+
+const reportedCalm = buildNews(
+  input({
+    matches: [
+      { ...MATCHES[0], goalsFor: 1, shots: 20, shotsInsideBox: 14, bigChances: 5, expectedGoalsReported: 0.4 },
+      ...MATCHES.slice(1),
+    ],
+  })
+);
+check(
+  "the model alone would call 1 goal from 20 shots wasteful",
+  buildNews(
+    input({
+      matches: [
+        { ...MATCHES[0], goalsFor: 1, shots: 20, shotsInsideBox: 14, bigChances: 5 },
+        ...MATCHES.slice(1),
+      ],
+    })
+  ).some((item) => item.id.startsWith("finishing-"))
+);
+check(
+  "and the game's figure turns the story off, which is the point of preferring it",
+  !has(reportedCalm, "finishing-")
 );
 
 const noMinutes = buildNews(

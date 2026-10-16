@@ -3,11 +3,16 @@
   "version": "0.3.2",
   "private": true,
   "scripts": {
+    "predev": "node scripts/stage-ocr-assets.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/stage-ocr-assets.mjs",
     "build": "next build",
     "start": "next start",
     "dev:browser": "node scripts/with-target.mjs browser dev",
     "build:browser": "node scripts/with-target.mjs browser build",
+    "ocr:stage": "node scripts/stage-ocr-assets.mjs",
+    "ocr:test": "tsx scripts/test-ocr.ts",
+    "ocr:eval": "node scripts/ocr-eval.mjs",
     "bridge": "tsx bridge/touchline-bridge.ts",
     "bridge:build": "node scripts/build-bridge.mjs",
     "lint": "eslint",
@@ -46,6 +51,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "sql.js": "^1.14.2",
+    "tesseract.js": "^7.0.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -59,6 +65,7 @@
     "esbuild": "^0.25.12",
     "eslint": "^9",
     "eslint-config-next": "16.3.6",
+    "playwright": "^1.64.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3"

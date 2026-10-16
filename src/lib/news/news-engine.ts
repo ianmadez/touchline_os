@@ -37,6 +37,12 @@
 import { bylineFor, type OutletStance, type PressByline } from "./outlets";
 import { describeTimeOut, injuryBand, type InjuryBand } from "../squad/injury";
 import { momentOf, phasePhrase, seasonPhase, type SeasonProgress } from "./moment";
+import { formatExpectedGoals } from "../ui/format";
+import {
+  effectiveExpectedGoals,
+  expectedGoalsSource,
+  FINISHING_STORY_EDGE,
+} from "../events/match-stats";
 
 /**
  * Which revision of the desk's VOICE wrote a story.
@@ -46,8 +52,12 @@ import { momentOf, phasePhrase, seasonPhase, type SeasonProgress } from "./momen
  * fixed, so the archive reprints anything stamped with an older revision and leaves saved and dismissed
  * stories exactly as they were. The number is here, beside the copy it describes, because "the desk was
  * rewritten" is an editorial call that cannot be computed from the code.
+ *
+ * 13 carries one change: the finishing story now argues from the game's own expected goals when a debrief
+ * has one, since a scanned figure beats the app's two-weight model, and it names which of the two it used.
+ * Every debrief logged before the scanner existed has no such figure and prints exactly as it did.
  */
-export const NEWS_COPY_VERSION = 12;
+export const NEWS_COPY_VERSION = 13;
 
 /** How a story's subject colours the card. Not a red/green light: a paper has good and bad news. */
 export type NewsTone = "GOOD" | "NEUTRAL" | "CONCERN";
@@ -163,6 +173,13 @@ export interface NewsMatch {
   shots: number | null;
   shotsInsideBox: number | null;
   bigChances: number | null;
+  /**
+   * The game's own expected goals, present only when the manager scanned it off the Match Facts screen.
+   *
+   * A decimal, and not the model's figure. Both are optional here for the same reason: a debrief may carry
+   * either, both, or neither, and the desk has to say which one it argued from.
+   */
+  expectedGoalsReported: number | null;
   /** What the manager told the press, when the press asked and he answered. */
   comment: string | null;
   /** True when the press asked and got nothing. A distinct thing from never having been asked. */
@@ -1865,12 +1882,18 @@ function matchReportBody(
     }
 
     // ---- 3. The finishing question, from the shots the manager logged -------------------------
-    // Only when there are figures to argue from: two rounded expected-goal weights do not justify a
-    // verdict on their own, and a story that says nothing is not worth printing.
-    if (last.shots !== null && last.shotsInsideBox !== null && last.bigChances !== null) {
-      const expected = last.shotsInsideBox * 0.15 + last.bigChances * 0.38;
+    // Two ways to argue from, and the better one wins. The game reports its own expected goals, which the
+    // scanner can read; failing that, the app's two rounded weights stand in. The story names which of the
+    // two it used, because "you finished ahead of it by 1.4" means different things from the two figures.
+    //
+    // The guard no longer demands inside box and big chances. Those two are the model's terms rather than
+    // things the manager always counts, and a real figure does not need them present to be worth a verdict.
+    // A reliable expected figure plus the shot count is enough to say something true.
+    const expected = effectiveExpectedGoals(last);
+    const fromTheGame = expectedGoalsSource(last) === "REPORTED";
+    if (last.shots !== null && expected !== null) {
       const edge = last.goalsFor - expected;
-      if (Math.abs(edge) >= 1) {
+      if (Math.abs(edge) >= FINISHING_STORY_EDGE) {
         const clinical = edge > 0;
         /**
          * The verdict has to agree with the result.
@@ -1927,10 +1950,12 @@ function matchReportBody(
           ),
           evidence: [
             `${last.shots} shots`,
-            `${last.shotsInsideBox} from inside the box`,
-            `${last.bigChances} big ${plural(last.bigChances ?? 0, "chance")}`,
-            `The app's model made that worth ${expected.toFixed(1)} goals, so you finished ${clinical ? "ahead of" : "behind"} it by ${Math.abs(edge).toFixed(1)}`,
-          ],
+            last.shotsInsideBox !== null ? `${last.shotsInsideBox} from inside the box` : "",
+            last.bigChances !== null ? `${last.bigChances} big ${plural(last.bigChances, "chance")}` : "",
+            fromTheGame
+              ? `The game's own expected goals was ${formatExpectedGoals(expected)}, so you finished ${clinical ? "ahead of" : "behind"} it by ${formatExpectedGoals(Math.abs(edge))}`
+              : `The app's model made that worth ${expected.toFixed(1)} goals, so you finished ${clinical ? "ahead of" : "behind"} it by ${Math.abs(edge).toFixed(1)}`,
+          ].filter(Boolean),
           playerNames: [],
           publishedOn: last.matchDate,
           weight: 74,
@@ -4741,8 +4766,15 @@ function finalise(items: StoryDraft[], input: NewsInput): NewsItem[] {
 
 /** The match figures, as a one-line note for the app's own record of why a story ran. */
 function matchStatsNote(match: NewsMatch): string {
-  if (match.shots === null) return "";
-  return `${match.shots} shots${match.shotsInsideBox !== null ? `, ${match.shotsInsideBox} inside the box` : ""}${match.bigChances !== null ? `, ${match.bigChances} big ${plural(match.bigChances, "chance")}` : ""}`;
+  const parts = [
+    match.shots !== null ? `${match.shots} shots` : "",
+    match.shotsInsideBox !== null ? `${match.shotsInsideBox} inside the box` : "",
+    match.bigChances !== null ? `${match.bigChances} big ${plural(match.bigChances, "chance")}` : "",
+    match.expectedGoalsReported !== null
+      ? `${formatExpectedGoals(match.expectedGoalsReported)} expected goals, read from the game`
+      : "",
+  ].filter(Boolean);
+  return parts.join(", ");
 }
 
 /**
