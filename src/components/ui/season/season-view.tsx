@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SeasonState, SeasonRecord } from "@/lib/services/season-service";
 import type { TargetBlock } from "@/lib/services/target-block-service";
 import { leagueLabel } from "@/lib/ui/leagues";
@@ -60,6 +60,35 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
   const [activeSubTab, setActiveSubTab] = useState<SubTab>(focusSubTab ?? "OUTLOOK");
   const [trendsTab, setTrendsTab] = useState<TrendsTab>("SEASON");
   const [selectedVaultSeason, setSelectedVaultSeason] = useState<number | null>(null);
+
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * A new inner tab starts at the top of the section, with the strip still in reach.
+   *
+   * Without this, switching from a long view to a shorter one left the window at its old offset, so
+   * the manager landed halfway down a screen they had not seen. The target is the strip rather than
+   * the section's own top: pinning the tabs under the sticky header is what keeps the control they
+   * just used visible while the new content starts beneath it.
+   *
+   * Scrolling is explicit rather than `scrollIntoView` (which did nothing here, because the section
+   * is not the scroll container), measured one frame later so the outgoing panel's height is already
+   * gone, and skipped on the first run because arriving on the Season tab is the shell's job. The
+   * first run is detected by comparing the previous tab rather than with a "mounted" flag: StrictMode
+   * invokes mount effects twice in development, so a flag would let the second pass scroll anyway.
+   */
+  const lastSubTab = useRef(activeSubTab);
+  useEffect(() => {
+    if (lastSubTab.current === activeSubTab) return;
+    lastSubTab.current = activeSubTab;
+    const frame = window.requestAnimationFrame(() => {
+      const node =
+        rootRef.current?.querySelector<HTMLElement>('[data-tour="season-subtabs"]') ?? rootRef.current;
+      if (!node) return;
+      const top = node.getBoundingClientRect().top + window.scrollY - 80;
+      window.scrollTo({ top: Math.max(0, top), behavior: "instant" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeSubTab]);
 
   // Arriving from a storyline card carries the inner tab with it. Deferred through a timeout rather
   // than set inline: a synchronous setState inside an effect is a lint error in this codebase, and the
@@ -143,7 +172,7 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
   }, [blockRows]);
 
   return (
-    <div className="flex h-full flex-col gap-6 overflow-hidden">
+    <div ref={rootRef} className="flex flex-col gap-6 scroll-mt-20">
       {careerId !== "" && (
         <SeasonHandoverBanner
           careerId={careerId}
@@ -189,8 +218,17 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
         </TabStrip>
       </div>
 
-      {/* Body — the only scroll region on this screen */}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+      {/*
+        The page itself is the scroll surface.
+
+        This used to be `h-full` with an inner `overflow-y-auto overscroll-contain` body, on the
+        theory that the body would scroll inside a fixed-height screen. The height never became
+        definite, so the body grew to fit its content: it was a scroll container that could not
+        scroll, and `overscroll-behavior: contain` then swallowed every wheel and touch gesture over
+        the content. Chromium refused to scroll the page at all; Firefox chained anyway, which is why
+        it looked fine in one browser and dead in the other.
+      */}
+      <div className="pr-1">
         {activeSubTab === "OUTLOOK" && (
           <div className="space-y-6" data-tour="season-outlook">
             {seasonState && careerId ? (
