@@ -9,6 +9,8 @@
  * the card can say which toggle removed it. An empty decision step with no explanation would read as a bug.
  */
 import { formationFamily } from "../events/tactics-stamp";
+import { DEFAULT_MATCHES_TARGET } from "../assignments/propose";
+import type { AssignmentProposal, PointsTargetProposal } from "../assignments/types";
 import { ordinal } from "../ui/format";
 import type {
   ReviewBlockBand,
@@ -79,10 +81,21 @@ function mostNamed(matches: ReviewMatch[]): { name: string; count: number } | nu
   return top ? { name: top[0], count: top[1] } : null;
 }
 
+  /** A player watch, in the shape the assignment store takes. */
+  function watchFor(playerName: string, rationale: string): AssignmentProposal {
+    return {
+      type: "PLAYER_WATCH",
+      playerName,
+      matchesTarget: DEFAULT_MATCHES_TARGET,
+      rationale,
+    };
+  }
+
 export function buildOptions(
   matches: ReviewMatch[],
   context: ReviewContext,
-  block: ReviewBlockBand | null
+  block: ReviewBlockBand | null,
+  pointsTarget: PointsTargetProposal | null
 ): OptionOutcome {
   const candidates: ReviewOption[] = [];
   const scored = matches.filter((match) => match.points !== null);
@@ -97,6 +110,8 @@ export function buildOptions(
       creates: "A monitor on the formation for the next block, so the next review compares like with like.",
       chips: ["monitor the formation", "next block"],
       blockedBy: null,
+      // Nothing to follow afterwards: keeping the shape you already have is not a change to measure.
+      assignment: null,
     });
   }
 
@@ -110,6 +125,13 @@ export function buildOptions(
       creates: "A tactical experiment for the next block, with this block as the baseline.",
       chips: ["tactical experiment", "field next block"],
       blockedBy: changesFamily && isOn(context, "keepFormationFamily") ? "keepFormationFamily" : null,
+      assignment: {
+        type: "TACTICAL_EXPERIMENT",
+        formationLabel: best.label,
+        matchesTarget: DEFAULT_MATCHES_TARGET,
+        baselinePointsPerGame: Math.round(worst.rate * 10) / 10,
+        rationale: `${worst.label} returned ${worst.points} from ${worst.count}; ${best.label} returned ${best.points} from ${best.count}.`,
+      },
     });
   }
 
@@ -135,6 +157,7 @@ export function buildOptions(
         creates: "A player watch with a rest built into it.",
         chips: ["player watch", "rest one match"],
         blockedBy: restBlocked ? "neverRotateKeyPlayers" : null,
+        assignment: watchFor(named.name, `${named.name} is marked as a key player and you named him in ${named.count} match${named.count === 1 ? "" : "es"}.`),
       });
       pushedSpecific = pushedSpecific || !restBlocked;
     }
@@ -147,6 +170,7 @@ export function buildOptions(
         creates: "A player watch that builds a rest into the next block.",
         chips: ["player watch", "one match out"],
         blockedBy: youngBlocked ? "preferYouthMinutes" : null,
+        assignment: watchFor(named.name, `${named.name} is ${age} and you named him in ${named.count} matches.`),
       });
       pushedSpecific = pushedSpecific || !youngBlocked;
     }
@@ -159,30 +183,44 @@ export function buildOptions(
         creates: "A player watch, so the next block reports on him rather than on the team alone.",
         chips: ["player watch", "next block"],
         blockedBy: null,
+        assignment: watchFor(named.name, `You named ${named.name} in ${named.count} of the ${matches.length} matches.`),
       });
     }
   }
 
-  if (block !== null && (block.verdict === "BELOW_TARGET" || block.verdict === "CONCERN")) {
+  // A points target is only offered when a figure exists to put on it. The option promises a target worked out from
+  // the blocks before it, and offering it with no block behind it would promise a number nobody had calculated.
+  if (
+    pointsTarget !== null &&
+    block !== null &&
+    (block.verdict === "BELOW_TARGET" || block.verdict === "CONCERN")
+  ) {
     candidates.push({
       id: "adjust-target",
-      label: "Set the next block's points target",
-      rationale: `Block ${block.blockIndex} finished on ${block.points} against a band of ${block.targetMin} to ${block.targetMax}.`,
+      label: `Set the next block's points target`,
+      rationale: `Block ${block.blockIndex} finished on ${block.points} against a band of ${block.targetMin} to ${block.targetMax}. The target comes out at ${pointsTarget.value}.`,
       creates: "A points target for the next block, with the band filled in before you save it.",
       chips: ["points target", "next block"],
       blockedBy: isOn(context, "fixedPointsBand") ? "fixedPointsBand" : null,
+      assignment: pointsTarget,
     });
   }
 
   const objectiveTarget = context.objective?.targetPosition ?? null;
-  if (objectiveTarget !== null && context.currentPosition !== null && context.currentPosition > objectiveTarget) {
+  if (
+    pointsTarget !== null &&
+    objectiveTarget !== null &&
+    context.currentPosition !== null &&
+    context.currentPosition > objectiveTarget
+  ) {
     candidates.push({
       id: "close-the-gap",
       label: `Close the gap to ${ordinal(objectiveTarget)}`,
-      rationale: `You are ${ordinal(context.currentPosition)} against a target of ${ordinal(objectiveTarget)}.`,
+      rationale: `You are ${ordinal(context.currentPosition)} against a target of ${ordinal(objectiveTarget)}. The points target comes out at ${pointsTarget.value}.`,
       creates: "A points target for the next block, worked out from the two blocks before it.",
       chips: ["points target", "next block"],
       blockedBy: isOn(context, "fixedPointsBand") ? "fixedPointsBand" : null,
+      assignment: pointsTarget,
     });
   }
 
@@ -198,6 +236,8 @@ export function buildOptions(
       creates: "A reminder to run this review again once the sample is bigger.",
       chips: ["review reminder"],
       blockedBy: null,
+      // A reminder is a decision, not a commitment, so there is no figure to follow.
+      assignment: null,
     });
   }
 

@@ -15,9 +15,13 @@ import { questionFor, sectionOpener, SECTION_ORDER, SECTION_TITLES, windowPhrase
 import { evaluateFindings } from "./findings";
 import { buildOptions } from "./options";
 import { buildWindow, type WindowInput, type WindowResult } from "./window";
+import { proposePointsTarget } from "../assignments/propose";
+import type { BlockBandInput } from "../assignments/types";
+import type { TargetBlock } from "../services/target-block-service";
 import type {
   Finding,
   Review,
+  ReviewBlockBand,
   ReviewContext,
   ReviewMatch,
   ReviewSection,
@@ -59,8 +63,63 @@ function restingOf(matches: ReviewMatch[]): Review["resting"] {
   };
 }
 
-function recordLine(record: Review["record"]): string {
-  if (record.played === 0) return "No result was reported in this window.";
+/**
+ * The bands a points target is worked out from.
+ *
+ * Only blocks that actually recorded a result count, and only the two most recent: a target set off a block nobody
+ * finished would be a number about nothing. The block under review is always one of them, because it has just
+ * finished and it is the freshest evidence of what this side scores.
+ *
+ * Three sources, in order of authority: the stored block list, the band the caller summarised for this review, and
+ * the single band carried in the context. They are merged by id rather than concatenated so the same block cannot be
+ * counted twice and skew the mean.
+ */
+function targetBands(
+  blocks: TargetBlock[],
+  band: ReviewBlockBand | null,
+  fallback: ReviewBlockBand | null
+): BlockBandInput[] {
+  const byId = new Map<string, BlockBandInput>();
+
+  for (const block of blocks) {
+    const played = block.matches.filter((match) => match.actualPoints !== null).length;
+    byId.set(block.id, {
+      id: block.id,
+      seasonNumber: block.seasonNumber,
+      blockIndex: block.blockIndex,
+      points: block.matches.reduce((total, match) => total + (match.actualPoints ?? 0), 0),
+      possible: played * 3,
+      targetMin: block.targetMin,
+      targetMax: block.targetMax,
+      concernPoints: block.concernPoints,
+      dreamPoints: block.dreamPoints,
+      matchesPlayed: played,
+    });
+  }
+
+  for (const summarised of [band, fallback]) {
+    if (summarised === null || byId.has(summarised.id)) continue;
+    byId.set(summarised.id, {
+      id: summarised.id,
+      seasonNumber: summarised.seasonNumber,
+      blockIndex: summarised.blockIndex,
+      points: summarised.points,
+      possible: summarised.possible,
+      targetMin: summarised.targetMin,
+      targetMax: summarised.targetMax,
+      concernPoints: summarised.concernPoints,
+      dreamPoints: summarised.dreamPoints,
+      matchesPlayed: Math.round(summarised.possible / 3),
+    });
+  }
+
+  return [...byId.values()]
+    .filter((entry) => entry.matchesPlayed > 0)
+    .sort((left, right) => right.seasonNumber - left.seasonNumber || right.blockIndex - left.blockIndex)
+    .slice(0, 2);
+}
+
+function recordLine(record: Review["record"]): string {  if (record.played === 0) return "No result was reported in this window.";
   const parts = [
     `${record.points} of ${record.possible} points`,
     `${record.wins}W ${record.draws}D ${record.losses}L`,
@@ -94,7 +153,16 @@ export function composeReview(input: ComposeReviewInput): Review {
   const scoreFindings = findings.filter((finding) => !finding.needsFigures);
   const record = tally(matches);
   const resting = restingOf(matches);
-  const { offered, blocked } = buildOptions(matches, input.context, input.band);
+  const { offered, blocked } = buildOptions(
+    matches,
+    input.context,
+    input.band,
+    proposePointsTarget({
+      blocks: targetBands(input.blocks, input.band, input.context.previousBlock),
+      targetPosition: input.context.objective?.targetPosition ?? null,
+      currentPosition: input.context.currentPosition,
+    })
+  );
   const thin = resting.withFigures < 5;
   const contrast = buildContrast(matches);
 

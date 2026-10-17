@@ -10,6 +10,7 @@
  * figure is omitted rather than computed from a zero. A block of group logged matches therefore reads as
  * scorelines and nothing more, which is exactly what was recorded.
  */
+import type { AssignmentProposal } from "../assignments/types";
 import type { FormationStamp } from "../events/tactics-stamp";
 
 /** What the review should read: one saved block, or the newest matches in a range. */
@@ -92,6 +93,14 @@ export interface ReviewOption {
   chips: string[];
   /** The toggle that blocks it, when one does. Named on screen so the filtered state can explain itself. */
   blockedBy: RulesToggleId | null;
+  /**
+   * The commitment taking it records, in the exact shape the assignment store accepts.
+   *
+   * Null for a monitor or a reminder: those are decisions, but there is no figure to follow afterwards, so nothing
+   * is stored to track. Carrying the payload here rather than re-deriving it on accept is what keeps the option and
+   * the thing created from being two different calculations of the same idea.
+   */
+  assignment: AssignmentProposal | null;
 }
 
 /** The two matches the review sets against each other. */

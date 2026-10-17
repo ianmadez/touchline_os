@@ -38,6 +38,7 @@ const OFFER_LABELS: Record<string, string> = {
 export function AssignmentPanel({
   active,
   proposals,
+  noted = [],
   positionLine,
   nextBlockIndex,
   busyKey,
@@ -46,6 +47,8 @@ export function AssignmentPanel({
 }: {
   active: Array<{ assignment: Assignment; progress: AssignmentProgress }>;
   proposals: AssignmentProposal[];
+  /** Options already taken that carry no commitment, by label. Shown so no decision disappears. */
+  noted?: string[];
   positionLine: string | null;
   nextBlockIndex: number;
   busyKey: string | null;
@@ -66,7 +69,7 @@ export function AssignmentPanel({
         )}
       </div>
 
-      {active.length === 0 ? (
+      {active.length === 0 && noted.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-300 px-3.5 py-3 font-sans text-[11px] text-slate-500 dark:border-slate-700 dark:text-slate-400">
           Nothing active. Anything you take from a review shows up here with its progress against the matches since.
         </p>
@@ -168,6 +171,16 @@ export function AssignmentPanel({
             </div>
           ))}
         </div>
+      )}
+
+      {noted.length > 0 && (
+        <p className="font-sans text-[10px] leading-relaxed text-slate-400 dark:text-slate-500">
+          <span className="font-sub text-[9px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            Also taken:
+          </span>{" "}
+          {noted.join(", ")}. {noted.length === 1 ? "That one carries" : "Those carry"} no figure, so there is nothing
+          for the matches to report against.
+        </p>
       )}
 
       {proposals.some((proposal) => proposal.type === "POINTS_TARGET") && (

@@ -55,6 +55,21 @@ interface RulesPayload {
   idle: RulesToggleId[];
 }
 
+/**
+ * Whether a stored assignment is the one this proposal would create.
+ *
+ * The store's identity is (type, subject), so that is what is compared: the shape for an experiment, the name for a
+ * watch, the figure for a target. A match on the review key as well keeps a decision about this window from reaching
+ * back into an older commitment about the same subject.
+ */
+function sameCommitment(assignment: Assignment, proposal: AssignmentProposal, reviewKey: string): boolean {
+  if (assignment.reviewKey !== reviewKey) return false;
+  if (assignment.type !== proposal.type) return false;
+  if (proposal.type === "PLAYER_WATCH") return assignment.playerId === proposal.playerName;
+  if (proposal.type === "TACTICAL_EXPERIMENT") return assignment.formationLabel === proposal.formationLabel;
+  return assignment.targetPoints === proposal.value;
+}
+
 export function ReviewTab({
   careerId,
   seasonNumber,
@@ -203,8 +218,40 @@ export function ReviewTab({
 
   const decide = async (option: ReviewOption, decision: "ACCEPTED" | "DROPPED" | "PENDING") => {
     if (review === null) return;
+    const proposal = option.assignment;
     setBusy(option.id);
     try {
+      // The commitment is created first and dropped first, so a TAKEN badge can always be trusted to mean the thing
+      // it promised exists, and a change of mind can never leave a live assignment behind it.
+      if (decision === "ACCEPTED" && proposal !== null) {
+        const created = await apiFetch("/api/assignments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ careerId, seasonNumber, reviewKey: review.key, proposal }),
+        });
+        const createdBody = (await created.json()) as { success?: boolean; error?: string };
+        if (!createdBody.success) {
+          setError(createdBody.error ?? "Could not record that assignment.");
+          return;
+        }
+      }
+
+      if (decision === "DROPPED" && proposal !== null) {
+        const existing = assignments?.active.find((entry) => sameCommitment(entry.assignment, proposal, review.key));
+        if (existing) {
+          const dropped = await apiFetch("/api/assignments", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ careerId, id: existing.assignment.id, status: "DROPPED" }),
+          });
+          const droppedBody = (await dropped.json()) as { success?: boolean; error?: string };
+          if (!droppedBody.success) {
+            setError(droppedBody.error ?? "Could not drop that assignment.");
+            return;
+          }
+        }
+      }
+
       const response = await apiFetch("/api/review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -221,6 +268,9 @@ export function ReviewTab({
       }
       setDecisions(payload.decisions ?? []);
       setError(null);
+      // The panel, the band prefill and the option list all read from the assignment store, so they are re-read
+      // rather than patched by hand.
+      if (proposal !== null && decision !== "PENDING") await load();
     } catch {
       setError("Could not reach the review service.");
     } finally {
@@ -406,6 +456,17 @@ export function ReviewTab({
 
   const noMatches = review !== null && review.matches.length === 0;
 
+  /**
+   * Options taken that carry no commitment.
+   *
+   * A monitor or a reminder is a real decision and is recorded as one, but there is no figure behind it, so it cannot
+   * carry progress. It is listed quietly instead of vanishing, because a TAKEN badge with nothing anywhere is the
+   * one thing this panel must never produce.
+   */
+  const noted = (review?.options ?? [])
+    .filter((option) => option.assignment === null && decisionFor.get(option.id)?.decision === "ACCEPTED")
+    .map((option) => option.label);
+
   // The hint explains the picker the manager is actually looking at, including the case where a
   // block was never saved and the newest matches are read as a window instead.
   let pickerHint = "A window reads the newest logged matches, five by default and never fewer than three.";
@@ -575,6 +636,7 @@ export function ReviewTab({
             <AssignmentPanel
               active={assignments.active}
               proposals={assignments.proposals}
+              noted={noted}
               positionLine={assignments.positionLine}
               nextBlockIndex={assignments.nextBlockIndex}
               busyKey={busy}

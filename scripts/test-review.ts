@@ -388,6 +388,64 @@ function main(): void {
     blockReview.options.some((option) => option.id === "adjust-target"),
     blockReview.options.map((option) => option.id).join(", ")
   );
+  check(
+    "and it carries the commitment the label promises",
+    blockReview.options.find((option) => option.id === "adjust-target")?.assignment?.type === "POINTS_TARGET"
+  );
+  console.log("an option carries the commitment it promises");
+
+  // Taking an option has to produce the thing it says it produces, so the payload is asserted by id rather than
+  // trusted. A monitor or a reminder is listed as carrying nothing, which is a deliberate answer, not a gap.
+  const COMMITMENT_BY_ID: Record<string, string | null> = {
+    "keep-system": null,
+    "change-shape": "TACTICAL_EXPERIMENT",
+    "rest-player": "PLAYER_WATCH",
+    "leave-out-young-player": "PLAYER_WATCH",
+    "watch-player": "PLAYER_WATCH",
+    "adjust-target": "POINTS_TARGET",
+    "close-the-gap": "POINTS_TARGET",
+    "look-again": null,
+  };
+  const mismatched = blockReview.options.filter(
+    (option) => (option.assignment?.type ?? null) !== COMMITMENT_BY_ID[option.id]
+  );
+  check(
+    "every option carries exactly the commitment its label promises",
+    mismatched.length === 0,
+    mismatched.map((option) => `${option.id}:${option.assignment?.type ?? "none"}`).join(", ")
+  );
+
+  // A career with no block history has no figure to put on a target, so the option would be a promise of a number
+  // nobody calculated. It is simply not offered.
+  const noHistory = composeReview({
+    request: { kind: "WINDOW", count: 5 },
+    events: FIXTURE,
+    blocks: [],
+    context: { ...CONTEXT, previousBlock: null },
+    band: null,
+  });
+  check(
+    "no points target is offered when there is no block to work one out from",
+    !noHistory.options.some((option) => option.assignment?.type === "POINTS_TARGET"),
+    noHistory.options.map((option) => option.id).join(", ")
+  );
+
+  // The figure is a whole number a block can produce, and never below the concern line of the block it came from.
+  const pointsOption = blockReview.options.find((option) => option.assignment?.type === "POINTS_TARGET");
+  const pointsValue =
+    pointsOption !== undefined && pointsOption.assignment?.type === "POINTS_TARGET"
+      ? pointsOption.assignment.value
+      : null;
+  check(
+    "the target is a whole number between 0 and 15, at or above the concern line",
+    pointsValue !== null &&
+      Number.isInteger(pointsValue) &&
+      pointsValue >= 0 &&
+      pointsValue <= 15 &&
+      pointsValue >= block.concernPoints,
+    `${pointsValue}`
+  );
+
   const blockStrings = stringsOf(blockReview);
   check(
     "no generated string invents a figure for a group logged block",
