@@ -315,7 +315,6 @@ export function ScanPanel({
             venue: effectiveVenue,
             ourClub,
             opponent,
-            goalsFor,
             onProgress: (fraction, status) => {
               const label = progressLabel(status);
               if (label !== null) setStage({ label, fraction });

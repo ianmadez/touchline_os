@@ -81,7 +81,7 @@ const MIN_READ_MS = 900;
  * `reconcileTourRevision`, which takes this value rather than deriving one, because "worth reshowing"
  * is an editorial call and cannot be computed.
  */
-const TOUR_REVISION = "2026-10-17-expected-goals-and-loans";
+const TOUR_REVISION = "2026-10-17-honours-and-block-points";
 
 /**
  * The fewest steps worth showing. A tour that survived filtering down to its tab button alone would
@@ -168,6 +168,16 @@ const TOURS: Record<string, TourStep[]> = {
       anchor: "season-history",
       title: "Your managerial record",
       body: "Every season the save kept, oldest first. Columns with a star are totals across all competitions rather than league-only figures.",
+    },
+    {
+      anchor: "trophy-leagues",
+      title: "Your honours",
+      body: "The competitions you can actually win from where you are, and the years you have won them. Click a year to put a trophy on the shelf by hand, for anything won before TouchlineOS was installed. Switch to Whole country to see everything above you.",
+    },
+    {
+      anchor: "trophy-cups",
+      title: "The cups",
+      body: "Every cup open to a club at your tier. The count above the shelf says how many of the possible ones you have, so a bare cabinet reads as a target rather than a gap in the data.",
     },
     {
       anchor: "season-subtab-VAULT",
@@ -483,7 +493,7 @@ const TOURS: Record<string, TourStep[]> = {
     {
       anchor: "group-heading",
       title: "Group debriefs",
-      body: "Five matches at a time instead of one: set the points you wanted from each, then come back and report what actually happened.",
+      body: "Five matches at a time instead of one. The band is league points, not league position: three for a win, one for a draw. Set what you want from each fixture while it is still ahead of you, then come back once they are played and report how it actually went.",
     },
     {
       anchor: "group-new",

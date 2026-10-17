@@ -872,19 +872,39 @@ function BlockEditor({
         <legend className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
           How the block will be judged
         </legend>
+        {/*
+          The band is POINTS, and saying so is the whole point of this line: "Target from" beside a table position
+          reads as a league place, and a manager who typed 8 meaning eighth would be holding himself to eight
+          points from five matches. The sentence also says what the block is FOR, because it is one form doing two
+          jobs: the per-match targets are set with the fixtures ahead, and the result is read back once they are
+          played.
+        */}
+        <p className="font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+          League points, not league position: three for a win, one for a draw. Going forward, the five fixtures
+          above carry what you want from each one, and the block is judged on the total. Looking back, those
+          results are added up and reported against the band you set here.
+        </p>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <NumberField label="Target from" value={draft.targetMin} onChange={(v) => set("targetMin", v)} />
-          <NumberField label="Target to" value={draft.targetMax} onChange={(v) => set("targetMax", v)} />
-          <NumberField label="Dream" value={draft.dreamPoints} onChange={(v) => set("dreamPoints", v)} />
-          <NumberField label="Concern at" value={draft.concernPoints} onChange={(v) => set("concernPoints", v)} />
+          <NumberField label="Target from (pts)" value={draft.targetMin} onChange={(v) => set("targetMin", v)} />
+          <NumberField label="Target to (pts)" value={draft.targetMax} onChange={(v) => set("targetMax", v)} />
+          <NumberField label="Dream (pts)" value={draft.dreamPoints} onChange={(v) => set("dreamPoints", v)} />
+          <NumberField label="Concern at (pts)" value={draft.concernPoints} onChange={(v) => set("concernPoints", v)} />
         </div>
+        <p className="font-sans text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
+          Target from is the least you would accept from the five, Target to a good block, Dream the one worth
+          talking about, and Concern the number you would rather not fall to.
+        </p>
       </fieldset>
 
       {/* The wrap-up. */}
       <fieldset className="space-y-3">
         <legend className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-          Where you ended up
+          Where the block left you
         </legend>
+        <p className="font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+          Fill this in once the fifth match is reported. Position is where you sat in the table at that point, which
+          is the figure a block is remembered by even though the band above is measured in points.
+        </p>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <NumberField label="Position" value={draft.tablePosition} onChange={(v) => set("tablePosition", v)} />
         </div>

@@ -9,13 +9,14 @@
  * real outcome that the manager resolves by looking at their own screenshot.
  */
 
-import { defaultProfile, readableScreens, screenRows, type Columns } from "./layouts";
+import { columnsFor, defaultProfile, readableScreens, screenRows, type Columns } from "./layouts";
 import { cropColumns, detectTable, prepareTable, variantById, DEFAULT_VARIANT_ID, type PreprocessVariant, type RgbaImage, type TableRegion } from "./preprocess";
 import { getOcrEngine, LABEL_WHITELIST, VALUE_WHITELIST, type OcrWord } from "./engine";
 import {
   classifyScreen,
   normaliseNumber,
-  readRows,
+  readBands,
+  readRowsIn,
   readScreen,
   resolveSide,
   settledSide,
@@ -52,8 +53,6 @@ export interface ReadOptions {
   venue: "HOME" | "AWAY" | "NEUTRAL" | null;
   ourClub: string;
   opponent: string;
-  /** Our goals from the scoreline, when the manager has entered one, for the cross-check. */
-  goalsFor: number | null;
   onProgress?: (fraction: number, status: string) => void;
   signal?: AbortSignal;
 }
@@ -175,6 +174,36 @@ function readScoreline(
 }
 
 /**
+ * One cell of the table, cropped out for a second look.
+ *
+ * Used only where the first pass found no number at all. Recognising a single cell on its own, as one line of
+ * text, is what the engine is best at, and it is the difference between a row reading zero and a row reading
+ * "unread": a lone `0` on a translucent panel is a thin ring with nothing around it, and it comes back as nothing
+ * at all when it is recognised as part of a whole column.
+ */
+function cellCrop(
+  image: RgbaImage,
+  columns: Columns,
+  side: "left" | "right",
+  centreY: number,
+  bandHeight: number
+): RgbaImage {
+  const [from, to] = columns[side];
+  const x0 = Math.max(0, Math.floor(from * image.width));
+  const x1 = Math.min(image.width, Math.ceil(to * image.width));
+  const y0 = Math.max(0, Math.floor(centreY - bandHeight * 0.55));
+  const y1 = Math.min(image.height, Math.ceil(centreY + bandHeight * 0.55));
+  const width = Math.max(1, x1 - x0);
+  const height = Math.max(1, y1 - y0);
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const sourceStart = ((y0 + y) * image.width + x0) * 4;
+    data.set(image.data.subarray(sourceStart, sourceStart + width * 4), y * width * 4);
+  }
+  return { data, width, height };
+}
+
+/**
  * Reads one screenshot.
  *
  * The engine is prepared once per session and reused, so a five image scan builds one worker rather than five.
@@ -271,12 +300,13 @@ export async function readMatchFacts(image: RgbaImage, options: ReadOptions): Pr
   /**
    * Which screen, decided before anything is matched to a row.
    *
-   * The bands are read twice on purpose. The first pass is a match against every screen's rows at once, which is
-   * only used to CLASSIFY the capture; the second reads it properly, against the rows of the screen that was
-   * chosen and of the section each band sits in.
+   * The bands are read once with no screen assumed, then scored against every screen this profile knows. Only
+   * after a screen is chosen are the labels resolved against its rows, and against the section each band sits
+   * in: matching first and choosing second would compare every band against one screen's table and call the
+   * capture whatever that table was.
    */
-  const probe = classifyScreen(readRows(words, bandCentres, bandHeight, prepared.image.width, profile.columns, profile.screens[0]), profile);
-  const choice: ScreenChoice = probe.screen === null ? probe : probe;
+  const bandsRead = readBands(words, bandCentres, bandHeight, prepared.image.width, profile.columns);
+  const choice: ScreenChoice = classifyScreen(bandsRead, profile);
 
   if (choice.screen === null) {
     return {
@@ -288,14 +318,56 @@ export async function readMatchFacts(image: RgbaImage, options: ReadOptions): Pr
     };
   }
 
-  const rows = readRows(
-    words,
-    bandCentres,
-    bandHeight,
-    prepared.image.width,
-    profile.columns,
-    choice.screen
-  );
+  const screenColumns = columnsFor(profile, choice.screen);
+  // Read again with the chosen screen's own columns when it carries any: the classification pass uses the
+  // profile's, which are wide enough for the longest label and would swallow a goals count into it.
+  const screenBands =
+    screenColumns.label === profile.columns.label && screenColumns.right === profile.columns.right
+      ? bandsRead
+      : readBands(words, bandCentres, bandHeight, prepared.image.width, screenColumns);
+  const rows = readRowsIn(screenBands, choice.screen);
+
+  /**
+   * The second look at a value column, only where the first one found nothing.
+   *
+   * A cell holding a single `0` is the one figure the engine keeps losing: it is a thin ring with no word around
+   * it, so with an unrestricted alphabet it comes back as a degree sign or nothing at all, and the row then reads
+   * as unread. Restricting the alphabet to digits makes that glyph unambiguous, so the two value columns are read
+   * again with the digit whitelist and the result is used ONLY for the cells the first pass left empty. Nothing
+   * that was read the first time can be changed by it.
+   */
+  /**
+   * The second look at a cell, only where the first one found nothing.
+   *
+   * A cell holding a single `0` is the one figure the engine keeps losing: it is a thin ring with no word around
+   * it, so recognised as part of a column it comes back as a degree sign or nothing at all, and the row then reads
+   * as unread. One cell, recognised on its own as a single line with a digits-only alphabet, is what the engine is
+   * good at. The result is used ONLY for a side the first pass left empty, so nothing already read can move.
+   */
+  for (const row of rows) {
+    if (row.row === null || row.row.key === null || row.isHeading) continue;
+    for (const side of ["left", "right"] as const) {
+      if (row[side] !== null) continue;
+      const cell = cellCrop(prepared.image, screenColumns, side, row.y, bandHeight);
+      const frame = await engine.recognise({
+        image: cell,
+        whitelist: VALUE_WHITELIST,
+        psm: "7",
+        signal: options.signal,
+      });
+      const words = frame.words;
+      if (words.length === 0) continue;
+      const value = normaliseNumber(words.map((word) => word.text.trim()).join(""));
+      if (value === null) continue;
+      row[side] = {
+        value,
+        raw: words.map((word) => word.text.trim()).join(""),
+        wordConfidence: words.reduce((total, word) => total + word.confidence, 0) / words.length,
+        words,
+        tokens: [],
+      };
+    }
+  }
 
   if (!choice.screen.enabled) {
     return {
@@ -307,20 +379,20 @@ export async function readMatchFacts(image: RgbaImage, options: ReadOptions): Pr
     };
   }
 
-  const settled = classifyScreen(rows, profile);
-  const screen = settled.screen ?? choice.screen;
+  // The enabled check comes AFTER classification: the capture is identified even when the screen it is cannot be
+  // read yet, so the refusal can name the screen rather than say the reader does not know it.
   const ours = settledSide(side);
-  const reading = ours === null ? blank : readScreen(rows, screen, ours);
-  const result = ours === null ? null : evaluateScreen(screen, reading.values);
+  const reading = ours === null ? blank : readScreen(rows, choice.screen, ours);
+  const result = ours === null ? null : evaluateScreen(choice.screen, reading.values);
 
   return {
     ok: true,
     imageIndex: options.imageIndex,
     name: options.name,
     profileId: profile.id,
-    screenId: screen.id,
-    screenLabel: screen.label,
-    screenReason: settled.reason,
+    screenId: choice.screen.id,
+    screenLabel: choice.screen.label,
+    screenReason: choice.reason,
     side,
     reading,
     result,

@@ -58,7 +58,7 @@ import { PREPROCESS_VARIANTS, detectTable, toLuma, scanRowEdges } from "./src/li
 import { disposeOcrEngine, getOcrEngine } from "./src/lib/ocr/engine";
 import { defaultProfile } from "./src/lib/ocr/layouts";
 import { SCREENS } from "./src/lib/ocr/layouts";
-import { readRows } from "./src/lib/ocr/extract";
+import { readRowsIn, readBands } from "./src/lib/ocr/extract";
 
 /** A union box around the words behind a value, for the focus highlight. Words themselves are dropped. */
 function boxOf(words) {
@@ -155,7 +155,8 @@ window.__ocr = {
     const screen = profile.screens[0];
     const centres = bands.centres.map((c) => (c - bands.region.top) * prepared.scale);
     const height = bands.rowHeight * prepared.scale;
-    const rows = readRows(frame.words, centres, height, prepared.image.width, profile.columns, screen);
+    const bandsRead = readBands(frame.words, centres, height, prepared.image.width, profile.columns);
+    const rows = readRowsIn(bandsRead, screen);
     return {
       preparedWidth: prepared.image.width,
       preparedHeight: prepared.image.height,
@@ -269,6 +270,19 @@ function pad(value, width) {
   return String(value).padEnd(width);
 }
 
+/** One figure against what the manager transcribed. A decimal is compared to the one place the game prints. */
+function same(want, got) {
+  if (typeof want !== "number" || typeof got !== "number") return want === got;
+  return Number.isInteger(want) ? want === got : Math.abs(got - want) < 0.05;
+}
+
+/**
+ * Per field accuracy, over BOTH columns.
+ *
+ * A sidecar asserts `[us, them]`; the two older ones assert a bare number, which is our side alone and stays
+ * supported so they keep working. A field counts as read only when every side the sidecar names was read right,
+ * because half a pair is not the figure the manager reads off his own screen.
+ */
 function score(outcome, expected) {
   if (!outcome.ok) return { hits: 0, total: Object.keys(expected).length, misses: [`not read: ${outcome.reason}`] };
   const misses = [];
@@ -279,12 +293,15 @@ function score(outcome, expected) {
       misses.push(`${field}: missing`);
       continue;
     }
-    // Our side is the one the manager's own figures are about, so that is the column a golden value is checked
-    // against. A decimal is compared to one place, which is the precision the game prints.
-    const value = got.us;
-    const matched = typeof want === "number" && !Number.isInteger(want) ? Math.abs(value - want) < 0.05 : value === want;
-    if (matched) hits += 1;
-    else misses.push(`${field}: want ${want} got ${value}`);
+    const [wantUs, wantThem] = Array.isArray(want) ? want : [want, null];
+    const usOk = same(wantUs, got.us);
+    const themOk = wantThem === null || same(wantThem, got.them);
+    if (usOk && themOk) hits += 1;
+    else {
+      misses.push(
+        `${field}: want ${wantUs}${wantThem === null ? "" : ` / ${wantThem}`} got ${got.us} / ${got.them}`
+      );
+    }
   }
   const refused = outcome.refused === null ? [] : [`screen refused: ${outcome.refused}`];
   return { hits, total: Object.keys(expected).length, misses: [...misses, ...refused] };
@@ -368,7 +385,7 @@ for (const entry of golden) {
   }
   if (VERBOSE) {
     for (const edge of info.edges) {
-      console.log(`      edge y=${pad(edge.y, 6)} x ${pad(edge.left, 6)} to ${pad(edge.right, 6)} width ${edge.w}`);
+      console.log(`      ${entry.spec.image} edge y=${pad(edge.y, 6)} x ${pad(edge.left, 6)} to ${pad(edge.right, 6)} width ${edge.w}`);
     }
   }
 }
@@ -411,7 +428,6 @@ for (const config of configs) {
       venue: entry.spec.venue ?? null,
       ourClub: entry.spec.ourClub ?? "",
       opponent: entry.spec.opponent ?? "",
-      goalsFor: null,
     };
     const outcome = await page.evaluate(
       ([base64, opts]) => window.__ocr.read(base64, opts),
@@ -503,7 +519,6 @@ for (const config of columnConfigs) {
       venue: entry.spec.venue ?? null,
       ourClub: entry.spec.ourClub ?? "",
       opponent: entry.spec.opponent ?? "",
-      goalsFor: null,
     };
     const outcome = await page.evaluate(
       ([base64, opts]) => window.__ocr.read(base64, opts),

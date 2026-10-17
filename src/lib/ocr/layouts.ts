@@ -153,6 +153,15 @@ export interface FactScreen {
   enabled: boolean;
   /** One line on why a screen is disabled. Null when it is enabled. */
   disabledBecause: string | null;
+  /**
+   * Column overrides for this screen, as fractions of the table rather than of the image.
+   *
+   * Only Shooting needs one, and the reason is the goals count. That screen draws a small ball and a goal tally
+   * between the label and the value, which lands inside a label band wide enough for the longest Summary label and
+   * turns "Normal" into "Normal 1". Pulling the label band back and letting the right column own everything from
+   * the goals count outwards is what keeps the label clean while the outer-number rule still finds the stat.
+   */
+  columns?: { label?: readonly [number, number]; right?: readonly [number, number] };
 }
 
 /**
@@ -304,6 +313,10 @@ export const SCREENS: readonly FactScreen[] = [
     signatures: [],
     sections: [{ heading: "", rows: SUMMARY_ROWS }],
     scrolls: true,
+    // On, because this screen is what fills the five boxes. Its FACTS group still refuses on every golden capture
+    // (three rows unread on each of the two clean ones, twelve on the photo), and the all-or-nothing rule means
+    // nothing from it is stored: the boxes are filled from the read, the facts are not kept until every required
+    // row and the possession sum hold.
     enabled: true,
     disabledBecause: null,
   },
@@ -317,9 +330,12 @@ export const SCREENS: readonly FactScreen[] = [
       { heading: "aim", rows: SHOOTING_ROWS.slice(13) },
     ],
     scrolls: false,
+    // Off on the Wigan capture: four shot-type rows that stand at 0 on our side (Header, Power, Volley, Chip) are
+    // not read at all, so three of the seven type rows are missing and the sums cannot be checked.
     enabled: false,
     disabledBecause:
-      "no capture of the Shooting screen has been supplied, so none of these rows has been measured",
+      "rows standing at 0 on our side were not read, so the shot type sum cannot be verified",
+    columns: { label: [0.18, 0.68], right: [0.68, 1] },
   },
   {
     id: "PASSING",
@@ -330,9 +346,11 @@ export const SCREENS: readonly FactScreen[] = [
       { heading: "style", rows: PASSING_ROWS.slice(12) },
     ],
     scrolls: false,
+    // Off on the Wigan capture: Pass and Go reads 0 on both sides and was not read at all, and one row missing is
+    // enough to fail the all-or-nothing rule.
     enabled: false,
     disabledBecause:
-      "no capture of the Passing screen has been supplied, so none of these rows has been measured",
+      "the Pass and Go row, 0 on both sides, was not read, so the screen cannot be stored whole",
   },
   {
     id: "DEFENDING",
@@ -343,9 +361,11 @@ export const SCREENS: readonly FactScreen[] = [
       { heading: "infractions", rows: DEFENDING_INFRACTIONS },
     ],
     scrolls: false,
+    // Off on the Wigan capture: three rows standing at 0 were not read, which is the same zero-glyph failure the
+    // other two screens show.
     enabled: false,
     disabledBecause:
-      "no capture of the Defending screen has been supplied, so none of these rows has been measured",
+      "rows standing at 0 were not read, so the screen cannot be stored whole",
   },
 ];
 
@@ -401,10 +421,26 @@ export function requiredRows(screen: FactScreen): FactRow[] {
   return screenRows(screen).filter((row) => row.required && row.key !== null);
 }
 
+  /**
+   * The columns a screen is read with: its own overrides, or the profile's.
+   *
+   * A screen can pull the label band back so a goals count beside the label stops becoming part of it, while the
+   * outer-number rule still reads the stat from the value column.
+   */
+export function columnsFor(profile: LayoutProfile, screen: FactScreen): Columns {
+  if (screen.columns === undefined) return profile.columns;
+  return {
+    left: profile.columns.left,
+    label: screen.columns.label ?? profile.columns.label,
+    right: screen.columns.right ?? profile.columns.right,
+  };
+}
+
 /** The rows that carry a stored key at all. */
 export function storedRows(screen: FactScreen): FactRow[] {
   return screenRows(screen).filter((row) => row.key !== null);
 }
+
 
 /**
  * A label reduced to what the matcher compares on.

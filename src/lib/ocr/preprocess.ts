@@ -481,16 +481,180 @@ function fitTableGrid(edges: RowEdge[]): TableGrid | null {
 }
 
 /**
+ * The band a row of text occupies, found from the text itself rather than from a rule line.
+ *
+ * WHY THIS EXISTS. The four Match Facts captures that arrive from the game at 1917x1078 have no row rules at all:
+ * the panel is translucent and the rows are separated by shading alone, so `scanRowEdges` finds six or sixteen
+ * stray edges and no grid. The rows are still there, and their labels are bright text on a dim panel, so the
+ * fallback below finds them by brightness instead. It runs ONLY when the rules produce no grid, which keeps the
+ * two captures that do carry rules reading exactly as they did.
+ */
+interface TextRun {
+  top: number;
+  bottom: number;
+  centre: number;
+}
+
+/** Where the labels live, as a fraction of the image width. Wider would take in the flanking stat cards. */
+const TEXT_WINDOW: readonly [number, number] = [0.34, 0.62];
+/** A label is white on a dim panel: this is the brightness a pixel has to reach to count as text. */
+const TEXT_BRIGHT = 150;
+/** How many bright pixels a row needs before the run counts as a line of text. */
+const TEXT_ROW_MIN_PIXELS = 10;
+/** A run may skip this many rows of a descender or a dot inside a letter without being split in two. */
+const TEXT_RUN_GAP = 3;
+
+/** Every line of bright text in the label column, as vertical runs. */
+function scanTextRuns(gray: Uint8ClampedArray, width: number, height: number): TextRun[] {
+  const from = Math.floor(width * TEXT_WINDOW[0]);
+  const to = Math.ceil(width * TEXT_WINDOW[1]);
+  const runs: TextRun[] = [];
+  let top = -1;
+  let last = -1;
+
+  const close = () => {
+    if (top < 0) return;
+    runs.push({ top, bottom: last, centre: Math.round((top + last) / 2) });
+    top = -1;
+  };
+
+  for (let y = 0; y < height; y += 1) {
+    let bright = 0;
+    const base = y * width;
+    for (let x = from; x < to; x += 1) {
+      if (gray[base + x] >= TEXT_BRIGHT) bright += 1;
+    }
+    if (bright >= TEXT_ROW_MIN_PIXELS) {
+      if (top < 0) top = y;
+      last = y;
+      continue;
+    }
+    if (top >= 0 && y - last > TEXT_RUN_GAP) close();
+  }
+  close();
+  return runs;
+}
+
+function medianOf(values: number[]): number {
+  const ordered = [...values].sort((left, right) => left - right);
+  return ordered[Math.floor(ordered.length / 2)];
+}
+
+/**
+ * The table found from its text, or null.
+ *
+ * The runs are grouped by the rhythm they sit on: a pitch is estimated from the commonest gap, and the longest
+ * chain of runs that keeps that pitch is the table. The header, the tab bar and the flanking stat cards are what
+ * that has to reject, and it does it by arithmetic rather than by knowing where they are: none of them continues
+ * at the row pitch.
+ */
+function detectTextTable(image: RgbaImage): RowBands | null {
+  const { width, height } = image;
+  const gray = toLuma(image);
+  const runs = scanTextRuns(gray, width, height);
+  if (runs.length < MIN_RULES) return null;
+
+  const gaps: number[] = [];
+  for (let index = 0; index < runs.length - 1; index += 1) {
+    const gap = runs[index + 1].centre - runs[index].centre;
+    if (gap >= MIN_ROW_HEIGHT && gap <= MAX_ROW_HEIGHT) gaps.push(gap);
+  }
+  if (gaps.length === 0) return null;
+  const pitch = medianOf(gaps);
+  const tolerance = Math.max(3, pitch * RHYTHM_TOLERANCE);
+
+  let best: TextRun[] = [];
+  for (let start = 0; start < runs.length; start += 1) {
+    const chain = [runs[start]];
+    for (let index = start + 1; index < runs.length; index += 1) {
+      const gap = runs[index].centre - chain[chain.length - 1].centre;
+      if (Math.abs(gap - pitch) <= tolerance) chain.push(runs[index]);
+    }
+    if (chain.length > best.length) best = chain;
+  }
+  if (best.length < MIN_RULES) return null;
+
+  /**
+   * The horizontal extent is measured from the text itself, over the rows that were kept.
+   *
+   * It has to be measured, not assumed: the columns are fractions of the TABLE, and these captures put the table
+   * between two stat cards whose positions differ from screen to screen. Getting this wrong puts the value columns
+   * over the card captions, which reads perfectly plausible figures from the wrong place.
+   *
+   * Measured in two passes, because a single bright-pixel extent is not the table. A white bib or a lit crowd
+   * behind the translucent panel is bright, and one of those at the edge of the frame stretched the region across
+   * the flanking cards on all four captures. So a pixel has to be BOTH bright and nearly colourless, which is what
+   * the game's own type is, and the extent is the MEDIAN of the rows rather than the union of them, so the two or
+   * three rows with a bright object behind them cannot decide it.
+   */
+  const { data: pixels } = image;
+  const isType = (x: number, y: number): boolean => {
+    const at = (y * width + x) * 4;
+    const r = pixels[at];
+    const g = pixels[at + 1];
+    const b = pixels[at + 2];
+    if (Math.max(r, g, b) - Math.min(r, g, b) > 40) return false;
+    return (r * 299 + g * 587 + b * 114) / 1000 >= TEXT_BRIGHT;
+  };
+
+  const lefts: number[] = [];
+  const rights: number[] = [];
+  for (const run of best) {
+    let left = -1;
+    let right = -1;
+    for (let y = Math.max(0, run.top); y <= Math.min(height - 1, run.bottom); y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if (!isType(x, y)) continue;
+        if (left === -1) left = x;
+        right = x;
+      }
+    }
+    if (left !== -1) {
+      lefts.push(left);
+      rights.push(right);
+    }
+  }
+  if (lefts.length < MIN_RULES) return null;
+
+  const left = medianOf(lefts);
+  const right = medianOf(rights);
+  if (right - left < width * MIN_RULE_WIDTH_FRACTION) return null;
+
+  const top = Math.max(0, best[0].top);
+  const bottom = Math.min(height, best[best.length - 1].bottom);
+  if (bottom - top < height * MIN_GROUP_SPAN_FRACTION) return null;
+
+  const margin = Math.round((right - left) * REGION_MARGIN);
+  const regionLeft = Math.max(0, left - margin);
+  const regionRight = Math.min(width, right + margin);
+
+  return {
+    centres: best.map((run) => run.centre),
+    rowHeight: pitch,
+    region: {
+      left: regionLeft,
+      top,
+      width: regionRight - regionLeft,
+      height: bottom - top,
+    },
+  };
+}
+
+/**
  * Finds the table, or null when there is not one.
  *
  * Returns null rather than a guess, because a guess here produces plausible but wrong row boundaries and the
  * numbers read out of them would look like real figures. The caller says it could not find the table, which is
  * the honest outcome.
+ *
+ * Two detectors, in order of how much they prove. The RULES are the stronger evidence and are tried first, so the
+ * captures that carry them read exactly as they always have; the text fallback exists for the captures whose panel
+ * has no rules at all and is only reached when the first detector finds no grid.
  */
 export function detectTable(image: RgbaImage): RowBands | null {
   const { width, height } = image;
   const grid = fitTableGrid(scanRowEdges(image));
-  if (grid === null) return null;
+  if (grid === null) return detectTextTable(image);
 
   const top = grid.lines[0];
   const bottom = grid.lines[grid.lines.length - 1];
@@ -573,6 +737,14 @@ export const PREPROCESS_VARIANTS: readonly PreprocessVariant[] = [
   { id: "colour-normalise-40", suppressColour: true, normalise: true, keepBrightest: null, targetRowHeight: 40 },
   { id: "colour-normalise-64", suppressColour: true, normalise: true, keepBrightest: null, targetRowHeight: 64 },
   { id: "colour-normalise-40-b12", suppressColour: true, normalise: true, keepBrightest: 0.12, targetRowHeight: 40 },
+  /**
+   * The 1917 wide captures are the reason the larger targets exist. Their rows are 38 to 49 pixels tall, so the
+   * forty pixel target SHRINKS them (a scale of 0.82 on the Summary capture) and a shrunk zero closes into a dash.
+   * At eighty the glyphs are grown instead, which is what the numbers need.
+   */
+  { id: "plain-80", suppressColour: false, normalise: false, keepBrightest: null, targetRowHeight: 80 },
+  { id: "colour-80", suppressColour: true, normalise: false, keepBrightest: null, targetRowHeight: 80 },
+  { id: "colour-normalise-80", suppressColour: true, normalise: true, keepBrightest: null, targetRowHeight: 80 },
 ];
 
 export const DEFAULT_VARIANT_ID = "colour-64";

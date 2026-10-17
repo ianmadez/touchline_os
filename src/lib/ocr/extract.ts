@@ -112,7 +112,21 @@ export function normaliseNumber(raw: string): number | null {
   cleaned = cleaned.replace(/[+-]/g, (match) => (match === "-" ? "-" : ""));
 
   const digits = cleaned.replace(/[^0-9]/g, "");
-  if (digits.length === 0) return null;
+  if (digits.length === 0) {
+    /**
+     * A lone zero does not survive as a zero.
+     *
+     * On every capture, an isolated "0" in a value column comes back from the engine as a degree sign, a dash, an
+     * underscore or a bare "o", because the glyph is one thin ring and the engine has no word around it for
+     * context. That is the whole reason the rows reading zero were the rows going missing, and it is why this
+     * single narrow rule exists: a token that is NOTHING BUT those glyphs, in a column of numbers, is a zero. The
+     * filled ball that marks a goal is deliberately not in the set, so a goals icon can never become a figure.
+     */
+    if (/^[°º˚oOQ!_\-=~|]+$/.test(text.trim())) return 0;
+    // A lone "i" or "l" is the other half of the same problem: a one, read as the letter it looks like.
+    if (/^[ilI]$/.test(text.trim())) return 1;
+    return null;
+  }
   if (digits.length > 4) return null;
 
   const value = Number(cleaned);
@@ -376,42 +390,68 @@ export function readColumnValue(
 }
 
 /**
- * One band into a reading.
+ * One row band, before any screen has been chosen: its label, and the number either side of it.
+ *
+ * Split from `RowReading` so a capture can be CLASSIFIED first. Matching a band's label to a row needs a screen,
+ * and choosing the screen by matching against one screen's rows first would compare every band against the wrong
+ * table and call the capture a Summary whatever it was.
+ */
+export interface BandReading {
+  y: number;
+  labelText: string;
+  left: ValueReading | null;
+  right: ValueReading | null;
+}
+
+/** Every band of the table, top to bottom, with the label and the two numbers but no screen assumed. */
+export function readBands(
+  words: OcrWord[],
+  bandCentres: number[],
+  bandHeight: number,
+  width: number,
+  columns: Columns
+): BandReading[] {
+  const buckets = bucketIntoBands(words, bandCentres, bandHeight);
+  return buckets.map((bucket, index) => ({
+    y: bandCentres[index],
+    labelText: wordsInColumn(bucket, width, columns.label).map(wordText).join(" ").trim(),
+    left: readColumnValue(bucket, width, columns.left, "LEFT"),
+    right: readColumnValue(bucket, width, columns.right, "RIGHT"),
+  }));
+}
+
+/**
+ * One band as a row of a chosen screen.
  *
  * The section in force is tried first and the whole screen is the fallback, so a misread section heading cannot
- * cost a row its figure while two same-named rows on other screens still stay apart. A band whose label does not
- * match any row still comes back, with a null row, which is what the screen classifier counts.
+ * cost a row its figure while two same-named rows on other screens still stay apart. A band whose label matches
+ * no row still comes back, with a null row, so "is this the screen" never has to invent a field.
  */
 export function readRow(
-  words: OcrWord[],
-  y: number,
-  width: number,
-  columns: Columns,
+  band: BandReading,
   screen: FactScreen,
-  section: readonly FactRow[] | null
+  section: readonly FactRow[] | null,
+  heading: string | null
 ): RowReading {
-  const labelWords = wordsInColumn(words, width, columns.label);
-  const labelText = labelWords.map(wordText).join(" ").trim();
-  const inSection = section === null || section.length === 0 ? null : matchLabel(labelText, screen, section);
-  const match = inSection ?? (labelText === "" ? null : matchLabel(labelText, screen));
+  const inSection = section === null || section.length === 0 ? null : matchLabel(band.labelText, screen, section);
+  const match = inSection ?? (band.labelText === "" ? null : matchLabel(band.labelText, screen));
 
   return {
-    y,
-    labelText,
+    y: band.y,
+    labelText: band.labelText,
     labelScore: match?.score ?? 0,
-    // Filled in by `readRows`, which is the only caller that knows which heading was last seen.
-    section: null,
+    section: heading,
     row: match?.row ?? null,
-    left: readColumnValue(words, width, columns.left, "LEFT"),
-    right: readColumnValue(words, width, columns.right, "RIGHT"),
+    left: band.left,
+    right: band.right,
     isHeading: false,
   };
 }
 
 /**
- * Every band of a screen read, top to bottom, tracking the section each band sits in.
+ * Every band read as a row of a screen, top to bottom, tracking the section each band sits in.
  *
- * A band whose text matches a section heading sets the section for the bands below it, and carries no figure of
+ * A band whose text matches a section heading sets the section for the bands below it and carries no figure of
  * its own. That is the whole of the section logic: it exists so a label can be resolved inside its section
  * first, not so a heading has to be read for a screen to work.
  */
@@ -423,17 +463,24 @@ export function readRows(
   columns: Columns,
   screen: FactScreen
 ): RowReading[] {
-  const buckets = bucketIntoBands(words, bandCentres, bandHeight);
+  return readRowsIn(readBands(words, bandCentres, bandHeight, width, columns), screen);
+}
+
+/**
+ * Every band read as a row of a screen, tracking the section each band sits in.
+ *
+ * A band whose text matches a section heading sets the section for the bands below it and carries no figure of
+ * its own. That is the whole of the section logic: it exists so a label can be resolved inside its section
+ * first, not so a heading has to be read for a screen to work.
+ */
+export function readRowsIn(bands: BandReading[], screen: FactScreen): RowReading[] {
   const headings = sectionHeadings(screen);
   const rows: RowReading[] = [];
   let current: FactRow[] | null = null;
   let heading: string | null = null;
 
-  for (let index = 0; index < buckets.length; index += 1) {
-    const bucket = buckets[index];
-    const labelText = wordsInColumn(bucket, width, columns.label).map(wordText).join(" ").trim();
-    const normalised = normaliseLabel(labelText);
-
+  for (const band of bands) {
+    const normalised = normaliseLabel(band.labelText);
     const headingHit =
       normalised === ""
         ? null
@@ -443,8 +490,8 @@ export function readRows(
       heading = headingHit;
       current = section?.rows ?? null;
       rows.push({
-        y: bandCentres[index],
-        labelText,
+        y: band.y,
+        labelText: band.labelText,
         labelScore: 1,
         section: headingHit,
         row: null,
@@ -455,8 +502,7 @@ export function readRows(
       continue;
     }
 
-    const reading = readRow(bucket, bandCentres[index], width, columns, screen, current);
-    rows.push({ ...reading, section: heading });
+    rows.push(readRow(band, screen, current, heading));
   }
 
   return rows;
@@ -473,39 +519,55 @@ export interface ScreenChoice {
 }
 
 /**
+ * How many bands of a capture belong to a screen, counting a heading of its own as decisive.
+ *
+ * The count is what makes a near pair resolvable: "Saves" is a row of both Summary and Defending, so one shared
+ * word proves nothing, while nine rows and a heading prove the screen.
+ */
+function screenScore(bands: BandReading[], screen: FactScreen): { matched: number; heading: boolean } {
+  let matched = 0;
+  let heading = false;
+  for (const band of bands) {
+    const text = normaliseLabel(band.labelText);
+    if (text === "") continue;
+    if (screen.signatures.some((signature) => labelSimilarity(text, signature) >= 0.8)) heading = true;
+    if (matchLabel(band.labelText, screen) !== null) matched += 1;
+  }
+  return { matched, heading };
+}
+
+/**
  * Which screen a capture is, decided by what is on it.
  *
  * The tab bar is deliberately not used: it is a strip of six words in small type, and one misread letter would
  * move a read onto another screen's rows, where the labels are plausible and the figures are wrong. The content
  * is the stronger signal, because the headings and the row labels are large type in the middle of the table.
  *
- * A screen's own heading decides it. Failing that, the screen whose rows matched most of the bands wins, and a
- * capture that matched nothing is not a Match Facts table at all.
+ * Every screen is scored, including the ones that ship disabled, so a Shooting capture is recognised and told
+ * apart from a Summary one even while the Shooting screen is not being read yet.
  */
-export function classifyScreen(rows: RowReading[], profile: LayoutProfile): ScreenChoice {
-  const screens = profile.screens;
-
-  for (const entry of screens) {
-    for (const row of rows) {
-      const text = normaliseLabel(row.labelText);
-      if (text === "") continue;
-      const hit = entry.signatures.some((signature) => labelSimilarity(text, signature) >= 0.8);
-      if (hit) return { screen: entry, reason: `the ${entry.label} heading is on the capture` };
+export function classifyScreen(bands: BandReading[], profile: LayoutProfile): ScreenChoice {
+  let best: { screen: FactScreen; matched: number; heading: boolean } | null = null;
+  for (const entry of profile.screens) {
+    const score = screenScore(bands, entry);
+    if (best === null) {
+      best = { screen: entry, ...score };
+      continue;
     }
+    const better =
+      (score.heading && !best.heading) ||
+      (score.heading === best.heading && score.matched > best.matched);
+    if (better) best = { screen: entry, ...score };
   }
 
-  let best: { screen: FactScreen; matched: number } | null = null;
-  for (const entry of screens) {
-    const matched = rows.filter((row) => row.row !== null).length;
-    if (best === null || matched > best.matched) best = { screen: entry, matched };
-  }
-
-  if (best === null || best.matched === 0) {
+  if (best === null || (!best.heading && best.matched === 0)) {
     return { screen: null, reason: "no row on this capture belongs to a screen the scanner knows" };
   }
   return {
     screen: best.screen,
-    reason: `${best.matched} of its rows were read and no other screen's heading was found`,
+    reason: best.heading
+      ? `the ${best.screen.label} heading is on the capture`
+      : `${best.matched} of its rows were read and no other screen's heading was found`,
   };
 }
 

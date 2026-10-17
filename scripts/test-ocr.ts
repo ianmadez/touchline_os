@@ -240,16 +240,7 @@ check("and never in two bands at once", bands[1].length, 0);
 console.log("classification, by content rather than by the tab bar");
 const classify = (labels: string[]): string | null =>
   classifyScreen(
-    labels.map((label) => ({
-      y: 0,
-      labelText: label,
-      labelScore: 0.9,
-      section: null,
-      row: null,
-      left: null,
-      right: null,
-      isHeading: false,
-    })),
+    labels.map((label) => ({ y: 0, labelText: label, left: null, right: null })),
     profile
   ).screen?.id ?? null;
 check("the Shooting heading decides it", classify(["Overall Shooting"]), "SHOOTING");
@@ -257,12 +248,29 @@ check("the Passing heading decides it", classify(["Overall Passing"]), "PASSING"
 check("the Defending heading decides it", classify(["Overall Defending"]), "DEFENDING");
 check("a misread heading still decides it", classify(["Overall Shooling"]), "SHOOTING");
 check("a capture with nothing recognisable on it is nothing", classify([]), null);
+// The rows decide it when no heading was read, which is how the Summary screen has to be recognised: it has no
+// heading of its own and opens straight onto Possession %.
+check(
+  "the Summary rows decide it with no heading at all",
+  classify(["Possession %", "Ball Recovery Time (Seconds)", "Shots", "Expected Goals", "Passes", "Tackles Won", "Corners"]),
+  "SUMMARY"
+);
+// "Saves" and "Interceptions" are rows of two screens, so one of them alone proves nothing; the balance of the
+// rows is what settles it.
+check(
+  "one shared row does not decide a screen on its own",
+  classify(["Saves", "Interceptions", "Standing Tackles", "Sliding Tackles Won", "Clearances", "Beaten By Opponent"]),
+  "DEFENDING"
+);
+// A screen that ships disabled is still identified, so the pane can say it is not read yet rather than claim the
+// capture is unknown.
+check("a disabled screen is still recognised", classify(["Overall Shooting", "Total Shots", "Finesse"]), "SHOOTING");
 
 // ---------------------------------------------------------------------------
 console.log("the screens the tables describe");
 check("Summary is read", summary.enabled, true);
 check("Shooting is not read yet", shooting.enabled, false);
-check("and the data says why", shooting.disabledBecause?.includes("no capture"), true);
+check("and the data says why", shooting.disabledBecause?.includes("were not read"), true);
 check("Passing is not read yet", passing.enabled, false);
 check("Defending is not read yet", defending.enabled, false);
 check("Summary carries the four box figures that are on it", storedRows(summary).map((row) => row.key).filter((key) => ["shots", "expectedGoals", "possessionPct", "passes"].includes(key as string)).length, 4);
