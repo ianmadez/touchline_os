@@ -134,8 +134,7 @@ export function LandingPage({
         </h1>
 
         <p className="font-sans text-slate-600 dark:text-slate-300 max-w-lg text-xs sm:text-sm mb-5 leading-relaxed font-medium">
-          It reads your save, remembers every squad change it finds, and reads each block of matches back to
-          you: what the numbers support, what they do not, and what is worth testing next.
+          TouchlineOS reads your PC's EA SPORTS FC save and builds a full career workspace around it. Track your season by logging matches, look at your squad rosters, contracts, finances, and a 2D pitch view are all auto-generated. Every season is logged, every transfer tracked, and every player scouted.
         </p>
 
         {/* Local Save Detector Box */}
