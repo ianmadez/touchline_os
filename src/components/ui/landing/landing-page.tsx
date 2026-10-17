@@ -126,7 +126,7 @@ export function LandingPage({
           because there is nothing to consent to - no tracking, no analytics, no uploads. */}
       <LocalStorageNotice onOpenLegal={onOpenLegal} />
       {/* PUNCHY HERO SECTION - FULL VIEWPORT FIT */}
-      <section className="flex flex-col items-center justify-center text-center py-4 sm:py-8 min-h-[calc(100vh-100px)]">
+      <section className="flex flex-col items-center justify-center text-center py-4 sm:py-8 min-h-[calc(100svh-100px)]">
 
         <h1 className="font-heading text-3xl sm:text-5xl lg:text-6xl text-slate-900 dark:text-slate-100 uppercase tracking-wide max-w-3xl leading-tight mb-3">
           Turn Your FC Save Into A <br />

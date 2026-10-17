@@ -364,7 +364,7 @@ export function ArticleDialog({
       onClick={onClose}
     >
       <article
-        className="max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 shadow-2xl backdrop-blur-xl animate-panel-in dark:border-slate-800 dark:bg-slate-900/95"
+        className="max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-white/95 shadow-2xl backdrop-blur-xl animate-panel-in sm:max-h-[88vh] dark:border-slate-800 dark:bg-slate-900/95"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex flex-col gap-5 p-5 sm:flex-row sm:gap-6 sm:p-6">

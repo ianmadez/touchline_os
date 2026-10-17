@@ -3,6 +3,8 @@
 import React, { useSyncExternalStore } from "react";
 import { AppTab } from "@/lib/session";
 import { IconDiscord } from "../icons";
+import { MobileTabBar } from "./mobile-tab-bar";
+import { appTabsFor } from "./tab-items";
 
 /**
  * Whether the page has scrolled past the nav's own height.
@@ -56,25 +58,15 @@ export function Navbar({
   const clubBadgeUrl = (activeClubLogoUrl ?? "").trim();
   const hasClubName = Boolean(activeClubName && activeClubName.trim() !== "");
 
-  const appTabs: { id: AppTab; label: string }[] = [
-    // Setup is one-time: the portal disappears once a career exists, so nobody is offered the
-    // onboarding wizard again after they have already completed it.
-    ...(isOnboardingComplete ? [] : [{ id: "PORTAL" as AppTab, label: "Portal" }]),
-    { id: "DASHBOARD", label: "Dashboard" },
-    { id: "SEASON", label: "Season" },
-    { id: "DEBRIEF", label: "Debrief" },
-    { id: "SQUAD", label: "Squad" },
-    { id: "TACTICS", label: "Tactics" },
-    { id: "FINANCE", label: "Finances" },
-    { id: "SETTINGS", label: "Settings" },
-  ];
+  const appTabs = appTabsFor(isOnboardingComplete);
 
   return (
-    // Sticky, so it stays put on every page while the content scrolls underneath it. The
-    // translucent backdrop is what makes content visibly duck UNDER rather than pass over: the
-    // blur plus the near-opaque fill hides whatever is sliding beneath, and the border and shadow
-    // only appear once there is something to separate the bar from - so the resting page looks flat
-    // and the scrolled page has a defined edge.
+    <>
+    {/* Sticky, so it stays put on every page while the content scrolls underneath it. The
+        translucent backdrop is what makes content visibly duck UNDER rather than pass over: the
+        blur plus the near-opaque fill hides whatever is sliding beneath, and the border and shadow
+        only appear once there is something to separate the bar from - so the resting page looks flat
+        and the scrolled page has a defined edge. */}
     <header
       className={`sticky top-0 z-50 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b px-4 py-3 text-slate-900 transition-[background-color,border-color,box-shadow] duration-200 dark:text-white ${
         scrolled
@@ -221,5 +213,17 @@ export function Navbar({
         )}
       </div>
     </header>
+
+    {/* The phone keeps the brand and theme toggle in the header and takes its navigation from the
+        bottom bar. The bar is not offered on the landing page or during setup, where there is no
+        career to navigate yet. */}
+    {!isLanding && isOnboardingComplete && (
+      <MobileTabBar
+        activeTab={activeTab}
+        onSelectTab={onSelectTab}
+        isOnboardingComplete={isOnboardingComplete}
+      />
+    )}
+    </>
   );
 }

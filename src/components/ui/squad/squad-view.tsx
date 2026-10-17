@@ -88,7 +88,7 @@ export function SquadView({
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={SEARCH_PLACEHOLDERS[subTab]}
-                className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-xs text-slate-900 focus:border-[#E11D48] focus:outline-none dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-xs text-slate-900 focus:border-[#E11D48] focus:outline-none max-md:min-h-11 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
               />
               <IconSearch className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             </label>

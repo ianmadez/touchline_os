@@ -295,6 +295,60 @@ export function SquadTable({
         </span>
       </div>
 
+      {/* The headers are the desktop sort controls, and they vanish with the table on a phone.
+          This is the same state, with a plain select, so sorting survives the card layout. */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-2.5 md:hidden dark:border-slate-800/80">
+        <label className="flex items-center gap-2 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          Sort by
+          <select
+            value={statsMode ? statsSortField : sortField}
+            onChange={(event) => {
+              if (statsMode) setStatsSortField(event.target.value as StatsSortField);
+              else setSortField(event.target.value as SortableField);
+            }}
+            className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-sub text-xs normal-case tracking-normal text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          >
+            {statsMode ? (
+              <>
+                <option value="averageRating">Average rating</option>
+                <option value="appearances">Appearances</option>
+                <option value="minutes">Minutes</option>
+                <option value="goals">Goals</option>
+                <option value="assists">Assists</option>
+              </>
+            ) : (
+              <>
+                <option value="overallRating">Overall rating</option>
+                <option value="potentialRating">Potential</option>
+                <option value="name">Name</option>
+                <option value="primaryPosition">Position</option>
+                <option value="age">Age</option>
+                <option value="assignedRole">Assigned role</option>
+                <option value="trustLevel">Trust</option>
+                <option value="importanceMarker">Status</option>
+              </>
+            )}
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={() => {
+            if (statsMode) setStatsSortAsc((current) => !current);
+            else setSortAsc((current) => !current);
+          }}
+          aria-label="Reverse the sort order"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-300"
+        >
+          {statsMode
+            ? statsSortAsc
+              ? "Ascending"
+              : "Descending"
+            : sortAsc
+              ? "Ascending"
+              : "Descending"}
+        </button>
+      </div>
+
       {/* Table Surface */}
       <div className="overflow-x-auto">
         {statsMode && (
@@ -304,7 +358,7 @@ export function SquadTable({
             the mode. The columns are the save's own record plus the manager's log, and the caption at
             the foot says which is which.
           */
-          <table className="w-full text-left border-collapse">
+          <table className="hidden w-full text-left border-collapse md:table">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/50 text-[11px] font-sub text-slate-500 dark:text-slate-400 uppercase tracking-wider select-none">
                 <th className="py-3 px-4">Player</th>
@@ -395,7 +449,7 @@ export function SquadTable({
         )}
 
         {!statsMode && (
-        <table className="w-full text-left border-collapse">
+        <table className="hidden w-full text-left border-collapse md:table">
           <thead>
             <tr className="border-b border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/50 text-[11px] font-sub text-slate-500 dark:text-slate-400 uppercase tracking-wider select-none">
               <th
@@ -578,6 +632,128 @@ export function SquadTable({
         </table>
         )}
       </div>
+
+      {/*
+        Below 768px the eleven columns become one card per player. The table stays the desktop
+        surface; the card carries the same facts in the order a squad list is read (face, name,
+        rating, availability) and opens the same dossier on tap.
+      */}
+      {!statsMode && sortedPlayers.length > 0 && (
+        <ul className="divide-y divide-slate-200 md:hidden dark:divide-slate-800/60">
+          {sortedPlayers.map((player) => {
+            const injury = player.userProfile?.injury;
+            const out = isInjured(injury, inGameDate);
+            const timeOut = out ? describeTimeOut(injury?.until ?? null, inGameDate) : null;
+            return (
+              <li key={player.id}>
+                <button
+                  type="button"
+                  onClick={() => onSelectPlayer(player)}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-slate-100 dark:active:bg-slate-800/60"
+                >
+                  <PlayerFace eaPlayerId={player.eaPlayerId} name={player.name} size={40} />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+                        {player.name}
+                      </span>
+                      <span className="shrink-0 font-heading text-sm font-bold text-amber-600 dark:text-amber-400">
+                        {player.overallRating}
+                      </span>
+                    </span>
+                    <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      <span className="rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 font-bold text-slate-700 dark:border-slate-700/80 dark:bg-slate-800 dark:text-slate-300">
+                        {player.primaryPosition || UNKNOWN_POSITION}
+                      </span>
+                      <span>POT {player.potentialRating}</span>
+                      <span>{player.age ?? "-"} yrs</span>
+                      <span
+                        className={
+                          out
+                            ? "text-rose-600 dark:text-rose-400"
+                            : "text-emerald-700 dark:text-emerald-400"
+                        }
+                      >
+                        {out ? `Out ${timeOut ?? ""}`.trim() : "Fit"}
+                      </span>
+                    </span>
+                    {(player.userProfile?.assignedRole ||
+                      player.userProfile?.trustLevel ||
+                      player.userProfile?.importanceMarker) && (
+                      <span className="mt-1.5 flex flex-wrap gap-1">
+                        {player.userProfile?.assignedRole ? (
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 font-sub text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            {player.userProfile.assignedRole}
+                          </span>
+                        ) : null}
+                        {player.userProfile?.trustLevel ? (
+                          <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-sub text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                            Trust {cleanLabel(player.userProfile.trustLevel)}
+                          </span>
+                        ) : null}
+                        {player.userProfile?.importanceMarker ? (
+                          <span className="rounded bg-purple-500/10 px-1.5 py-0.5 font-sub text-[10px] font-bold uppercase tracking-wider text-purple-700 dark:text-purple-300">
+                            {cleanLabel(player.userProfile.importanceMarker)}
+                          </span>
+                        ) : null}
+                      </span>
+                    )}
+                  </span>
+                  <span aria-hidden="true" className="shrink-0 text-amber-600 dark:text-amber-400">
+                    →
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {statsMode && statsRows.length > 0 && (
+        <ul className="divide-y divide-slate-200 md:hidden dark:divide-slate-800/60">
+          {statsRows.map(({ player, record }) => (
+            <li key={player.id}>
+              <button
+                type="button"
+                onClick={() => (onSelectPlayerFromStats ?? onSelectPlayer)(player)}
+                className="w-full px-4 py-3 text-left transition-colors active:bg-slate-100 dark:active:bg-slate-800/60"
+              >
+                <span className="flex items-center gap-3">
+                  <PlayerFace eaPlayerId={player.eaPlayerId} name={player.name} size={40} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+                      {player.userProfile?.displayName || player.name}
+                    </span>
+                    <span className="mt-0.5 block font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      {player.primaryPosition || UNKNOWN_POSITION}
+                    </span>
+                  </span>
+                  {record?.averageRating !== null && record?.averageRating !== undefined ? (
+                    <RatingBadge rating={record.averageRating} />
+                  ) : null}
+                </span>
+                <span className="mt-2 grid grid-cols-4 gap-2">
+                  {[
+                    ["APP", record?.appearances],
+                    ["MINS", record?.minutes],
+                    ["GOALS", record?.goals],
+                    ["ASSISTS", record?.assists],
+                  ].map(([label, value]) => (
+                    <span key={String(label)} className="rounded-lg bg-slate-50 px-2 py-1.5 text-center dark:bg-slate-950/60">
+                      <span className="block font-sub text-[9px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                        {label}
+                      </span>
+                      <span className="block font-heading text-sm tabular-nums text-slate-900 dark:text-slate-100">
+                        {value ?? "-"}
+                      </span>
+                    </span>
+                  ))}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
 
       {statsMode && statsRows.length > 0 && (
         <p className="border-t border-slate-200 px-4 py-3 font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:border-slate-800/80 dark:text-slate-500">

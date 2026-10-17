@@ -229,7 +229,7 @@ export function FinanceView({ careerId }: { careerId: string | null }) {
         ) : (
           <>
             {/* Internal scroll: a long commitment list can never stretch the page. */}
-            <ul className="max-h-[280px] space-y-3 overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+            <ul className="max-h-[280px] space-y-3 overflow-y-auto overscroll-contain pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
               {report.contractLiability.map((row) => {
                 const share = report.estimatedTierRevenue
                   ? row.committedAnnualWage / report.estimatedTierRevenue

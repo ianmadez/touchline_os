@@ -473,8 +473,8 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
             </p>
           ) : (
             <>
-              <div className="max-h-[560px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
-                <table className="w-full border-collapse text-left">
+              <div className="max-h-[60dvh] overflow-y-auto overscroll-contain pr-1 scrollbar-thin scrollbar-thumb-slate-300 md:max-h-[560px] dark:scrollbar-thumb-slate-700">
+                <table className="hidden w-full border-collapse text-left md:table">
                   <thead className="sticky top-0 bg-white/95 backdrop-blur dark:bg-slate-900/95">
                     <tr className="border-b border-slate-200 dark:border-slate-800">
                       {["Rank", "Player", "Pos", "OVR", "POT", "Age", "Value", "Fits", ""].map((heading, index) => (
@@ -578,6 +578,75 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
                     ))}
                   </tbody>
                 </table>
+
+                <ul className="divide-y divide-slate-100 md:hidden dark:divide-slate-800/60">
+                  {rows.map((row) => (
+                    <li key={row.eaPlayerId} className="flex items-start gap-2 px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => void openDossier(row.eaPlayerId)}
+                        className="flex min-w-0 flex-1 items-start gap-2.5 text-left"
+                      >
+                        <span className="mt-0.5 w-5 shrink-0 text-right font-heading text-xs text-slate-400 tabular-nums dark:text-slate-500">
+                          {row.rank}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          {row.nameResolved ? (
+                            <span className="block truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+                              {row.name}
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 font-sub text-[9px] font-bold uppercase tracking-wider text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300">
+                              <IconAlert className="h-3.5 w-3.5" />
+                              Name not in this save
+                            </span>
+                          )}
+                          <span className="mt-0.5 block font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                            {row.clubName ?? "Club unrecorded"}
+                            {row.nameResolved ? "" : ` · id ${row.eaPlayerId}`}
+                          </span>
+                          <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                            <span className="font-bold text-slate-700 dark:text-slate-300">
+                              {row.primaryPosition}
+                            </span>
+                            <span>OVR {row.overallRating ?? "—"}</span>
+                            <span>POT {row.potentialRating ?? "—"}</span>
+                            <span>{row.age ?? "—"} yrs</span>
+                          </span>
+                          <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                            <span className="font-heading text-xs text-emerald-600 tabular-nums dark:text-emerald-400">
+                              {row.value.text}
+                            </span>
+                            <span
+                              className={`rounded px-1 py-0.5 font-sub text-[8px] font-bold uppercase tracking-wider ${
+                                CONFIDENCE_STYLES[row.value.confidence]
+                              }`}
+                            >
+                              {row.value.confidence} · estimated
+                            </span>
+                            <span
+                              className={`font-sub text-[9px] font-bold uppercase tracking-wider ${
+                                AFFORDABILITY_STYLES[row.affordability]
+                              }`}
+                            >
+                              {AFFORDABILITY_LABELS[row.affordability]}
+                            </span>
+                          </span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={pinningId === row.eaPlayerId}
+                        onClick={() => void pinToShortlist(row)}
+                        aria-label={`Pin ${row.nameResolved ? row.name : `player ${row.eaPlayerId}`} to your shortlist`}
+                        className="inline-flex min-w-11 shrink-0 items-center justify-center gap-1 rounded-lg border border-slate-300 px-2 py-1 font-sub text-[9px] font-bold uppercase tracking-wider text-slate-600 transition-colors hover:border-[#E11D48] hover:text-[#E11D48] disabled:opacity-40 dark:border-slate-700 dark:text-slate-300"
+                      >
+                        <IconPlus className="h-3.5 w-3.5" />
+                        {pinningId === row.eaPlayerId ? "Pinning" : "Pin"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
 
               {totalPages > 1 && (
@@ -827,7 +896,7 @@ function DossierPanel({
 
       {/* ---- Fit: why him, for THIS squad and system ---------------------------------- */}
       {face === "fit" && (
-        <div className="max-h-[560px] space-y-5 overflow-y-auto overscroll-contain p-5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+        <div className="max-h-[60dvh] space-y-5 overflow-y-auto overscroll-contain p-5 scrollbar-thin scrollbar-thumb-slate-300 md:max-h-[560px] dark:scrollbar-thumb-slate-700">
           <div className={`rounded-xl border p-4 ${ADVISORY_STYLES[dossier.fits.advisory.tone]}`}>
             <div className="flex items-baseline justify-between gap-3">
               <span className="font-heading text-sm uppercase tracking-wide">
@@ -877,7 +946,7 @@ function DossierPanel({
 
       {/* ---- Every face stat, in the game's own groups ------------------------------ */}
       {face === "attributes" && (
-        <div className="max-h-[560px] space-y-5 overflow-y-auto overscroll-contain p-5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+        <div className="max-h-[60dvh] space-y-5 overflow-y-auto overscroll-contain p-5 scrollbar-thin scrollbar-thumb-slate-300 md:max-h-[560px] dark:scrollbar-thumb-slate-700">
         <AttributeBars attributes={dossier.attributes} position={dossier.primaryPosition} />
         </div>
       )}

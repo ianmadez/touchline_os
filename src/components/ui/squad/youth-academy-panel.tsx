@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/platform/api-client";
+import { Hint } from "@/components/ui/hint";
 import { NationFlag } from "./nation-flag";
 /**
  * The academy: the save's own unpromoted prospects.
@@ -337,10 +338,14 @@ export function YouthAcademyPanel({ careerId, query }: { careerId: string; query
 
               <span className="flex items-center gap-2">
                 <span
-                  className="font-sub text-label font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                  className="flex items-center gap-1 font-sub text-label font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
                   title="How far below his headline potential he may fall. A negative swing means the game is warning he might never reach it."
                 >
                   Swing
+                  <Hint label="the swing">
+                    How far below his headline potential he may fall. A negative swing means the
+                    game is warning he might never reach it.
+                  </Hint>
                 </span>
                 <Observed low={row.swingLowMin} high={row.swingLowMax} format={signed} />
               </span>

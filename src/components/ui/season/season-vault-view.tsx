@@ -702,7 +702,7 @@ function NotObservedPanel() {
  * cap. The four shapes differ because a table row, a chip, a bullet and a quotation are four different heights.
  */
 const SCROLL_BOX =
-  "overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700";
+  "overflow-y-auto overscroll-contain pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700";
 const capToRows = (count: number, shape: "table" | "chips" | "bullets" | "quotes"): string => {
   if (count <= 4) return "";
   const heights = {
@@ -740,7 +740,7 @@ function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
             Goals and assists you recorded
           </div>
           <div className={`overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800/80 ${capToRows(contributors.length, "table")}`}>
-            <table className="w-full text-left text-xs font-sub">
+            <table className="hidden w-full text-left text-xs font-sub md:table">
               <thead className="bg-slate-50 text-[10px] uppercase text-slate-500 dark:bg-slate-950/60 dark:text-slate-400">
                 <tr>
                   <th className="px-3 py-2 font-bold">Player</th>
@@ -765,6 +765,18 @@ function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
                 ))}
               </tbody>
             </table>
+            <ul className="divide-y divide-slate-100 md:hidden dark:divide-slate-800/60">
+              {contributors.map((player) => (
+                <li key={player.name} className="flex items-center gap-3 px-3 py-2 text-xs">
+                  <span className="min-w-0 flex-1 truncate font-sub text-slate-700 dark:text-slate-200">
+                    {player.name}
+                  </span>
+                  <span className="shrink-0 text-right font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                    {player.goals}G {player.assists}A · {player.matches} logged
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       )}

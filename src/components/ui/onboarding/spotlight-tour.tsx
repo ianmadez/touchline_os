@@ -10,6 +10,7 @@ import {
   subscribeTour,
   toursDoneFor,
 } from "@/lib/session";
+import { tourAnchorRect, visibleTourAnchor } from "@/lib/ui/tour-anchor";
 
 /**
  * Spotlight tours.
@@ -63,6 +64,15 @@ const SETTLE_DELAYS = [50, 150, 340];
 const OPEN_POLL_MS = 250;
 const OPEN_QUIET_MS = 400;
 const OPEN_MAX_WAIT_MS = 3000;
+/**
+ * The ceiling when NOTHING has been found yet.
+ *
+ * Three seconds is enough to finish a screen that is already rendering, but a phone can spend longer
+ * than that fetching the squad list before the first anchor exists. Giving up there lost the tour for
+ * the whole career, because a tour with zero steps is never shown and never retried. The longer
+ * ceiling only applies while the list is empty, so it cannot delay a tour that has something to say.
+ */
+const OPEN_RETRY_MAX_MS = 12000;
 /**
  * How long a tour must have been on screen before leaving it counts as having seen it.
  *
@@ -258,7 +268,7 @@ const TOURS: Record<string, TourStep[]> = {
     {
       anchor: "squad-table",
       title: "The squad list",
-      body: "Click any column heading to sort it. Click a player to open his profile, which is where his tactical role and your notes about him live.",
+      body: "Sort the list, then tap or click a player to open his profile, which is where his tactical role and your notes about him live.",
     },
     REPLAY_STEP,
   ],
@@ -613,19 +623,19 @@ interface SpotlightTourProps {
  */
 function availableSteps(tab: string): TourStep[] {
   if (NO_TOUR_TABS.has(tab)) return [];
-  const present = (TOURS[tab] ?? []).filter(
-    (step) => document.querySelector(`[data-tour="${step.anchor}"]`) !== null
-  );
-  return present.length >= MIN_TOUR_STEPS ? present : [];
+  // Present AND laid out. A `display:none` tab still matches `querySelector`, and choosing it would
+  // point the ring at nothing (or close the tour at the first step).
+  const present = (TOURS[tab] ?? []).filter((step) => tourAnchorRect(step.anchor) !== null);
+  // At least one real content step, not just tab buttons and the replay step. A screen that has only
+  // rendered its navigation so far is still fetching; opening there would spend the tour on two tab
+  // steps and leave the panel it exists to explain out.
+  const hasContent = present.some((step) => !step.anchor.startsWith("tab-"));
+  return hasContent && present.length >= MIN_TOUR_STEPS ? present : [];
 }
 
 /** The anchor's box in viewport coordinates, or null when it is absent or has no size. */
 function anchorRect(anchor: string): { top: number; left: number; width: number; height: number } | null {
-  const target = document.querySelector(`[data-tour="${anchor}"]`);
-  if (target === null) return null;
-  const rect = target.getBoundingClientRect();
-  if (rect.width === 0 && rect.height === 0) return null;
-  return { top: rect.top, left: rect.left, width: rect.width, height: rect.height };
+  return tourAnchorRect(anchor);
 }
 
 /** The inner tab the manager is on, taken from whichever strip marks itself as selected. */
@@ -791,7 +801,8 @@ export function SpotlightTour({ careerId, tab, enabled, restartToken }: Spotligh
         setOpen(true);
         return;
       }
-      if (elapsed >= OPEN_MAX_WAIT_MS) return;
+      const deadline = best.length > 0 ? OPEN_MAX_WAIT_MS : OPEN_RETRY_MAX_MS;
+      if (elapsed >= deadline) return;
       timer = window.setTimeout(check, OPEN_POLL_MS);
     };
 
@@ -898,7 +909,7 @@ export function SpotlightTour({ careerId, tab, enabled, restartToken }: Spotligh
       frame = window.requestAnimationFrame(read);
     };
 
-    const target = document.querySelector(`[data-tour="${step.anchor}"]`);
+    const target = visibleTourAnchor(step.anchor);
     if (target instanceof HTMLElement) {
       target.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
     }
@@ -1001,7 +1012,7 @@ export function SpotlightTour({ careerId, tab, enabled, restartToken }: Spotligh
           aria-labelledby="tour-step-title"
           aria-live="polite"
           className="animate-panel-in pointer-events-auto w-[380px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
-          style={{ marginLeft: cardLeft, maxHeight: `calc(100vh - ${CARD_MARGIN * 2}px)` }}
+          style={{ marginLeft: cardLeft, maxHeight: `calc(100dvh - ${CARD_MARGIN * 2}px)` }}
         >
           <div className="flex items-start justify-between gap-3">
             <h2

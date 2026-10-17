@@ -14,8 +14,8 @@ export function LegalModal({ activeDoc, onClose }: LegalModalProps) {
   if (!activeDoc) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-panel-in">
+    <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-end justify-center p-4 sm:items-center">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-3xl w-full max-h-[calc(100dvh-2rem)] sm:max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-panel-in pb-[env(safe-area-inset-bottom,0px)]">
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950">
           <h2 className="font-heading text-lg text-slate-900 dark:text-slate-100 uppercase">
@@ -32,7 +32,7 @@ export function LegalModal({ activeDoc, onClose }: LegalModalProps) {
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 overflow-y-auto space-y-6 font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+        <div className="p-6 overflow-y-auto overscroll-contain space-y-6 font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
           {activeDoc === "tos" && (
             <>
               <div>

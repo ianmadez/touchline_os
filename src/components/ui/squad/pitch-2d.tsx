@@ -404,18 +404,28 @@ export function Pitch2D({
             return (
               <div
                 key={slotDef.slotIndex}
+                role="button"
+                tabIndex={0}
+                aria-pressed={isSelected}
+                aria-label={`${slotDef.label}: ${currentSlotData?.playerName ?? "empty"}. Tap to assign a player.`}
                 style={{
                   top: `${slotDef.top}%`,
                   left: `${slotDef.left}%`,
                   transform: "translate(-50%, -50%)",
                 }}
                 onClick={() => setSelectedSlotIndex(slotDef.slotIndex)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedSlotIndex(slotDef.slotIndex);
+                  }
+                }}
                 className={`absolute cursor-pointer transition-[left,top,transform] duration-300 z-10 ${
                   isSelected ? "scale-110 z-30" : "hover:scale-105"
                 }`}
               >
                 <div
-                  className={`w-20 sm:w-24 bg-slate-950/90 border rounded-lg p-1.5 backdrop-blur-md shadow-xl text-center ${
+                  className={`w-16 sm:w-24 bg-slate-950/90 border rounded-lg p-1 sm:p-1.5 backdrop-blur-md shadow-xl text-center ${
                     isSelected
                       ? "border-amber-400 ring-2 ring-amber-400/40"
                       : slotPlayerOut
@@ -429,22 +439,22 @@ export function Pitch2D({
                       before you read the label. Absent for an empty slot, so a blank position stays
                       visibly blank rather than wearing a stranger's face. */}
                   {slotPlayer && (
-                    <div className="mb-1 flex justify-center">
+                    <div className="mb-1 hidden justify-center sm:flex">
                       <PlayerFace eaPlayerId={slotPlayer.eaPlayerId} name={slotPlayer.name} size={30} />
                     </div>
                   )}
                   <div className="flex items-center justify-between px-1 mb-0.5">
-                    <span className="text-[10px] font-sub font-bold text-amber-400 uppercase">
+                    <span className="text-micro font-sub font-bold text-amber-400 uppercase sm:text-[11px] sm:leading-normal">
                       {slotDef.label}
                     </span>
                     {currentSlotData?.overallRating && (
-                      <span className="text-[11px] font-heading font-bold text-emerald-400">
+                      <span className="text-micro font-heading font-bold text-emerald-400 sm:text-[12px] sm:leading-normal">
                         {currentSlotData.overallRating}
                       </span>
                     )}
                   </div>
 
-                  <div className="text-xs font-bold text-slate-100 truncate px-0.5">
+                  <div className="text-micro font-bold text-slate-100 truncate px-0.5 sm:text-xs">
                     {currentSlotData?.playerName || (
                       <span className="text-slate-500 italic font-normal text-[10px]">
                         Select Player
@@ -475,10 +485,17 @@ export function Pitch2D({
               : "Squad Bench & Reserves"}
           </h4>
           <p className="text-xs text-slate-500 dark:text-slate-400 font-sans">
-            {selectedSlotIndex !== null
-              ? "Click a player below to place them into the selected position."
-              : "Click a pitch card on the left to assign or swap a player."}
-          </p>
+            {selectedSlotIndex !== null ? (
+              <>
+                <span className="md:hidden">Tap a player below to place them into the selected position.</span>
+                <span className="hidden md:inline">Click a player below to place them into the selected position.</span>
+              </>
+            ) : (
+              <>
+                <span className="md:hidden">Tap a pitch card on the left to assign or swap a player.</span>
+                <span className="hidden md:inline">Click a pitch card on the left to assign or swap a player.</span>
+              </>
+            )}          </p>
         </div>
 
         {/* The refusal, where the click happened. */}
@@ -544,7 +561,7 @@ export function Pitch2D({
           </div>
         )}
 
-        <div className="space-y-1.5 max-h-[580px] overflow-y-auto pr-1">
+        <div className="space-y-1.5 max-h-[min(580px,60dvh)] overflow-y-auto overscroll-contain pr-1 md:max-h-[580px]">
           {sortedBench.map((player) => {
             const out = isInjured(player.userProfile?.injury, inGameDate);
             const timeOut = out
@@ -553,9 +570,18 @@ export function Pitch2D({
             return (
             <div
               key={player.id}
+              role="button"
+              tabIndex={0}
+              aria-label={`${player.name}, ${player.overallRating} overall${out ? ", out injured" : ""}`}
               onClick={() => {
                 if (selectedSlotIndex !== null) {
                   assignPlayerToSlot(player, selectedSlotIndex);
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  if (selectedSlotIndex !== null) assignPlayerToSlot(player, selectedSlotIndex);
                 }
               }}
               title={out ? `Out injured${timeOut ? `, ${timeOut}` : ""}` : undefined}

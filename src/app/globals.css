@@ -100,6 +100,16 @@
 
 html {
   scroll-behavior: smooth;
+  /* The browser's default tap highlight is the loudest "this is a website" signal on iOS and
+     Android. Every tappable control carries its own :active feedback instead. */
+  -webkit-tap-highlight-color: transparent;
+  /* Stop landscape text inflation from overriding the type ladder. */
+  -webkit-text-size-adjust: 100%;
+  /* The app has its own scroll containers and a fixed bottom bar; a pull-to-refresh gesture would
+     reload the career instead of scrolling it. */
+  overscroll-behavior: none;
+  /* Tours scroll anchors into view; this keeps them clear of the fixed mobile bar. */
+  scroll-padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
 }
 
 body {
@@ -107,10 +117,76 @@ body {
   color: var(--foreground);
   font-family: var(--font-karla), sans-serif;
   min-height: 100vh;
+  min-height: 100dvh;
   transition: background-color 0.2s ease, color 0.2s ease;
   /* Crisper text on macOS. */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/*
+  Touch baseline. Everything here is gated on a coarse pointer, so a mouse and trackpad keep the
+  compact controls the desktop screenshots were taken against.
+
+  The tap-target floor is deliberately global: the app grew hundreds of 28-34px icon buttons and
+  chips, and editing each call site would drift the moment a new one is added. `data-compact` is the
+  escape hatch for a control that genuinely cannot grow (an inline sort indicator, for example).
+*/
+@media (pointer: coarse) {
+  /* Native controls (calendar pickers, select popups, scrollbars) follow the app's own theme on a
+     device where those popups are the manager's own. Desktop keeps its default chrome, which is what
+     the before/after screenshots are measured against. */
+  :root {
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+
+  input,
+  textarea,
+  select {
+    /* iOS Safari zooms the page when a focused input is under 16px and never zooms back. */
+    font-size: 16px;
+    /* With the keyboard open, leave room under the focused field instead of pinning it to the
+       bottom edge. `resizes-content` shrinks the viewport; this keeps the label visible too. */
+    scroll-margin-block: 1.5rem 40dvh;
+  }
+
+  button,
+  [role="button"],
+  select,
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]) {
+    min-height: 44px;
+  }
+
+  button[aria-label] {
+    min-width: 44px;
+  }
+
+  [data-compact] {
+    min-height: revert;
+    min-width: revert;
+  }
+}
+
+button,
+[role="button"] {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Clears the fixed mobile tab bar (56px plus its safe-area padding) and returns to the original
+   80px gutter once the bar is hidden at md. */
+.pb-mobile-bar {
+  padding-bottom: calc(6rem + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 768px) {
+  .pb-mobile-bar {
+    padding-bottom: 5rem;
+  }
 }
 
 /* Stop headings from leaving a single orphaned word on the last line. */
@@ -157,11 +233,15 @@ p {
   background-color: #1e293b !important;
 }
 
-/* Keep light-on-dark hover states bright even when the base utility is overridden above */
-.dark .hover\:text-slate-900:hover,
-.dark .hover\:text-white:hover,
-.dark .dark\:hover\:text-white:hover {
-  color: #ffffff !important;
+/* Keep light-on-dark hover states bright even when the base utility is overridden above.
+   Gated to a real pointer: on touch a tapped element keeps :hover until the next tap, which would
+   leave text stuck white on the pale surface it was hovering over. */
+@media (hover: hover) and (pointer: fine) {
+  .dark .hover\:text-slate-900:hover,
+  .dark .hover\:text-white:hover,
+  .dark .dark\:hover\:text-white:hover {
+    color: #ffffff !important;
+  }
 }
 
 /* NOTE: translucent surfaces (bg-white/90, bg-white/95, ...) are intentionally NOT

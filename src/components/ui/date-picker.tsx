@@ -225,7 +225,7 @@ export function DatePicker({
           role="dialog"
           aria-modal="false"
           aria-label="Choose a date"
-          className={`animate-panel-in absolute left-0 z-50 w-[19rem] rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/95 ${
+          className={`animate-panel-in absolute left-0 z-50 w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-2xl backdrop-blur-xl sm:w-[19rem] sm:max-w-none sm:p-3 dark:border-slate-700 dark:bg-slate-900/95 ${
             opensUpward ? "bottom-[calc(100%+0.5rem)]" : "top-[calc(100%+0.5rem)]"
           }`}
         >

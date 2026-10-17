@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { DatePicker } from "@/components/ui/date-picker";
+import { Hint } from "@/components/ui/hint";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import { KNOWN_POSITION_ROLES, UNKNOWN_POSITION } from "@/lib/parser/interface";
 import {
@@ -152,7 +153,7 @@ export function PlayerDrawer({
       <div className="flex-1" onClick={onClose} />
 
       {/* Drawer Container */}
-      <div className="w-full max-w-md bg-white/95 dark:bg-slate-900/95 border-l border-slate-200 dark:border-slate-800 shadow-2xl p-6 flex flex-col justify-between overflow-y-auto animate-drawer-in">
+      <div className="w-full max-w-md bg-white/95 dark:bg-slate-900/95 border-l border-slate-200 dark:border-slate-800 shadow-2xl p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] flex flex-col justify-between overflow-y-auto overscroll-contain animate-drawer-in">
         <div>
           {/* Header */}
           <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4 mb-6">
@@ -253,28 +254,26 @@ export function PlayerDrawer({
                     </div>
                     <div className="flex justify-between items-start gap-3 border-b border-slate-800/80 pb-2 text-xs">
                       <span
-                        className="text-slate-400 shrink-0"
+                        className="flex shrink-0 items-center gap-1 text-slate-400"
                         title="Derived from the transfer fees this world has actually paid. The save itself stores no player value."
                       >
                         Estimated value
+                        <Hint label="the estimated value">
+                          Derived from the transfer fees this world has actually paid. The save
+                          itself stores no player value, so this is a range rather than a fact.
+                          {valuation?.available
+                            ? ` ${formatMoneyExact(valuation.low)} to ${formatMoneyExact(valuation.high)}. ${valuation.explanation}`
+                            : ""}
+                        </Hint>
                       </span>
                       {valuation?.available ? (
-                        <span
-                          className="text-right font-bold text-slate-100 tabular-nums"
-                          title={`${formatMoneyExact(valuation.low)} to ${formatMoneyExact(valuation.high)}. ${valuation.explanation}`}
-                        >
+                        <span className="text-right font-bold text-slate-100 tabular-nums">
                           {formatMoney(valuation.low)} – {formatMoney(valuation.high)}
-                          <span
-                            className="ml-1.5 align-middle text-[9px] font-sub font-bold uppercase px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                            title="Not a save fact. An estimate, so it is shown as a range."
-                          >
+                          <span className="ml-1.5 align-middle text-[9px] font-sub font-bold uppercase px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40">
                             Estimate
                           </span>
                           {valuation.extrapolated && (
-                            <span
-                              className="ml-1 align-middle text-[9px] font-sub font-bold uppercase px-1.5 py-0.5 rounded-md bg-slate-500/20 text-slate-300 border border-slate-500/40"
-                              title="This player's wage sits outside the range the observed deals cover."
-                            >
+                            <span className="ml-1 align-middle text-[9px] font-sub font-bold uppercase px-1.5 py-0.5 rounded-md bg-slate-500/20 text-slate-300 border border-slate-500/40">
                               Extrapolated
                             </span>
                           )}
@@ -336,7 +335,7 @@ export function PlayerDrawer({
                     </button>
                   </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
                   <div className="space-y-3 text-left">
                     <div>
                       <label className="block font-sub text-[11px] text-slate-600 dark:text-slate-300 mb-1 font-semibold">
@@ -680,10 +679,13 @@ export function PlayerDrawer({
                 </div>
                 <div>
                   <dt
-                    className="font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                    className="flex items-center gap-1 font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400"
                     title="Goals you logged in a match debrief. The save records no scorer."
                   >
                     Goals
+                    <Hint label="goals">
+                      Goals you logged in a match debrief. The save records no scorer.
+                    </Hint>
                   </dt>
                   <dd className="mt-1 font-heading text-lg tabular-nums text-slate-900 dark:text-slate-100">
                     {performance.goals}
@@ -691,10 +693,11 @@ export function PlayerDrawer({
                 </div>
                 <div>
                   <dt
-                    className="font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                    className="flex items-center gap-1 font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400"
                     title="Assists you logged in a match debrief."
                   >
                     Assists
+                    <Hint label="assists">Assists you logged in a match debrief.</Hint>
                   </dt>
                   <dd className="mt-1 font-heading text-lg tabular-nums text-slate-900 dark:text-slate-100">
                     {performance.assists}

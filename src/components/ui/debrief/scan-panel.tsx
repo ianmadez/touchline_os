@@ -517,8 +517,17 @@ export function ScanPanel({
               if (event.target.files) addFiles(event.target.files);
               event.target.value = "";
             }}
-            className="block w-full max-w-sm cursor-pointer font-sans text-xs text-slate-600 file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:font-sub file:text-[11px] file:font-bold file:uppercase file:tracking-wider file:text-slate-700 hover:file:bg-slate-200 dark:text-slate-300 dark:file:bg-slate-800 dark:file:text-slate-200"
+            className="sr-only md:not-sr-only md:block md:w-full md:max-w-sm md:cursor-pointer md:font-sans md:text-xs md:text-slate-600 md:file:mr-3 md:file:cursor-pointer md:file:rounded-lg md:file:border-0 md:file:bg-slate-100 md:file:px-3 md:file:py-2 md:file:font-sub md:file:text-[11px] md:file:font-bold md:file:uppercase md:file:tracking-wider md:file:text-slate-700 md:hover:file:bg-slate-200 dark:md:text-slate-300 dark:md:file:bg-slate-800 dark:md:file:text-slate-200"
           />
+          {/* A real label, because the native file input is a small, badly-styled target on a
+              phone. Tapping the label opens the same picker; the input stays in the DOM for the
+              keyboard and the drag area. */}
+          <label
+            htmlFor="debrief-scan-files"
+            className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-lg bg-slate-100 px-3 text-[11px] font-sub font-bold uppercase tracking-wider text-slate-700 transition-colors hover:bg-slate-200 md:hidden dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+          >
+            Choose screenshots
+          </label>
           <button
             type="button"
             onClick={() => void analyse()}
@@ -697,8 +706,8 @@ export function ScanPanel({
               }}
             />
             <p className="mt-2 font-sans text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-              A read figure only fills an empty box, and it never replaces something you typed. Hover or tab
-              into a figure to see where its value came from.
+              A read figure only fills an empty box, and it never replaces something you typed.
+              Select a figure to see where its value came from.
             </p>
           </div>
         </div>

@@ -66,7 +66,7 @@ export function StorylineEvidence({
       {/* Click-away, kept as a sibling so the panel itself never swallows an accidental click. */}
       <div className="flex-1" onClick={onClose} aria-hidden="true" />
 
-      <div className="flex h-full w-full max-w-lg flex-col border-l border-slate-200 bg-white/95 shadow-2xl backdrop-blur-xl animate-drawer-in dark:border-slate-800 dark:bg-slate-900/95">
+      <div className="flex h-full w-full max-w-lg flex-col border-l border-slate-200 bg-white/95 shadow-2xl backdrop-blur-xl animate-drawer-in pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] dark:border-slate-800 dark:bg-slate-900/95">
         <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
           <div className="flex flex-wrap items-center gap-2">
             <span className="shrink-0 rounded-md border border-slate-500/30 bg-slate-500/15 px-2 py-0.5 font-sub text-[10px] font-bold text-slate-600 dark:text-slate-300">
@@ -90,7 +90,7 @@ export function StorylineEvidence({
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-5 py-5">
           <div className="space-y-1.5">
             <h2
               id="storyline-evidence-title"

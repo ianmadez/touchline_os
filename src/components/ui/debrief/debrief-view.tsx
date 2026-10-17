@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SubTabs } from "@/components/ui/sub-tabs";
 import { DatePicker } from "@/components/ui/date-picker";
+import { Hint } from "@/components/ui/hint";
 import { portal, useScrollLock } from "@/components/ui/portal";
 import { GroupDebriefPanel } from "@/components/ui/debrief/group-debrief-panel";
 import { ReviewTab } from "@/components/ui/debrief/review/review-tab";
@@ -1531,10 +1532,13 @@ export function DebriefView({
             <div>
               <label
                 htmlFor="debrief-date"
-                className="block font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5"
+                className="mb-1.5 block font-sub text-xs font-bold uppercase tracking-wider text-slate-700 max-md:flex max-md:items-center max-md:gap-1 dark:text-slate-300"
                 title="The in-game date you played, not today's date."
               >
                 Match date
+                <Hint label="the match date">
+                  The in-game date you played, not today&apos;s date.
+                </Hint>
               </label>
               <DatePicker
                 id="debrief-date"
@@ -2002,10 +2006,11 @@ export function DebriefView({
             <div data-tour="debrief-standouts">
               <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
                 <label
-                  className="font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider"
+                  className="block font-sub text-xs font-bold uppercase tracking-wider text-slate-700 max-md:flex max-md:items-center max-md:gap-1 dark:text-slate-300"
                   title="(can select more than one)"
                 >
                   Standout Performers
+                  <Hint label="standout performers">You can select more than one.</Hint>
                 </label>
                 <div className="flex items-center gap-2">
                   {standoutPlayerIds.length > 0 && (
@@ -2040,7 +2045,7 @@ export function DebriefView({
               <p className="mb-1.5 text-[10px] font-sub text-slate-500 dark:text-slate-400">
                 (can select more than one)
               </p>
-              <div className="max-h-44 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-2 flex flex-wrap gap-1.5">
+              <div className="max-h-44 overflow-y-auto overscroll-contain rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-2 flex flex-wrap gap-1.5">
                 {players.length === 0 ? (
                   <p className="text-xs text-slate-500 dark:text-slate-400 italic p-2">
                     No squad synced yet - sync a save to pick performers.
@@ -2113,10 +2118,7 @@ export function DebriefView({
                 </div>
 
                 <div className="w-16">
-                  <label
-                    className="block text-[10px] font-sub font-bold uppercase text-slate-500 dark:text-slate-400 mb-1"
-                    title="(Optional) A goal can be unassisted, or scored off a defender error."
-                  >
+                  <label className="mb-1 block text-[10px] font-sub font-bold uppercase text-slate-500 dark:text-slate-400">
                     Assists <span className="font-normal normal-case">(Optional)</span>
                   </label>
                   <input
@@ -2186,10 +2188,14 @@ export function DebriefView({
 
                 <div data-tour="debrief-notes">
                   <label
-                    className="block font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5"
+                    className="mb-1.5 block font-sub text-xs font-bold uppercase tracking-wider text-slate-700 max-md:flex max-md:items-center max-md:gap-1 dark:text-slate-300"
                     title="(Optional) Something you noticed that went wrong, so you can check it against the next match."
                   >
                     Weakness you spotted <span className="font-normal normal-case">(Optional)</span>
+                    <Hint label="the weakness">
+                      Something you noticed that went wrong, so you can check it against the next
+                      match.
+                    </Hint>
                   </label>
                   <input
                     type="text"
@@ -2202,10 +2208,13 @@ export function DebriefView({
 
                 <div>
                   <label
-                    className="block font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5"
+                    className="mb-1.5 block font-sub text-xs font-bold uppercase tracking-wider text-slate-700 max-md:flex max-md:items-center max-md:gap-1 dark:text-slate-300"
                     title="Anything worth remembering about this match. Only you can see it."
                   >
                     Your notes
+                    <Hint label="your notes">
+                      Anything worth remembering about this match. Only you can see it.
+                    </Hint>
                   </label>
                   <textarea
                     rows={3}
@@ -2257,7 +2266,7 @@ export function DebriefView({
             Open any match for the full record, and keep the ones worth remembering.
           </p>
 
-          <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
+          <div className="space-y-3 max-h-[min(600px,60dvh)] overflow-y-auto overscroll-contain pr-1 md:max-h-[600px]">
             {visibleDebriefs.length > 0 ? (
               visibleDebriefs.map((evt) => {
                 let payload: DebriefHistory = {};
@@ -2620,14 +2629,14 @@ function DebriefDetailModal({
 
   return portal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm animate-overlay-in"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/60 p-4 backdrop-blur-sm animate-overlay-in sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-labelledby="debrief-detail-title"
       onClick={onClose}
     >
       <div
-        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-2xl backdrop-blur-xl animate-panel-in dark:border-slate-800 dark:bg-slate-900/95"
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-white/95 p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] shadow-2xl backdrop-blur-xl animate-panel-in sm:max-h-[85vh] sm:pb-5 dark:border-slate-800 dark:bg-slate-900/95"
         onClick={(clickEvent) => clickEvent.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3">

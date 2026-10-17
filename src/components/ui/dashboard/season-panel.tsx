@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import type { SeasonState } from "@/lib/services/season-service";
 import { statusLabel } from "@/lib/ui/labels";
+import { Hint } from "@/components/ui/hint";
 
 import { apiFetch } from "@/lib/platform/api-client";
 interface SeasonPanelProps {
@@ -232,10 +233,14 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
         <div className="flex items-end gap-3 flex-wrap">
           <label className="flex flex-col gap-1">
             <span
-              className="text-[10px] font-sub uppercase font-bold text-slate-500 dark:text-slate-400"
+              className="flex items-center gap-1.5 text-[10px] font-sub uppercase font-bold text-slate-500 dark:text-slate-400"
               title="No live league table in the save. Your entry calibrates the estimate above."
             >
               {inference.low !== null ? "Correct it if that's wrong" : "Tell it where you are"}
+              <Hint label="your league position">
+                No live league table in the save. Your entry calibrates the estimate above. Use the
+                position you see in-game.
+              </Hint>
             </span>
             <input
               type="number"
@@ -244,7 +249,6 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
               value={draftPosition}
               onChange={(e) => setDraftPosition(e.target.value)}
               placeholder={inference.saveHint ? String(inference.saveHint) : "e.g. 7"}
-              title="The position you see in-game."
               className="w-28 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 tabular-nums"
             />
           </label>
@@ -258,7 +262,6 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
               void submit({ leaguePosition: value });
             }}
             disabled={saving || draftPosition === ""}
-            title="Saves your position and narrows the estimate."
             className="px-4 py-2.5 min-h-10 bg-[#E11D48] hover:bg-[#FF8C7A] disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-sub font-bold uppercase tracking-wider rounded-xl transition-[background-color,transform] duration-200 active:scale-[0.96] shadow-md cursor-pointer"
           >
             {saving ? "Saving…" : "Confirm Position"}
@@ -284,24 +287,34 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
 
         <div className="flex items-end gap-3 flex-wrap">
           <label className="flex flex-col gap-1 flex-1 min-w-52">
-            <span className="text-[10px] font-sub uppercase font-bold text-slate-500 dark:text-slate-400">
+            <span
+              className="flex items-center gap-1.5 text-[10px] font-sub uppercase font-bold text-slate-500 dark:text-slate-400"
+              title="What the board has asked of you this season, in your own words."
+            >
               Your objective
+              <Hint label="your objective">
+                What the board has asked of you this season, in your own words.
+              </Hint>
             </span>
             <input
               type="text"
               value={draftObjective}
               onChange={(e) => setDraftObjective(e.target.value)}
               placeholder="e.g. Promotion push"
-              title="What the board has asked of you this season, in your own words."
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100"
             />
           </label>
           <label className="flex flex-col gap-1">
             <span
-              className="text-[10px] font-sub uppercase font-bold text-slate-500 dark:text-slate-400"
+              className="flex items-center gap-1.5 text-[10px] font-sub uppercase font-bold text-slate-500 dark:text-slate-400"
               title="Optional. The finishing position this objective demands. Without it the objective is recorded but never marked as passed or failed."
             >
               Target finish
+              <Hint label="the target finish">
+                Optional. The finishing position this objective demands. Without it the objective is
+                recorded but never marked as passed or failed. With it, the season end judges it
+                automatically.
+              </Hint>
             </span>
             <input
               type="number"
@@ -310,7 +323,6 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
               value={targetPosition}
               onChange={(e) => setTargetPosition(e.target.value)}
               placeholder="e.g. 6"
-              title="Optional. Set it and this objective is judged automatically when the season ends."
               className="w-28 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-slate-100 tabular-nums"
             />
           </label>
@@ -322,7 +334,6 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
               })
             }
             disabled={saving || !draftObjective.trim()}
-            title="Saves this objective for the current season."
             className="px-4 py-2.5 min-h-10 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-800 dark:text-slate-200 text-xs font-sub font-bold uppercase tracking-wider rounded-xl transition-[background-color,transform] duration-200 active:scale-[0.96] cursor-pointer"
           >
             Save Objective

@@ -202,7 +202,7 @@ export function TransferLedgerPanel({
 
           {ledger.seasons.length > 1 && (
             <div className="overflow-x-auto">
-              <table className={`w-full border-collapse text-left ${seasonWages ? "min-w-[520px]" : "min-w-[420px]"}`}>
+              <table className={`hidden w-full border-collapse text-left md:table ${seasonWages ? "min-w-[520px]" : "min-w-[420px]"}`}>
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-800">
                     <Th>Season</Th>
@@ -231,6 +231,49 @@ export function TransferLedgerPanel({
                   ))}
                 </tbody>
               </table>
+
+              <ul className="divide-y divide-slate-100 md:hidden dark:divide-slate-800/60">
+                {ledger.seasons.map((season) => (
+                  <li key={String(season.season)} className="px-3 py-2.5">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="font-sub text-xs font-bold text-slate-700 dark:text-slate-200">
+                        {season.season ?? "Season not recorded"}
+                      </span>
+                      <span
+                        className={`font-heading text-sm tabular-nums ${
+                          season.net > 0
+                            ? "text-rose-600 dark:text-rose-400"
+                            : "text-slate-900 dark:text-slate-100"
+                        }`}
+                      >
+                        {formatMoney(season.net, symbol)}
+                      </span>
+                    </div>
+                    <dl className="mt-1 grid grid-cols-3 gap-2 text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                      <div>
+                        <dt>Spent</dt>
+                        <dd className="font-sub text-[11px] normal-case tracking-normal text-slate-700 dark:text-slate-300">
+                          {formatMoney(season.spent, symbol)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Received</dt>
+                        <dd className="font-sub text-[11px] normal-case tracking-normal text-slate-700 dark:text-slate-300">
+                          {formatMoney(season.received, symbol)}
+                        </dd>
+                      </div>
+                      {seasonWages ? (
+                        <div>
+                          <dt>Wages</dt>
+                          <dd className="font-sub text-[11px] normal-case tracking-normal text-slate-700 dark:text-slate-300">
+                            {season.wages > 0 ? formatMoney(season.wages, symbol) : "none"}
+                          </dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

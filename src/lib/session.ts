@@ -672,9 +672,27 @@ export function resolveTheme(mode: ThemeMode): "light" | "dark" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+/**
+ * The two surfaces at the top of the page, used by the browser chrome and the status bar.
+ * Kept beside `applyThemeClass` so the class and the meta tag can never disagree.
+ */
+const THEME_COLORS = { light: "#f8fafc", dark: "#090d16" } as const;
+
+function applyThemeColorMeta(dark: boolean): void {
+  let meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  if (meta === null) {
+    meta = document.createElement("meta");
+    meta.setAttribute("name", "theme-color");
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute("content", dark ? THEME_COLORS.dark : THEME_COLORS.light);
+}
+
 export function applyThemeClass(mode: ThemeMode): void {
   if (typeof document === "undefined") return;
-  document.documentElement.classList.toggle("dark", resolveTheme(mode) === "dark");
+  const dark = resolveTheme(mode) === "dark";
+  document.documentElement.classList.toggle("dark", dark);
+  applyThemeColorMeta(dark);
 }
 
 /**
@@ -697,4 +715,4 @@ export function watchSystemTheme(onChange: () => void): () => void {
  */
 export const THEME_BOOTSTRAP_SCRIPT = `(function(){try{var raw=localStorage.getItem(${JSON.stringify(
   SESSION_STORAGE_KEY
-)});var s=raw?JSON.parse(raw):null;var mode=s&&s.theme?s.theme:"light";var dark=mode==="dark"||(mode==="system"&&!!window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(dark){document.documentElement.classList.add("dark");}}catch(e){}})();`;
+)});var s=raw?JSON.parse(raw):null;var mode=s&&s.theme?s.theme:"light";var dark=mode==="dark"||(mode==="system"&&!!window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches);if(dark){document.documentElement.classList.add("dark");}var m=document.querySelector('meta[name="theme-color"]');if(!m){m=document.createElement("meta");m.setAttribute("name","theme-color");document.head.appendChild(m);}m.setAttribute("content",dark?"${THEME_COLORS.dark}":"${THEME_COLORS.light}");}catch(e){}})();`;

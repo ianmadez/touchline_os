@@ -142,7 +142,7 @@ export function TransferDesk({ careerId, currencySymbol = "£" }: { careerId: st
             he appears here with his cost.
           </p>
         ) : (
-          <ul className="max-h-[420px] space-y-3 overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+          <ul className="max-h-[min(420px,60dvh)] space-y-3 overflow-y-auto overscroll-contain pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
             {shortlist.map((entry) => (
               <li
                 key={entry.target.id}

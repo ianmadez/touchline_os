@@ -188,7 +188,7 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
       </div>
 
       {/* Body — the only scroll region on this screen */}
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
         {activeSubTab === "OUTLOOK" && (
           <div className="space-y-6" data-tour="season-outlook">
             {seasonState && careerId ? (
@@ -324,7 +324,7 @@ function SeasonHistoryTable({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-left text-xs font-sub">
+        <table className="hidden w-full text-left text-xs font-sub md:table">
           <thead>
             <tr className="border-b border-slate-200 text-[10px] uppercase text-slate-400 dark:border-slate-800">
               <th className="px-3 py-2.5">Season</th>
@@ -376,6 +376,50 @@ function SeasonHistoryTable({
             })}
           </tbody>
         </table>
+
+        {/* Nine columns do not fit a phone, and a sideways scroll hides the points column. One card
+            per season keeps the record readable in the order it is compared. */}
+        <ul className="divide-y divide-slate-100 md:hidden dark:divide-slate-800/60">
+          {seasons.map((s) => {
+            const hasGoals = s.goalsFor !== null && s.goalsAgainst !== null;
+            const gd = hasGoals ? (s.goalsFor as number) - (s.goalsAgainst as number) : null;
+            return (
+              <li key={s.season} className="px-3 py-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="font-bold text-[#E11D48] dark:text-[#FF8C7A]">Season {s.season}</p>
+                  <StatusPill complete={s.complete} />
+                </div>
+                <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">
+                  {leagueLabel(s.leagueName, s.leagueId)}
+                </p>
+                <dl className="mt-2 grid grid-cols-4 gap-2 text-center">
+                  {[
+                    ["P", s.gamesPlayed ?? "—"],
+                    [
+                      "W-D-L",
+                      s.wins !== null && s.draws !== null && s.losses !== null
+                        ? `${s.wins}-${s.draws}-${s.losses}`
+                        : "—",
+                    ],
+                    ["GF:GA", hasGoals ? `${s.goalsFor}:${s.goalsAgainst}` : "—"],
+                    ["PTS", s.points ?? "—"],
+                  ].map(([label, value]) => (
+                    <div key={String(label)} className="rounded-lg bg-slate-50 px-1 py-1.5 dark:bg-slate-950/60">
+                      <dt className="font-sub text-[9px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                        {label}
+                      </dt>
+                      <dd className="font-bold tabular-nums text-slate-800 dark:text-slate-200">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="mt-1.5 font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                  GD {gd === null ? "—" : gd > 0 ? `+${gd}` : gd} ·{" "}
+                  {s.complete ? `${s.tablePosition}${ordinalSuffix(s.tablePosition as number)} finish` : "In progress"}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
       </div>
 
       {/* `*` because the save keeps ONE combined record per season: these are not league figures.
@@ -518,8 +562,16 @@ function MatchdayTrajectoryChart({
               return (
                 <div
                   key={p.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Matchday ${p.matchday}: ${p.points} point${p.points === 1 ? "" : "s"}${
+                    target === undefined ? "" : `, target ${target}`
+                  }`}
                   onMouseEnter={() => setHoveredIndex(idx)}
                   onMouseLeave={() => setHoveredIndex(null)}
+                  onPointerDown={() => setHoveredIndex(idx)}
+                  onFocus={() => setHoveredIndex(idx)}
+                  onBlur={() => setHoveredIndex(null)}
                   className={`group flex h-full flex-1 cursor-pointer flex-col items-center rounded-lg px-0.5 transition-colors duration-150 ${
                     isHovered ? "bg-slate-900/[0.05] dark:bg-white/[0.06]" : ""
                   }`}
@@ -604,7 +656,7 @@ function PointsBySeasonChart({
     <ChartCard
       tour="season-chart-points"
       title="Points by Season"
-      subtitle="Final points for completed seasons, and points so far this season. Hover any bar to highlight totals."
+      subtitle="Final points for completed seasons, and points so far this season. Tap or hover any bar to highlight totals."
     >
       <div className="flex h-56 items-end gap-4 px-2">
         {bars.map((b) => {
@@ -612,8 +664,14 @@ function PointsBySeasonChart({
           return (
             <div
               key={b.label}
+              role="button"
+              tabIndex={0}
+              aria-label={`${b.label}: ${b.points} point${b.points === 1 ? "" : "s"}${b.live ? " so far" : ""}`}
               onMouseEnter={() => setHoveredLabel(b.label)}
               onMouseLeave={() => setHoveredLabel(null)}
+              onPointerDown={() => setHoveredLabel(b.label)}
+              onFocus={() => setHoveredLabel(b.label)}
+              onBlur={() => setHoveredLabel(null)}
               className={`group flex h-full flex-1 cursor-pointer flex-col items-center rounded-lg px-1 transition-colors duration-150 ${
                 isHovered ? "bg-slate-900/[0.05] dark:bg-white/[0.06]" : ""
               }`}
@@ -665,7 +723,7 @@ function FinishBySeasonChart({ seasons }: { seasons: SeasonRecord[] }) {
   const worst = Math.max(...positions, 1);
 
   return (
-    <ChartCard tour="season-chart-finish" title="Finishing Position by Season" subtitle="Lower is better — bars are scaled to your worst finish on record. Hover to inspect.">
+    <ChartCard tour="season-chart-finish" title="Finishing Position by Season" subtitle="Lower is better. Bars are scaled to your worst finish on record. Tap or hover to inspect.">
       <div className="flex h-48 items-end gap-4 px-2">
         {seasons.map((s) => {
           const pos = s.tablePosition ?? 0;
@@ -675,8 +733,14 @@ function FinishBySeasonChart({ seasons }: { seasons: SeasonRecord[] }) {
           return (
             <div
               key={s.season}
+              role="button"
+              tabIndex={0}
+              aria-label={`Season ${s.season}: ${pos > 0 ? `${pos}${ordinalSuffix(pos)} place` : "no finish recorded"}`}
               onMouseEnter={() => setHoveredSeason(s.season)}
               onMouseLeave={() => setHoveredSeason(null)}
+              onPointerDown={() => setHoveredSeason(s.season)}
+              onFocus={() => setHoveredSeason(s.season)}
+              onBlur={() => setHoveredSeason(null)}
               className={`group flex h-full flex-1 cursor-pointer flex-col items-center rounded-lg px-1 transition-colors duration-150 ${
                 isHovered ? "bg-slate-900/[0.05] dark:bg-white/[0.06]" : ""
               }`}

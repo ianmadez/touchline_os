@@ -23,7 +23,7 @@ export function ReviewReportSection({ section }: { section: ReviewSection }) {
       {section.paragraphs.map((paragraph, index) => (
         <p
           key={`${section.id}-${index}`}
-          className="font-sans text-[11px] leading-relaxed text-slate-600 dark:text-slate-400"
+          className="break-words font-sans text-[11px] leading-relaxed text-slate-600 dark:text-slate-400"
         >
           {paragraph}
         </p>

@@ -299,7 +299,7 @@ export function DashboardView({
             </div>
 
             {visibleStorylines.length > 0 ? (
-              <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+              <div className="space-y-3 max-h-[280px] overflow-y-auto overscroll-contain pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
                 {visibleStorylines.map((story) => {
                   const destination = storylineDestination(story.category);
                   const facts = story.evidenceEvents ?? [];
@@ -535,7 +535,7 @@ export function DashboardView({
 
           {/* Internal scroll, the same trait the storylines card has: a long feed can never
               stretch the column, and the card keeps its own height whatever the save holds. */}
-          <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+          <div className="space-y-3 max-h-[280px] overflow-y-auto overscroll-contain pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
             {displayEventsFiltered.length > 0 ? (
               displayEventsFiltered.map((evt) => (
                 <div

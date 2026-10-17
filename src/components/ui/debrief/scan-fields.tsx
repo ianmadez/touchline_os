@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { Hint } from "@/components/ui/hint";
 import { matchStatLabel } from "@/lib/ui/labels";
 import {
   MATCH_STAT_KEYS,
@@ -115,9 +116,17 @@ export function ScanFields({
             }`}
           >
             <div className="flex items-start gap-3">
-              <label className="w-24 shrink-0 pt-1" title={decimal ? "The game's own figure, if you can see it." : undefined}>
-                <span className="block font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              <label
+                className="w-24 shrink-0 pt-1"
+                title={decimal ? "The game's own figure, if you can see it." : undefined}
+              >
+                <span className="flex items-center gap-1 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                   {matchStatLabel(key)}
+                  {decimal ? (
+                    <Hint label={matchStatLabel(key)}>
+                      The game&apos;s own figure, if you can see it.
+                    </Hint>
+                  ) : null}
                 </span>
               </label>
               <input

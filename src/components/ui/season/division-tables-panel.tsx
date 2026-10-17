@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiFetch } from "@/lib/platform/api-client";
+import { Hint } from "@/components/ui/hint";
 import type {
   DivisionRow,
   DivisionSummary,
@@ -117,10 +118,14 @@ export function DivisionTablesPanel({ careerId }: { careerId: string }) {
         </div>
         {asAtSave && (
           <span
-            className="rounded border border-slate-200 bg-slate-50 px-2.5 py-1 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400"
+            className="flex items-center gap-1.5 rounded border border-slate-200 bg-slate-50 px-2.5 py-1 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400"
             title="These are the save's own figures at the moment it was written. Nothing here changes until you sync again."
           >
             As at the save: {asAtSave}
+            <Hint label="the save figures">
+              These are the save&apos;s own figures at the moment it was written. Nothing here
+              changes until you sync again.
+            </Hint>
           </span>
         )}
       </div>
@@ -166,7 +171,7 @@ export function DivisionTablesPanel({ careerId }: { careerId: string }) {
 
           {table && (
             <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-left text-xs font-sub">
+              <table className="hidden w-full text-left text-xs font-sub md:table">
                 <thead>
                   <tr className="border-b border-slate-200 text-[10px] uppercase text-slate-400 dark:border-slate-800">
                     <th className="px-3 py-2.5">{table.division.orderBasis === "SAVE" ? "Pos" : "#"}</th>
@@ -216,6 +221,38 @@ export function DivisionTablesPanel({ careerId }: { careerId: string }) {
                   ))}
                 </tbody>
               </table>
+
+              {/* The phone reads the same division as a ranked list: club, record, points. */}
+              <ul className="divide-y divide-slate-100 md:hidden dark:divide-slate-800/60">
+                {table.rows.map((row: DivisionRow, index: number) => (
+                  <li key={row.teamId} className="flex items-center gap-3 px-3 py-2.5">
+                    <span className="w-6 shrink-0 text-center font-sub text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                      {table.division.orderBasis === "SAVE" ? (row.position ?? "-") : index + 1}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-slate-800 dark:text-slate-200">
+                        {row.name}
+                      </span>
+                      {table.division.hasRecord && (
+                        <span className="mt-0.5 block font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                          P {row.played ?? "-"} · W {row.won ?? "-"} D {row.drawn ?? "-"} L{" "}
+                          {row.lost ?? "-"} · GD {row.goalDifference ?? "-"}
+                        </span>
+                      )}
+                    </span>
+                    {table.division.hasRecord && (
+                      <span className="shrink-0 text-right">
+                        <span className="block font-heading text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">
+                          {row.points ?? "-"}
+                        </span>
+                        <span className="block font-sub text-[9px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                          PTS
+                        </span>
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
 
               {!table.division.hasRecord && (
                 <p className="mt-3 font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">

@@ -78,7 +78,7 @@ export function CareerTimeline({ events }: { events: ParsedCareerEvent[] }) {
           ) : (
             /* Internal scroll, matching the dashboard's storylines card: the card keeps its height
                and the feed scrolls inside it, however long a career runs. */
-            <ol data-tour="timeline-feed" className="max-h-[560px] space-y-3 overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-slate-700">
+            <ol data-tour="timeline-feed" className="max-h-[min(560px,60dvh)] space-y-3 overflow-y-auto overscroll-contain pr-1.5 scrollbar-thin scrollbar-thumb-slate-300 md:max-h-[560px] dark:scrollbar-thumb-slate-700">
               {visible.map((event) => (
                 <li key={event.id} className="space-y-0.5 border-l-2 border-[#E11D48] py-1 pl-4">
                   <div className="flex flex-wrap items-center gap-2">

@@ -1329,7 +1329,7 @@ export default function TouchlineApp() {
   // dashboard can never paint behind the splash.
   if (bootPhase === "booting") {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-6">
+      <main className="min-h-dvh flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-6">
         <div className="w-full max-w-sm text-center space-y-4">
           <span className="block font-heading text-2xl tracking-wider text-slate-900 dark:text-slate-100">
             TOUCHLINE<span className="text-[#E11D48]">OS</span>
@@ -1357,7 +1357,7 @@ export default function TouchlineApp() {
   }
 
   return (
-    <main className="min-h-screen relative flex flex-col">
+    <main className="min-h-dvh relative flex flex-col">
 
       {displayedTab === "LANDING" || displayedTab === "PORTAL" || displayedTab === "DASHBOARD" ? (
         <div className="fixed inset-0 bg-[url('/stadium-bg.jpg')] bg-cover bg-center opacity-30 dark:opacity-15 blur-[1px] pointer-events-none transition-opacity duration-300" />
@@ -1667,7 +1667,7 @@ export default function TouchlineApp() {
         key={displayedTab}
         className={`flex-1 w-full mx-auto z-10 ${
           isAppSurface
-            ? "max-w-7xl px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-20"
+            ? "max-w-7xl px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-mobile-bar"
             : "max-w-7xl p-4 sm:p-6"
         } ${tabPhase === "in" ? "animate-page-in" : "animate-page-out"}`}
       >
