@@ -5,7 +5,22 @@ import React, { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/platform/api-client";
 import type { SeasonReview, SeasonReviewSection } from "@/lib/season/handover";
 import { carryOverOptionId } from "@/lib/season/handover";
-import { IconArrowIn, IconCheck, IconFlag, IconSpark, IconTrophy, IconUnavailable } from "@/components/ui/icons";
+import {
+  IconArrowIn,
+  IconCalendar,
+  IconCheck,
+  IconFlag,
+  IconNote,
+  IconPerson,
+  IconSliders,
+  IconSpark,
+  IconTable,
+  IconTarget,
+  IconTrend,
+  IconTrophy,
+  IconUnavailable,
+  IconWallet,
+} from "@/components/ui/icons";
 
 /**
  * The season, read back.
@@ -36,6 +51,32 @@ const KIND_LABELS: Record<string, string> = {
   HYPOTHESIS: "Question",
   ASSIGNMENT: "Assignment",
   FORMATION: "Shape",
+};
+
+/**
+ * A section's mark.
+ *
+ * Eight cards of equal weight read as a wall of text, so each one is identified by a shape before it is read: the
+ * record is the table, objectives are the target, money is the wallet. The icon repeats what the title says rather
+ * than replacing it, and it is hidden from assistive tech because the title is right beside it.
+ */
+const SECTION_ICONS: Record<SeasonReviewSection["id"], React.ReactNode> = {
+  RECORD: <IconTable className="h-3.5 w-3.5" />,
+  OBJECTIVES: <IconTarget className="h-3.5 w-3.5" />,
+  TACTICS: <IconSliders className="h-3.5 w-3.5" />,
+  SQUAD: <IconPerson className="h-3.5 w-3.5" />,
+  PATTERNS: <IconTrend className="h-3.5 w-3.5" />,
+  QUESTIONS: <IconCalendar className="h-3.5 w-3.5" />,
+  YOUTH: <IconSpark className="h-3.5 w-3.5" />,
+  MONEY: <IconWallet className="h-3.5 w-3.5" />,
+};
+
+/** The carry-over list's own marks, so a row's kind is visible before the label is read. */
+const KIND_ICONS: Record<string, React.ReactNode> = {
+  OBJECTIVE: <IconTarget className="h-3 w-3" />,
+  HYPOTHESIS: <IconFlag className="h-3 w-3" />,
+  ASSIGNMENT: <IconNote className="h-3 w-3" />,
+  FORMATION: <IconSliders className="h-3 w-3" />,
 };
 
 export function SeasonReviewPanel({
@@ -225,7 +266,10 @@ export function SeasonReviewPanel({
             className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-950/40"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h4 className="font-heading text-[11px] uppercase tracking-wide text-slate-800 dark:text-slate-200">
+              <h4 className="flex items-center gap-1.5 font-heading text-[11px] uppercase tracking-wide text-slate-800 dark:text-slate-200">
+                <span aria-hidden="true" className="text-[#E11D48] dark:text-[#FF8C7A]">
+                  {SECTION_ICONS[section.id]}
+                </span>
                 {section.title}
               </h4>
               <span
@@ -284,7 +328,8 @@ export function SeasonReviewPanel({
                   }`}
                 >
                   <div className="min-w-[12rem] flex-1">
-                    <span className="font-sub text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                    <span className="flex items-center gap-1 font-sub text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                      <span aria-hidden="true">{KIND_ICONS[item.kind]}</span>
                       {KIND_LABELS[item.kind] ?? item.kind}
                     </span>
                     <p className="font-sans text-[11px] leading-relaxed text-slate-700 dark:text-slate-300">

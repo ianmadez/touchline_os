@@ -21,6 +21,7 @@ import type { SeasonDossier } from "../src/lib/services/season-archive-service";
 import type { HypothesisWithEvidence } from "../src/lib/hypotheses/types";
 import type { Assignment } from "../src/lib/assignments/types";
 import type { ReviewBlockBand } from "../src/lib/review/types";
+import { resolveLeagueName } from "../src/lib/ui/leagues";
 
 let failures = 0;
 
@@ -167,7 +168,8 @@ const DOSSIER: SeasonDossier = {
       },
     ],
     boardObjectives: [
-      { id: "bo_1", category: "YOUTH", priority: 3, title: "Give youth a chance", status: "ACTIVE", notes: null },
+      { id: "bo_1", category: "YOUTH", priority: 3, title: "Give youth a chance", status: "ON_TRACK", notes: null },
+      { id: "bo_2", category: "FINANCIAL", priority: 2, title: "Trim the wage bill", status: "AT_RISK", notes: null },
     ],
     positions: [],
     timeline: [],
@@ -319,6 +321,51 @@ function pureHalf(): void {
   const strings = review.sections.flatMap((section) => [section.title, ...section.lines]);
   const offending = strings.filter((line) => banned.some((pattern) => pattern.test(line)));
   check("no em dash, no causal verb, no marketing filler", offending.length === 0, offending.slice(0, 2).join(" | "));
+
+  // A stored code must never reach the page as an identifier. `ON_TRACK` lower-cased prints `on_track`, which is what
+  // the objectives section used to do.
+  const identifiers = strings.filter((line) => /\b[a-z]+_[a-z_]+\b/.test(line));
+  check(
+    "no stored code is printed as an identifier",
+    identifiers.length === 0,
+    identifiers.slice(0, 2).join(" | ")
+  );
+  check(
+    "a board goal's status reads as words",
+    review.sections
+      .find((section) => section.id === "OBJECTIVES")!
+      .lines.some((line) => line.includes("Give youth a chance: On track")),
+    review.sections.find((section) => section.id === "OBJECTIVES")!.lines.join(" | ")
+  );
+  const unknownStatus = composeSeasonReview({
+    dossier: {
+      ...DOSSIER,
+      observed: {
+        ...DOSSIER.observed!,
+        boardObjectives: [
+          { id: "bo_3", category: "BRAND", priority: 4, title: "Grow the brand", status: "UNMAPPED_CODE", notes: null },
+        ],
+      },
+    },
+    blocks: [],
+    hypotheses: [],
+    assignments: [],
+  });
+  check(
+    "and a status this app does not know is passed through rather than guessed",
+    unknownStatus.sections
+      .find((section) => section.id === "OBJECTIVES")!
+      .lines.some((line) => line.includes("Grow the brand: UNMAPPED_CODE")),
+    unknownStatus.sections.find((section) => section.id === "OBJECTIVES")!.lines.join(" | ")
+  );
+
+  // The save writes its own competition name with a trailing tier marker. The headline must not carry it.
+  check(
+    "the league name drops the save's tier suffix",
+    !/\(\d+\)/.test(review.headline),
+    review.headline
+  );
+  equal("and it uses this app's wording", resolveLeagueName("England League One (3)"), "League One");
 }
 
 /** The transition must be idempotent: a second run changes nothing and writes no second boundary event. */

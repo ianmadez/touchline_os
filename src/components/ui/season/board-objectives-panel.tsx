@@ -16,7 +16,43 @@ import {
   type ObjectiveCategory,
   type ObjectiveStatus,
 } from "@/lib/objectives-vocabulary";
-import { IconCheck, IconFlag, IconPlus, IconTarget, IconTrash } from "@/components/ui/icons";
+import {
+  IconCheck,
+  IconClock,
+  IconFlag,
+  IconPerson,
+  IconPlus,
+  IconShield,
+  IconSpark,
+  IconTarget,
+  IconTrash,
+  IconTrophy,
+  IconUnavailable,
+  IconWallet,
+} from "@/components/ui/icons";
+
+/**
+ * A board goal's category, as a mark.
+ *
+ * The category name sat on its own line under every objective, which is eight identical-looking words down a list.
+ * A mark beside the title says which part of the club the goal belongs to at a glance, and the word stays next to it
+ * so nothing depends on recognising an icon.
+ */
+const CATEGORY_ICONS: Record<ObjectiveCategory, React.ReactNode> = {
+  DOMESTIC: <IconTrophy className="h-3 w-3" />,
+  CONTINENTAL: <IconShield className="h-3 w-3" />,
+  BRAND: <IconPerson className="h-3 w-3" />,
+  FINANCIAL: <IconWallet className="h-3 w-3" />,
+  YOUTH: <IconSpark className="h-3 w-3" />,
+};
+
+/** The same idea for status, so the summary chips read at a glance rather than as four coloured words. */
+const STATUS_ICONS: Record<ObjectiveStatus, React.ReactNode> = {
+  ACHIEVED: <IconCheck className="h-2.5 w-2.5" />,
+  ON_TRACK: <IconClock className="h-2.5 w-2.5" />,
+  AT_RISK: <IconFlag className="h-2.5 w-2.5" />,
+  FAILED: <IconUnavailable className="h-2.5 w-2.5" />,
+};
 
 import { apiFetch } from "@/lib/platform/api-client";
 /**
@@ -148,10 +184,13 @@ export function BoardObjectivesPanel({
           <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 font-sub text-dense tabular-nums">
             {OBJECTIVE_STATUSES.map((status) => (
               <span key={status} className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
-                <span className={`rounded-md px-2 py-0.5 font-bold uppercase text-label tracking-wider ${STATUS_STYLES[status]}`}>
+                <span className={`flex items-center gap-1 rounded-md px-2 py-0.5 font-bold uppercase text-label tracking-wider ${STATUS_STYLES[status]}`}>
+                  <span aria-hidden="true">{STATUS_ICONS[status]}</span>
                   {STATUS_LABELS[status]}
                 </span>
-                {summary.counts[status]}
+                <span className={summary.counts[status] === 0 ? "text-slate-400 dark:text-slate-500" : undefined}>
+                  {summary.counts[status]}
+                </span>
               </span>
             ))}
           </div>
@@ -163,8 +202,8 @@ export function BoardObjectivesPanel({
             <span>
               <span className="font-bold text-slate-900 dark:text-slate-100">
                 {PRIORITY_LABELS[summary.focus.priority]}
-              </span>{" "}
-              &mdash; {summary.focus.title} is the most demanding objective still open. The board weighs
+              </span>
+              . {summary.focus.title} is the most demanding objective still open. The board weighs
               this one heaviest.
             </span>
           </p>
@@ -275,7 +314,8 @@ export function BoardObjectivesPanel({
                       {objective.priority} &middot; {PRIORITY_LABELS[objective.priority]}
                     </span>
                   </div>
-                  <p className="mt-1 font-sub text-label uppercase tracking-wider text-slate-400">
+                  <p className="mt-1 flex items-center gap-1.5 font-sub text-label uppercase tracking-wider text-slate-400">
+                    <span aria-hidden="true">{CATEGORY_ICONS[objective.category]}</span>
                     {CATEGORY_LABELS[objective.category]}
                   </p>
                 </div>
@@ -361,7 +401,7 @@ export function BoardObjectivesPanel({
       <p className="flex items-start gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 font-sans text-dense leading-relaxed text-slate-500 dark:border-slate-800 dark:bg-slate-950/50 dark:text-slate-400">
         <IconCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
         <span>
-          The save stores a single board-objective code and no wording, so these are yours &mdash;
+          The save stores a single board-objective code and no wording, so these are yours:
           recorded and edited by you, never derived or overwritten. Status is your judgement, not a
           calculated figure.
         </span>

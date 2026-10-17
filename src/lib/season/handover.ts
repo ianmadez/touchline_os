@@ -18,7 +18,20 @@ import type { SeasonDossier } from "../services/season-archive-service";
 import type { ReviewBlockBand } from "../review/types";
 import type { HypothesisWithEvidence } from "../hypotheses/types";
 import type { Assignment } from "../assignments/types";
+import { STATUS_LABELS, type ObjectiveStatus } from "../objectives-vocabulary";
+import { resolveLeagueName } from "../ui/leagues";
 import { ordinal } from "../ui/format";
+
+/**
+ * A board goal's status as words.
+ *
+ * The stored value is a code like `ON_TRACK`, so lower-casing it prints `on_track`, which reads as an identifier
+ * leaking into the page. Anything unrecognised is passed through rather than guessed at, because a status this app
+ * does not know is still the manager's own record.
+ */
+function statusWords(status: string): string {
+  return STATUS_LABELS[status as ObjectiveStatus] ?? status;
+}
 
 export type CarryOverKind = "OBJECTIVE" | "HYPOTHESIS" | "ASSIGNMENT" | "FORMATION";
 
@@ -103,7 +116,9 @@ function headlineFor(dossier: SeasonDossier): { headline: string; subhead: strin
   const { fromSave } = dossier;
   const position = fromSave.tablePosition;
   const points = fromSave.points;
-  const league = fromSave.leagueName ?? "the league";
+  // The save writes its own competition name with a trailing tier marker, so "England League One (3)" reaches the
+  // page with a stray number that reads like a season or a count. `leagueLabel` is the one place that knows better.
+  const league = resolveLeagueName(fromSave.leagueName) ?? "the league";
 
   if (!dossier.complete) {
     return {
@@ -111,7 +126,7 @@ function headlineFor(dossier: SeasonDossier): { headline: string; subhead: strin
       subhead:
         fromSave.played === null
           ? "The save has not written a record yet."
-          : `${fromSave.played} played, ${points ?? 0} points${position === null ? "" : `, ${ordinal(position)} in ${league}`}.`,
+          : `${fromSave.played} played, ${points ?? 0} points${position === null || position <= 0 ? "" : `, ${ordinal(position)} in ${league}`}.`,
     };
   }
 
@@ -156,7 +171,7 @@ function recordSection(dossier: SeasonDossier): SeasonReviewSection {
   } else if (dossier.coverage.saveRecordWhenFirstSeen !== null) {
     const seen = dossier.coverage.saveRecordWhenFirstSeen;
     lines.push(
-      `You started using TouchlineOS with the season already at ${seen.played ?? "?"} played and ${seen.points ?? "?"} points${seen.position === null ? "" : `, ${ordinal(seen.position)}`}.`
+      `You started using TouchlineOS with the season already at ${seen.played ?? "?"} played and ${seen.points ?? "?"} points${seen.position === null || seen.position <= 0 ? "" : `, ${ordinal(seen.position)}`}.`
     );
   }
 
@@ -166,7 +181,12 @@ function recordSection(dossier: SeasonDossier): SeasonReviewSection {
     provenance: "SAVE",
     lines,
     counts: [
-      { label: "Position", value: fromSave.tablePosition === null ? "not recorded" : ordinal(fromSave.tablePosition) },
+      // The save writes 0 into the position column until the season is finished, so 0 means "not recorded" rather
+      // than "0th" - the archive service uses the same test to decide whether a season is complete.
+      {
+        label: "Position",
+        value: fromSave.tablePosition === null || fromSave.tablePosition <= 0 ? "not recorded" : ordinal(fromSave.tablePosition),
+      },
       { label: "Points", value: fromSave.points === null ? "not recorded" : String(fromSave.points) },
       { label: "Played", value: fromSave.played === null ? "not recorded" : String(fromSave.played) },
     ],
@@ -207,7 +227,7 @@ function objectivesSection(dossier: SeasonDossier): SeasonReviewSection {
 
   for (const objective of observed.boardObjectives) {
     lines.push(
-      `${objective.title}: ${objective.status.toLowerCase()}${objective.notes === null ? "" : `, ${objective.notes}`}`
+      `${objective.title}: ${statusWords(objective.status)}${objective.notes === null ? "" : `, ${objective.notes}`}`
     );
   }
 
@@ -423,7 +443,7 @@ function youthSection(dossier: SeasonDossier): SeasonReviewSection {
     }
   }
   for (const goal of youthGoals) {
-    lines.push(`Board goal: ${goal.title}, ${goal.status.toLowerCase()}.`);
+    lines.push(`Board goal: ${goal.title}, ${statusWords(goal.status)}.`);
   }
   if (lines.length === 0) lines.push("Nothing about the youth pathway was recorded this season.");
 

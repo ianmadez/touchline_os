@@ -10,6 +10,15 @@ import type {
   SeasonObservedHalf,
 } from "@/lib/services/season-archive-service";
 import { leagueLabel } from "@/lib/ui/leagues";
+import { statusLabel } from "@/lib/ui/labels";
+import { CATEGORY_LABELS, STATUS_LABELS, type ObjectiveStatus } from "@/lib/objectives-vocabulary";
+import {
+  IconCheck,
+  IconClock,
+  IconFlag,
+  IconUnavailable,
+  IconUnknown,
+} from "@/components/ui/icons";
 
 import { apiFetch } from "@/lib/platform/api-client";
 /**
@@ -538,7 +547,8 @@ function ObservedHalf({
                   </div>
                 </div>
                 <span
-                  className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                  title={thread.status === "ACTIVE" ? "Still open" : thread.status === "RESOLVED" ? "Settled" : "Open but quiet"}
+                  className={`rounded px-2 py-0.5 text-[10px] font-bold tracking-wide ${
                     thread.status === "ACTIVE"
                       ? "border border-emerald-500/30 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                       : thread.status === "RESOLVED"
@@ -546,7 +556,7 @@ function ObservedHalf({
                         : "border border-amber-500/30 bg-amber-500/15 text-amber-600 dark:text-amber-400"
                   }`}
                 >
-                  {thread.status}
+                  {statusLabel(thread.status)}
                 </span>
               </li>
             ))}
@@ -577,10 +587,14 @@ function ObservedHalf({
                       ? `Board objective code ${dossier.fromSave.boardObjectiveCode} (no wording in the save)`
                       : "(no text recorded)")}
                 </span>
-                <span className="ml-2 text-slate-500 dark:text-slate-400">
-                  {objective.targetPosition ? `· target ${objective.targetPosition}${ordinalSuffix(objective.targetPosition)}` : ""} ·{" "}
-                  {objective.status}
-                  {objective.outcome ? ` (${objective.outcome})` : ""}
+                <span className="ml-2 inline-flex flex-wrap items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                  {objective.targetPosition
+                    ? `· target ${objective.targetPosition}${ordinalSuffix(objective.targetPosition)}`
+                    : null}
+                  {/* These statuses are the objective record's own vocabulary (active, met, missed), not the board
+                      goal's, so they read as words rather than borrowing the board's coloured pill. */}
+                  <span className="font-bold uppercase tracking-wider">{statusLabel(objective.status)}</span>
+                  {objective.outcome ? <span>({objective.outcome})</span> : null}
                 </span>
               </div>
             ))}
@@ -601,8 +615,9 @@ function ObservedHalf({
                   P{objective.priority}
                 </span>
                 <span className="text-slate-800 dark:text-slate-100">{objective.title}</span>
-                <span className="ml-2 text-slate-500 dark:text-slate-400">
-                  · {objective.category.toLowerCase()} · {objective.status}
+                <span className="ml-2 inline-flex flex-wrap items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                  <span>· {categoryWords(objective.category)}</span>
+                  <StatusPill status={objective.status} />
                 </span>
                 {objective.notes && (
                   <div className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
@@ -905,6 +920,47 @@ function Chip({ label, value }: { label: string; value: number }) {
       <span className="ml-1.5 tabular-nums text-slate-400">{value}</span>
     </span>
   );
+}
+
+/**
+ * A board goal's state, as a mark and a word.
+ *
+ * The stored value is a code (`ON_TRACK`), and printing it raw put an identifier on the page. The mark carries the
+ * same information at a glance: achieved is a tick, at risk a flag, failed a cross, and anything this app does not
+ * recognise an unknown rather than a guess.
+ */
+const STATUS_ICONS: Record<string, React.ReactNode> = {
+  ACHIEVED: <IconCheck className="h-2.5 w-2.5" />,
+  ON_TRACK: <IconClock className="h-2.5 w-2.5" />,
+  AT_RISK: <IconFlag className="h-2.5 w-2.5" />,
+  FAILED: <IconUnavailable className="h-2.5 w-2.5" />,
+};
+
+const STATUS_TONES: Record<string, string> = {
+  ACHIEVED: "border-emerald-500/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  ON_TRACK: "border-sky-500/30 bg-sky-500/15 text-sky-700 dark:text-sky-300",
+  AT_RISK: "border-amber-500/30 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+  FAILED: "border-slate-400/30 bg-slate-400/15 text-slate-600 dark:text-slate-300",
+};
+
+function StatusPill({ status }: { status: string }) {
+  const key = status.toUpperCase();
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+        STATUS_TONES[key] ?? "border-slate-400/30 bg-slate-400/15 text-slate-600 dark:text-slate-300"
+      }`}
+    >
+      <span aria-hidden="true">{STATUS_ICONS[key] ?? <IconUnknown className="h-2.5 w-2.5" />}</span>
+      {STATUS_LABELS[key as ObjectiveStatus] ?? status}
+    </span>
+  );
+}
+
+/** The board goal category in words, from the vocabulary the picker uses. */
+function categoryWords(category: string): string {
+  const key = category.toUpperCase();
+  return CATEGORY_LABELS[key as keyof typeof CATEGORY_LABELS] ?? category.replace(/_/g, " ").toLowerCase();
 }
 
 function NameList({
