@@ -29,6 +29,15 @@ import {
 } from "@/components/ui/icons";
 
 import { apiFetch } from "@/lib/platform/api-client";
+import {
+  FORMATION_NOT_RECORDED,
+  selectionForStamp,
+  stampForSelection,
+  type FormationChoice,
+} from "@/lib/events/tactics-stamp";
+import { FormationSelect, formationRecordText } from "@/components/ui/debrief/formation-select";
+import { HypothesisConfirmRow } from "@/components/ui/debrief/review/hypothesis-confirm-row";
+
 /**
  * Group Debrief.
  *
@@ -82,6 +91,8 @@ interface MatchDraft {
   opponentPosition: string;
   /** Which preset ask the manager set for this match. */
   target: string;
+  /** The shape select for this match: "same as Tactics", "not recorded", or a formation label. */
+  formation: string;
   ourGoals: string;
   theirGoals: string;
   note: string;
@@ -102,6 +113,8 @@ interface BlockDraft {
   goalDifferenceBefore: string;
   tablePosition: string;
   notes: string;
+  /** The points target this band was pre-filled from, so the editor can say where the figures came from. */
+  prefilledFrom?: number | null;
 }
 
 function emptyMatch(): MatchDraft {
@@ -110,28 +123,45 @@ function emptyMatch(): MatchDraft {
     opponentOther: false,
     opponentPosition: "",
     target: "3-3",
+    // Not "same as Tactics": a block covers five matches and the shape may have changed inside it, so an
+    // untouched row claims nothing. Stamping all five with one shape would be the app inventing tactics.
+    formation: FORMATION_NOT_RECORDED,
     ourGoals: "",
     theirGoals: "",
     note: "",
   };
 }
 
-function newDraft(seasonNumber: number | null, blockIndex: number): BlockDraft {
+/**
+ * A new block, with the band pre-filled when a review set a points target for this one.
+ *
+ * The band is a single number when it comes from an assignment, so the floor and the ceiling are both that number and
+ * the dream and concern sit two either side of it, clamped to what five matches can return. The manager changes any
+ * of the four before saving; that is why the prefill is a draft value rather than a rule.
+ */
+function newDraft(
+  seasonNumber: number | null,
+  blockIndex: number,
+  prefill: { points: number; blockIndex: number } | null = null
+): BlockDraft {
+  const applies = prefill !== null && prefill.blockIndex === blockIndex;
+  const target = applies ? prefill.points : null;
   return {
     id: null,
     seasonNumber: seasonNumber === null ? "" : String(seasonNumber),
     blockIndex,
     matches: Array.from({ length: MATCHES_PER_BLOCK }, () => emptyMatch()),
-    targetMin: "8",
-    targetMax: "10",
-    dreamPoints: "12",
-    concernPoints: "6",
+    targetMin: target === null ? "8" : String(target),
+    targetMax: target === null ? "10" : String(target),
+    dreamPoints: target === null ? "12" : String(Math.min(15, target + 2)),
+    concernPoints: target === null ? "6" : String(Math.max(0, target - 2)),
     gamesPlayedBefore: "",
     pointsBefore: "",
     positionBefore: "",
     goalDifferenceBefore: "",
     tablePosition: "",
     notes: "",
+    prefilledFrom: applies ? prefill.points : null,
   };
 }
 
@@ -149,6 +179,7 @@ function draftFromBlock(block: TargetBlock): BlockDraft {
         opponentOther: false,
         opponentPosition: match.opponentPosition === null ? "" : String(match.opponentPosition),
         target: `${match.targetPoints}-${match.targetMaxPoints}`,
+        formation: selectionForStamp(match.formation ?? null),
         ourGoals: match.goalsFor === null ? "" : String(match.goalsFor),
         theirGoals: match.goalsAgainst === null ? "" : String(match.goalsAgainst),
         note: match.note ?? "",
@@ -209,17 +240,31 @@ export function GroupDebriefPanel({
   careerId,
   seasonNumber,
   leagueTeams,
+  formations = [],
+  pointsTarget = null,
 }: {
   careerId: string;
   seasonNumber: number | null;
   /** The clubs in the manager's own division, so an opponent is picked rather than typed. */
   leagueTeams?: LeagueTeamSummary[];
+  /** The formations saved in Tactics, offered per match so a block records the shape each one was played in. */
+  formations?: FormationChoice[];
+  /**
+   * The points target the manager took on in a review, and the block it belongs to.
+   *
+   * It only ever PRE-FILLS: the band is written into the new draft so he can see what he committed to, and every
+   * figure stays editable before anything is saved. An assignment that wrote itself into a saved block would be the
+   * app deciding a band the manager never agreed to.
+   */
+  pointsTarget?: { points: number; blockIndex: number } | null;
 }) {
   const [rows, setRows] = useState<BlockRow[]>([]);
   const [draft, setDraft] = useState<BlockDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  /** The mirror events the last save wrote, so the confirm row knows which matches to read against the questions. */
+  const [savedEventIds, setSavedEventIds] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     if (!careerId) return;
@@ -294,6 +339,7 @@ export function GroupDebriefPanel({
               actualPoints: pointsFor(outcome),
               goalsFor: outcome === null ? null : optionalNumber(match.ourGoals),
               goalsAgainst: outcome === null ? null : optionalNumber(match.theirGoals),
+              formation: stampForSelection(formations, match.formation),
               note: match.note,
             };
           }),
@@ -309,12 +355,26 @@ export function GroupDebriefPanel({
           notes: draft.notes,
         }),
       });
-      const payload = (await response.json()) as { success?: boolean; error?: string };
+      const payload = (await response.json()) as {
+        success?: boolean;
+        error?: string;
+        block?: { id: string; matches: Array<{ matchday: number; actualPoints: number | null }> };
+      };
       if (!payload.success) {
         setError(payload.error ?? "Could not save the group debrief.");
         return;
       }
       setError(null);
+      // The mirrors the save wrote, so the post-save confirm row can read the open questions against them. Only the
+      // matches with a reported result were mirrored, which is exactly the set worth confirming.
+      const saved = payload.block;
+      setSavedEventIds(
+        saved === undefined
+          ? []
+          : saved.matches
+              .filter((match) => match.actualPoints !== null)
+              .map((match) => `grp_${saved.id}_${match.matchday}`)
+      );
       setDraft(null);
       await load();
     } catch {
@@ -338,16 +398,16 @@ export function GroupDebriefPanel({
         <div>
           <h2 className="flex items-center gap-2 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
             <IconWhistle className="h-4 w-4 text-[#E11D48] dark:text-[#FF8C7A]" />
-            Group Debrief
+            Blocks you have logged
           </h2>
           <p className="mt-1 max-w-xl font-sans text-xs text-slate-600 dark:text-slate-400">
-            Five matches at a time: the points you wanted from each, and what actually happened.
+            Each block holds the points you set for its fixtures and the scorelines you reported back.
           </p>
         </div>
         <button
           type="button"
           data-tour="group-new"
-          onClick={() => setDraft(newDraft(seasonNumber, nextBlockIndex))}
+          onClick={() => setDraft(newDraft(seasonNumber, nextBlockIndex, pointsTarget))}
           className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#E11D48] px-4 py-2.5 font-heading text-xs font-bold uppercase tracking-wider text-white shadow-sm shadow-rose-600/20 transition-colors hover:bg-[#c4173d] dark:bg-[#FF8C7A] dark:text-slate-950 dark:hover:bg-[#ff7a63]"
         >
           <IconPlus className="h-4 w-4" />
@@ -361,11 +421,16 @@ export function GroupDebriefPanel({
         </p>
       )}
 
+      {savedEventIds.length > 0 && (
+        <HypothesisConfirmRow careerId={careerId} eventIds={savedEventIds} />
+      )}
+
       {draft && (
         <BlockEditor
           draft={draft}
           saving={saving}
           leagueTeams={leagueTeams}
+          formations={formations}
           onChange={setDraft}
           onPatchMatch={patchMatch}
           onCancel={() => setDraft(null)}
@@ -378,7 +443,7 @@ export function GroupDebriefPanel({
           Reading your group debriefs…
         </p>
       ) : rows.length === 0 && !draft ? (
-        <EmptyState onStart={() => setDraft(newDraft(seasonNumber, nextBlockIndex))} />
+        <EmptyState onStart={() => setDraft(newDraft(seasonNumber, nextBlockIndex, pointsTarget))} />
       ) : (
         <div data-tour="group-blocks" className="space-y-5">
           {rows.map((row) => (
@@ -502,6 +567,13 @@ function BlockDocument({
                   <IconTarget className="h-3 w-3" />
                   Target {presetLabel(match.targetPoints, match.targetMaxPoints)}
                 </span>
+                {/* Only when one was recorded: an empty row claiming "not recorded" five times is noise in a
+                    document that already has the target and the score in it. */}
+                {(match.formation ?? null) !== null && (
+                  <span className="mt-1 block font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                    {formationRecordText(match.formation ?? null)}
+                  </span>
+                )}
               </div>
 
               <div className="min-w-[5.5rem]">
@@ -626,6 +698,7 @@ function BlockEditor({
   draft,
   saving,
   leagueTeams,
+  formations,
   onChange,
   onPatchMatch,
   onCancel,
@@ -634,6 +707,7 @@ function BlockEditor({
   draft: BlockDraft;
   saving: boolean;
   leagueTeams?: LeagueTeamSummary[];
+  formations: FormationChoice[];
   onChange: React.Dispatch<React.SetStateAction<BlockDraft | null>>;
   onPatchMatch: (index: number, patch: Partial<MatchDraft>) => void;
   onCancel: () => void;
@@ -811,6 +885,14 @@ function BlockEditor({
                     </select>
                   </label>
 
+                  <FormationSelect
+                    label="Shape"
+                    value={match.formation}
+                    formations={formations}
+                    onChange={(next) => onPatchMatch(index, { formation: next })}
+                    className="w-44"
+                  />
+
                   <div className="flex items-end gap-2">
                     <label className="w-16">
                       <span className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -884,6 +966,12 @@ function BlockEditor({
           above carry what you want from each one, and the block is judged on the total. Looking back, those
           results are added up and reported against the band you set here.
         </p>
+        {typeof draft.prefilledFrom === "number" && (
+          <p className="rounded-lg border border-emerald-300 bg-emerald-50/70 px-3 py-2 font-sans text-[11px] leading-relaxed text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200">
+            Pre-filled from the points target you took on: {draft.prefilledFrom} points. Change any figure before you
+            save and the block will hold what you set, not what you accepted.
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <NumberField label="Target from (pts)" value={draft.targetMin} onChange={(v) => set("targetMin", v)} />
           <NumberField label="Target to (pts)" value={draft.targetMax} onChange={(v) => set("targetMax", v)} />

@@ -124,6 +124,21 @@ export function captureLabel(method: string): string {
 }
 
 /**
+ * Where a recorded formation came from.
+ *
+ * "DEFAULT" and "OVERRIDE" are storage words. The reader's question is whether the manager chose this shape for
+ * this match or simply had it set, so the default case says nothing at all and reads as a plain formation: only
+ * an override is worth a word, and it is the word that explains why the row disagrees with the Tactics tab.
+ */
+const FORMATION_SOURCE_LABELS: Record<string, string> = {
+  OVERRIDE: "picked for this match",
+};
+
+export function formationSourceLabel(source: string): string | null {
+  return FORMATION_SOURCE_LABELS[source] ?? null;
+}
+
+/**
  * The figures a debrief records, as names for the screen.
  *
  * Kept here rather than in the debrief view because the scan pane, the detail view and the news note all name

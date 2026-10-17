@@ -102,7 +102,14 @@ function hashString(value: string): number {
  * the same facts composed under many seeds must still make the same claims, so variety can never
  * quietly become a different statement.
  */
-function pickVariant(options: readonly string[], seed: string, slot: string): string {
+/**
+ * Picks one phrasing from a list, deterministically.
+ *
+ * Exported because the review needs the same guarantee: the same data must produce the same words on every visit,
+ * or a manager refreshing the tab would watch his review rewrite itself. The seed is the window key and the slot
+ * is the sentence being picked, so adding a sentence later does not reshuffle the others.
+ */
+export function pickVariant(options: readonly string[], seed: string, slot: string): string {
   return options[hashString(`${seed}|${slot}`) % options.length];
 }
 

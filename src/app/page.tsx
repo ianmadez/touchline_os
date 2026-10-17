@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navbar } from "@/components/ui/nav/navbar";
 import { LandingPage } from "@/components/ui/landing/landing-page";
+import { OsLaunchSplash } from "@/components/ui/shell/os-launch-splash";
 import { Footer } from "@/components/ui/landing/footer";
 import { OnboardingWizard, OnboardingSubmission } from "@/components/ui/onboarding/onboarding-wizard";
 import { SpotlightTour } from "@/components/ui/onboarding/spotlight-tour";
@@ -111,6 +112,23 @@ export default function TouchlineApp() {
   const [entrySync, setEntrySync] = useState<EntrySyncSummary | null>(null);
   const [entrySyncError, setEntrySyncError] = useState<string | null>(null);
 
+  /**
+   * The launch cover: the beat between the entry menu and the app itself.
+   *
+   * `LAUNCHING` fades the cover in over the menu while the app mounts underneath it, `SETTLING` fades it out over the
+   * app it was hiding. Two phases rather than a boolean because the cover has to disappear gradually - unmounting it
+   * the instant the dashboard arrives reads as a cut, which is exactly the seam this is here to remove.
+   */
+  const [launchPhase, setLaunchPhase] = useState<"IDLE" | "LAUNCHING" | "SETTLING">("IDLE");
+  const launchTimers = useRef<number[]>([]);
+  useEffect(
+    () => () => {
+      for (const timer of launchTimers.current) window.clearTimeout(timer);
+      launchTimers.current = [];
+    },
+    []
+  );
+
   const prefersReducedMotion = () =>
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -164,6 +182,45 @@ export default function TouchlineApp() {
       setTabPhase("in");
       tabSwapTimeout.current = null;
     }, TAB_FADE_OUT_MS);
+  };
+
+  /**
+   * A new page starts at the top. Arriving mid-scroll leaves the manager looking at the bottom of a
+   * screen they have never seen, and the dashboard is the one that catches it most.
+   */
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [displayedTab]);
+
+  /**
+   * Steps from the entry menu into the app.
+   *
+   * The cover is up for 760ms before the dashboard is handed over, which is long enough for the mark to settle and the
+   * line to cross, and short enough that nobody waits on it. Reduced motion skips the cover entirely: the manager asked
+   * the OS for less movement, so he gets the app, not a slower version of the same journey.
+   */
+  const enterApp = (tab: AppTab) => {
+    if (prefersReducedMotion() || launchPhase !== "IDLE") {
+      setHasEntered(true);
+      switchTab(tab);
+      return;
+    }
+    for (const timer of launchTimers.current) window.clearTimeout(timer);
+    launchTimers.current = [];
+    setLaunchPhase("LAUNCHING");
+    launchTimers.current.push(
+      window.setTimeout(() => {
+        setHasEntered(true);
+        switchTab(tab);
+        setLaunchPhase("SETTLING");
+      }, 760)
+    );
+    launchTimers.current.push(
+      window.setTimeout(() => {
+        setLaunchPhase("IDLE");
+        launchTimers.current = [];
+      }, 1060)
+    );
   };
 
   const [isLoading, setIsLoading] = useState(false);
@@ -1332,7 +1389,7 @@ export default function TouchlineApp() {
       <SpotlightTour
         careerId={careerId}
         tab={displayedTab}
-        enabled={isOnboardingComplete && !isRestoring && !splashVisible}
+        enabled={isOnboardingComplete && !isRestoring && !splashVisible && launchPhase === "IDLE"}
         restartToken={tourRestartToken}
       />
 
@@ -1372,194 +1429,204 @@ export default function TouchlineApp() {
       )}
 
       {/* Full-Screen Splash Screen Overlay */}
+      {launchPhase !== "IDLE" && (
+        <OsLaunchSplash
+          clubName={careerInfo.clubName}
+          closing={launchPhase === "SETTLING"}
+        />
+      )}
+
       {splashVisible && (
-        <div className="fixed inset-0 z-[60] bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white flex flex-col justify-between p-4 sm:p-8 lg:p-10 overflow-hidden animate-overlay-in">
-          {/* Subtle Ambient Grid & Light Glow Background */}
+        <div className="fixed inset-0 z-[60] bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white animate-overlay-in">
+          {/* Subtle Ambient Grid & Light Glow Background. Kept outside the scrolling layer so the
+              backdrop stays put while the menu scrolls over it. */}
           <div className="absolute inset-0 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] dark:bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] opacity-50 pointer-events-none" />
           <div className="absolute -top-32 -left-32 w-96 h-96 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-rose-500/5 rounded-full blur-3xl pointer-events-none" />
 
-          {/* Top Bar */}
-          <div className="relative z-10 flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4 animate-slide-in-top">
-            <span className="font-heading text-xl tracking-wider text-slate-900 dark:text-slate-100">
-              TOUCHLINE<span className="text-[#E11D48]">OS</span>
-            </span>
-            <span className="font-sub text-xs text-slate-400 font-bold uppercase tracking-widest">
-              START TRACKING YOUR SAVE
-            </span>
-          </div>
-
-          {/* Expansive Main Menu Grid */}
-          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center max-w-6xl w-full mx-auto my-auto py-8">
-            {/* Left: the mark sits beside the words, both flush to the same left edge. The asset is
-                pre-cropped (public/touchlineOS-mark.png) because the original carried roughly 55%
-                transparent padding, which made every height setting look small. */}
-            <div className="lg:col-span-7 flex items-center gap-5 sm:gap-8 text-left animate-slide-in-left">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/touchlineOS-mark.png"
-                alt="TouchlineOS"
-                className="h-24 sm:h-36 lg:h-44 w-auto shrink-0 animate-splash-logo drop-shadow-2xl"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = "none";
-                }}
-              />
-              <div className="space-y-1.5 min-w-0">
-                <span className="font-sub text-xs text-[#E11D48] font-bold uppercase tracking-widest block">
-                  Turn Your Save Into A Living Managerial Career.
+          {/* The menu scrolls. A detected save, an open bridge panel and the settings button can add up
+              to more than one screen of height on a laptop, and clipping that hid the footer entirely. */}
+          <div className="absolute inset-0 flex flex-col justify-between gap-6 overflow-y-auto overscroll-contain p-4 sm:p-8 lg:p-10">
+              {/* Top Bar */}
+              <div className="relative z-10 flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4 animate-slide-in-top">
+                <span className="font-heading text-xl tracking-wider text-slate-900 dark:text-slate-100">
+                  TOUCHLINE<span className="text-[#E11D48]">OS</span>
                 </span>
-                <h1 className="font-heading text-3xl sm:text-5xl text-slate-900 dark:text-slate-100 uppercase tracking-tight leading-none break-words">
-                  {careerInfo.clubName || "TOUCHLINE HUB"}
-                </h1>
-                <p className="font-sub text-sm text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider pt-1">
-                  MANAGER: {careerInfo.managerName || "UNASSIGNED"}
-                </p>
+                <span className="font-sub text-xs text-slate-400 font-bold uppercase tracking-widest">
+                  START TRACKING YOUR SAVE
+                </span>
               </div>
-            </div>
 
-            {/* Right Column: save sync, then the game-style action stack */}
-            <div className="lg:col-span-5 flex flex-col space-y-3 w-full max-w-sm ml-auto animate-slide-in-bottom [animation-delay:200ms]">
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur px-4 py-3.5 space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Latest detected save
+              {/* Expansive Main Menu Grid */}
+              <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center max-w-6xl w-full mx-auto py-2">
+              {/* Left: the mark sits beside the words, both flush to the same left edge. The asset is
+                  pre-cropped (public/touchlineOS-mark.png) because the original carried roughly 55%
+                  transparent padding, which made every height setting look small.
+
+                  The entrance is staged rather than one block sliding in: the mark settles first, then the words
+                  follow it 80ms apart, so the eye reads the brand before the club. */}
+              <div className="lg:col-span-7 flex items-center gap-5 sm:gap-8 text-left">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/touchlineOS-mark.png"
+                  alt="TouchlineOS"
+                  className="h-24 sm:h-36 lg:h-44 w-auto shrink-0 animate-splash-logo drop-shadow-2xl"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = "none";
+                  }}
+                />
+                <div className="space-y-1.5 min-w-0">
+                  <span className="animate-os-word font-sub text-xs text-[#E11D48] font-bold uppercase tracking-widest block [animation-delay:120ms]">
+                    Turn Your Save Into A Living Managerial Career.
                   </span>
+                  <h1 className="animate-os-word font-heading text-3xl sm:text-5xl text-slate-900 dark:text-slate-100 uppercase tracking-tight leading-none break-words [animation-delay:200ms]">
+                    {careerInfo.clubName || "TOUCHLINE HUB"}
+                  </h1>
+                  <p className="animate-os-word font-sub text-sm text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider pt-1 [animation-delay:300ms]">
+                    MANAGER: {careerInfo.managerName || "UNASSIGNED"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Right Column: save sync, then the game-style action stack. It follows the words by a beat rather
+                  than arriving with them, so the menu reads as one sequence rather than a wall appearing at once. */}
+              <div className="lg:col-span-5 flex flex-col space-y-3 w-full max-w-sm ml-auto animate-slide-in-bottom [animation-delay:360ms]">
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur px-4 py-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Latest detected save
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void (saveSourceMode === "picker" ? handleChooseSave() : loadSaveCandidates())}
+                      disabled={isLoading}
+                      className="font-sub text-[10px] font-bold uppercase text-[#E11D48] dark:text-[#FF8C7A] hover:underline cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {saveRefreshLabel(saveSourceMode)}
+                    </button>
+                  </div>
+
+                  {!saveScanComplete ? (
+                    <p className="font-sub text-xs text-slate-500 dark:text-slate-400">
+                      {saveScanningLabel(saveSourceMode)}
+                    </p>
+                  ) : latestSaveCandidate ? (
+                    <>
+                      <p className="font-sub text-xs font-bold text-slate-900 dark:text-slate-100 break-all">
+                        {latestSaveCandidate.fileName}
+                        <span className="ml-2 font-normal text-slate-500 dark:text-slate-400">
+                          {(latestSaveCandidate.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB
+                        </span>
+                      </p>
+                      {/* Where it came from. The card used to read identically whether the save was read
+                          from a folder, chosen by hand, or served by the bridge - so the one screen that
+                          tells the manager what is about to be synced never said where it got it. */}
+                      {saveProvenanceLabel(latestSaveCandidate.foundIn) && (
+                        <p className="font-sub text-[10px] text-slate-500 dark:text-slate-400">
+                          {saveProvenanceLabel(latestSaveCandidate.foundIn)}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="font-sub text-xs text-amber-600 dark:text-amber-400">
+                      {savesUnavailableReason ??
+                        `${saveEmptyLabel(saveSourceMode)}. You can still enter with the career already loaded.`}
+                    </p>
+                  )}
+
+                  {entrySyncError && (
+                    <p className="font-sub text-xs text-rose-600 dark:text-rose-400">
+                      {entrySyncError}
+                    </p>
+                  )}
+
+                  {entrySync && (
+                    <div className="space-y-1.5 border-t border-slate-200 dark:border-slate-800 pt-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Snapshot #{entrySync.snapshotNumber ?? "—"}
+                        </span>
+                        <span
+                          className={`font-sub text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                            entrySync.status === "SYNCED"
+                              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                              : "bg-slate-500/15 text-slate-600 dark:text-slate-300"
+                          }`}
+                        >
+                          {entrySync.status === "NO_CHANGE" ? "Up to date" : entrySync.status}
+                        </span>
+                      </div>
+                      {entrySync.events.length > 0 ? (
+                        <ul className="space-y-1">
+                          {entrySync.events.slice(0, 4).map((event, index) => (
+                            <li
+                              key={`${event.eventType}-${index}`}
+                              className="font-sub text-xs text-slate-700 dark:text-slate-300 flex items-center gap-2"
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#E11D48] shrink-0" />
+                              {event.eventType.replace(/_/g, " ").toLowerCase()}
+                            </li>
+                          ))}
+                          {entrySync.events.length > 4 && (
+                            <li className="font-sub text-[11px] text-slate-500 dark:text-slate-400 pl-3.5">
+                              +{entrySync.events.length - 4} more
+                            </li>
+                          )}
+                        </ul>
+                      ) : (
+                        <p className="font-sub text-xs text-slate-600 dark:text-slate-300">
+                          {entrySync.status === "NO_CHANGE"
+                            ? "Save is byte-identical to the last snapshot."
+                            : "No squad, transfer or finance changes detected."}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   <button
                     type="button"
-                    onClick={() => void (saveSourceMode === "picker" ? handleChooseSave() : loadSaveCandidates())}
-                    disabled={isLoading}
-                    className="font-sub text-[10px] font-bold uppercase text-[#E11D48] dark:text-[#FF8C7A] hover:underline cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    onClick={() => void handleEntrySync()}
+                    disabled={isLoading || !latestSaveCandidate}
+                    className="w-full py-2.5 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 font-sub text-[11px] font-bold uppercase tracking-wider cursor-pointer transition-colors hover:bg-[#E11D48] dark:hover:bg-[#FF8C7A] disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    {saveRefreshLabel(saveSourceMode)}
+                    {isLoading ? "Syncing…" : entrySync ? "Sync again" : "Sync latest save"}
                   </button>
                 </div>
 
-                {!saveScanComplete ? (
-                  <p className="font-sub text-xs text-slate-500 dark:text-slate-400">
-                    {saveScanningLabel(saveSourceMode)}
-                  </p>
-                ) : latestSaveCandidate ? (
-                  <>
-                    <p className="font-sub text-xs font-bold text-slate-900 dark:text-slate-100 break-all">
-                      {latestSaveCandidate.fileName}
-                      <span className="ml-2 font-normal text-slate-500 dark:text-slate-400">
-                        {(latestSaveCandidate.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB
-                      </span>
-                    </p>
-                    {/* Where it came from. The card used to read identically whether the save was read
-                        from a folder, chosen by hand, or served by the bridge - so the one screen that
-                        tells the manager what is about to be synced never said where it got it. */}
-                    {saveProvenanceLabel(latestSaveCandidate.foundIn) && (
-                      <p className="font-sub text-[10px] text-slate-500 dark:text-slate-400">
-                        {saveProvenanceLabel(latestSaveCandidate.foundIn)}
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <p className="font-sub text-xs text-amber-600 dark:text-amber-400">
-                    {savesUnavailableReason ??
-                      `${saveEmptyLabel(saveSourceMode)}. You can still enter with the career already loaded.`}
-                  </p>
-                )}
-
-                {entrySyncError && (
-                  <p className="font-sub text-xs text-rose-600 dark:text-rose-400">
-                    {entrySyncError}
-                  </p>
-                )}
-
-                {entrySync && (
-                  <div className="space-y-1.5 border-t border-slate-200 dark:border-slate-800 pt-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                        Snapshot #{entrySync.snapshotNumber ?? "—"}
-                      </span>
-                      <span
-                        className={`font-sub text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
-                          entrySync.status === "SYNCED"
-                            ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                            : "bg-slate-500/15 text-slate-600 dark:text-slate-300"
-                        }`}
-                      >
-                        {entrySync.status === "NO_CHANGE" ? "Up to date" : entrySync.status}
-                      </span>
-                    </div>
-                    {entrySync.events.length > 0 ? (
-                      <ul className="space-y-1">
-                        {entrySync.events.slice(0, 4).map((event, index) => (
-                          <li
-                            key={`${event.eventType}-${index}`}
-                            className="font-sub text-xs text-slate-700 dark:text-slate-300 flex items-center gap-2"
-                          >
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#E11D48] shrink-0" />
-                            {event.eventType.replace(/_/g, " ").toLowerCase()}
-                          </li>
-                        ))}
-                        {entrySync.events.length > 4 && (
-                          <li className="font-sub text-[11px] text-slate-500 dark:text-slate-400 pl-3.5">
-                            +{entrySync.events.length - 4} more
-                          </li>
-                        )}
-                      </ul>
-                    ) : (
-                      <p className="font-sub text-xs text-slate-600 dark:text-slate-300">
-                        {entrySync.status === "NO_CHANGE"
-                          ? "Save is byte-identical to the last snapshot."
-                          : "No squad, transfer or finance changes detected."}
-                      </p>
-                    )}
-                  </div>
-                )}
+                {/* The same panel the landing page and wizard use, so the bridge's state stays visible and
+                    it can be disconnected from the screen the manager actually returns to. Renders nothing
+                    unless a bridge is in play. */}
+                <BridgePanel
+                  state={bridgeState}
+                  onPair={(code) => void handlePairBridge(code)}
+                  onDisconnect={() => void handleDisconnectBridge()}
+                  busy={pairingBridge}
+                  error={bridgeError}
+                />
 
                 <button
-                  type="button"
-                  onClick={() => void handleEntrySync()}
-                  disabled={isLoading || !latestSaveCandidate}
-                  className="w-full py-2.5 rounded-xl bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 font-sub text-[11px] font-bold uppercase tracking-wider cursor-pointer transition-colors hover:bg-[#E11D48] dark:hover:bg-[#FF8C7A] disabled:opacity-40 disabled:cursor-not-allowed"
+                  onClick={() => enterApp("DASHBOARD")}
+                  className="w-full py-4 px-6 bg-[#E11D48] hover:bg-[#FF8C7A] text-white font-heading text-base font-bold uppercase tracking-widest rounded-2xl shadow-xl shadow-rose-600/20 hover:shadow-2xl hover:shadow-[#FF8C7A]/30 transition-[background-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 active:scale-[0.97] cursor-pointer flex items-center justify-between group animate-fade-in-up [animation-delay:170ms]"
                 >
-                  {isLoading ? "Syncing…" : entrySync ? "Sync again" : "Sync latest save"}
+                  <span>ENTER OS</span>
+                  <span className="text-xl transition-transform group-hover:translate-x-1">→</span>
+                </button>
+
+                <button
+                  onClick={() => enterApp("SETTINGS")}
+                  className="w-full py-3.5 px-6 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 font-heading text-xs font-bold uppercase tracking-wider rounded-2xl transition-colors duration-200 cursor-pointer flex items-center justify-between shadow-xs animate-fade-in-up [animation-delay:280ms]"
+                >
+                  <span>⚙ SYSTEM SETTINGS</span>
+                  <span className="text-slate-400 text-xs font-sub">OPEN</span>
                 </button>
               </div>
-
-              {/* The same panel the landing page and wizard use, so the bridge's state stays visible and
-                  it can be disconnected from the screen the manager actually returns to. Renders nothing
-                  unless a bridge is in play. */}
-              <BridgePanel
-                state={bridgeState}
-                onPair={(code) => void handlePairBridge(code)}
-                onDisconnect={() => void handleDisconnectBridge()}
-                busy={pairingBridge}
-                error={bridgeError}
-              />
-
-              <button
-                onClick={() => {
-                  setHasEntered(true);
-                  switchTab("DASHBOARD");
-                }}
-                className="w-full py-4 px-6 bg-[#E11D48] hover:bg-[#FF8C7A] text-white font-heading text-base font-bold uppercase tracking-widest rounded-2xl shadow-xl shadow-rose-600/20 hover:shadow-2xl hover:shadow-[#FF8C7A]/30 transition-[background-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 active:scale-[0.97] cursor-pointer flex items-center justify-between group animate-fade-in-up [animation-delay:170ms]"
-              >
-                <span>ENTER OS</span>
-                <span className="text-xl transition-transform group-hover:translate-x-1">→</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setHasEntered(true);
-                  switchTab("SETTINGS");
-                }}
-                className="w-full py-3.5 px-6 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 font-heading text-xs font-bold uppercase tracking-wider rounded-2xl transition-colors duration-200 cursor-pointer flex items-center justify-between shadow-xs animate-fade-in-up [animation-delay:280ms]"
-              >
-                <span>⚙ SYSTEM SETTINGS</span>
-                <span className="text-slate-400 text-xs font-sub">OPEN</span>
-              </button>
             </div>
-          </div>
 
-          {/* Footer Copyright */}
-          <div className="relative z-10 border-t border-slate-200 dark:border-slate-800 pt-4 text-center font-sub text-[10px] text-slate-400 dark:text-slate-500 space-y-0.5 animate-fade-in-up [animation-delay:380ms]">
-            <p>© 2026 TouchlineOS. All rights reserved. Read-only EA FC career companion app.</p>
-            <p>Not affiliated with or endorsed by Electronic Arts Inc.</p>
+            {/* Footer Copyright */}
+            <div className="relative z-10 border-t border-slate-200 dark:border-slate-800 pt-4 text-center font-sub text-[10px] text-slate-400 dark:text-slate-500 space-y-0.5 animate-fade-in-up [animation-delay:380ms]">
+              <p>© 2026 TouchlineOS. All rights reserved. Read-only EA FC career companion app.</p>
+              <p>Not affiliated with or endorsed by Electronic Arts Inc.</p>
+            </div>
           </div>
         </div>
       )}
@@ -1746,6 +1813,11 @@ export default function TouchlineApp() {
             clubName={careerInfo.clubName}
             inGameDate={careerInfo.inGameDate}
             seasonNumber={seasonState?.outlook?.seasonNumber ?? null}
+            formations={formationsForUi.map((formation) => ({
+              label: formation.label,
+              formationName: formation.formationName,
+              isDefault: formation.isDefault === true,
+            }))}
             onDebriefSubmitted={() => {
               if (careerId) {
                 apiFetch(`/api/career?careerId=${encodeURIComponent(careerId)}`)

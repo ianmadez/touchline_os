@@ -88,7 +88,10 @@ async function main(): Promise<void> {
   }
 
   const careerTables = tables().filter((name) => columnsOf(name).includes("career_id"));
-  const expected = [...careerTables, "storyline_events"].sort();
+  // Two tables reach their career through a parent rather than carrying `career_id` themselves: the storyline's
+  // evidence rows, and the evidence read against a hypothesis. Both still belong in a backup, so both are expected.
+  const viaParent = ["storyline_events", "hypothesis_evidence"];
+  const expected = [...careerTables, ...viaParent].sort();
   const carried = [...pkg.tables].sort();
   check("backup carries every career-scoped table", carried.length === expected.length,
     `${carried.length} tables, schemaVersion ${pkg.schemaVersion}`);
@@ -100,13 +103,17 @@ async function main(): Promise<void> {
 
   const rowsInPackage = Object.values(pkg.counts).reduce((total, value) => total + value, 0);
   const rowsFromDb = expected.reduce((total, name) => {
-    // `storyline_events` is the one table reached through its storyline rather than a career_id.
+    // The two parent-scoped tables are reached through the row that owns them, not through a career_id.
     const rows =
       name === "storyline_events"
         ? db.all<Row>(
             sql`SELECT * FROM ${sql.identifier(name)} WHERE storyline_id IN (SELECT id FROM storylines WHERE career_id = ${CAREER_ID})`
           )
-        : db.all<Row>(sql`SELECT * FROM ${sql.identifier(name)} WHERE career_id = ${CAREER_ID}`);
+        : name === "hypothesis_evidence"
+          ? db.all<Row>(
+              sql`SELECT * FROM ${sql.identifier(name)} WHERE hypothesis_id IN (SELECT id FROM hypotheses WHERE career_id = ${CAREER_ID})`
+            )
+          : db.all<Row>(sql`SELECT * FROM ${sql.identifier(name)} WHERE career_id = ${CAREER_ID}`);
     return total + rows.length;
   }, 0);
   check("row totals match the database", rowsInPackage === rowsFromDb,

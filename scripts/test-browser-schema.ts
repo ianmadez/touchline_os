@@ -48,7 +48,17 @@ function check(label: string, condition: boolean, detail?: string) {
 
 /** The columns and tables a build from before the leagues rework did not have. */
 const REMOVE_COLUMNS: ReadonlyArray<readonly [string, string]> = [["leagues", "country_name"]];
-const REMOVE_TABLES = ["career_trophies", "news_items", "career_finance_inputs", "debrief_marks"];
+const REMOVE_TABLES = [
+  "career_trophies",
+  "news_items",
+  "career_finance_inputs",
+  "debrief_marks",
+  "review_decisions",
+  "hypothesis_evidence",
+  "hypotheses",
+  "assignments",
+  "rules_profile",
+];
 
 /**
  * A real database as an older build left it, so the browser port can be tested against one by hand.

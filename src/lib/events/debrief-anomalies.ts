@@ -1,5 +1,6 @@
 import type { MatchContribution } from "./types";
 import type { MatchStats } from "./match-stats";
+import type { FormationStamp } from "./tactics-stamp";
 
 export interface DebriefHistoryPayload {
   opponent?: string;
@@ -22,6 +23,8 @@ export interface DebriefHistoryPayload {
     ownPoints?: number | null;
   };
   dynamicPrompts?: Array<{ id: string; question: string; answer: string }>;
+  /** The formation the match was played in, as reported at the time. Absent means it was never recorded. */
+  formation?: FormationStamp | null;
   /** Present once the manager has logged any post-match figures. */
   matchStats?: MatchStats | null;
 }

@@ -1,6 +1,7 @@
 import { SeasonService } from "../services/season-service";
 import { TargetBlockService, type TargetBlock } from "../services/target-block-service";
 import { EventService } from "../services/event-service";
+import { deleteReviewDecisions } from "./review";
 import { at, failed, ok, type OperationResult } from "./types";
 
 /**
@@ -53,6 +54,9 @@ async function syncGroupDebriefEvents(block: TargetBlock): Promise<void> {
           opponentPosition: match.opponentPosition,
           targetPoints: match.targetPoints,
           targetMaxPoints: match.targetMaxPoints,
+          // The shape travels with the mirrored match, so a reader of the diary sees the same tactical record as a
+          // reader of the block. Absent stays absent rather than becoming a default.
+          ...(match.formation === null ? {} : { formation: match.formation }),
         },
       }),
       timestamp: new Date().toISOString(),
@@ -167,6 +171,8 @@ export async function deleteTargetBlock(
     // The mirrored diary entries go with the block - a deleted block must not leave five results
     // behind it in the record.
     await new EventService().deleteEventsForEntity(careerId, "TARGET_BLOCK", id);
+    // A review taken over that block described evidence that no longer exists, so its decisions go too.
+    await deleteReviewDecisions(careerId, [id]);
     return ok({ success: true });
   } catch (error) {
     console.error("[api/season/blocks] delete failed:", error);

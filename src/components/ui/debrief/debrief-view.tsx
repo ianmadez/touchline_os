@@ -5,6 +5,8 @@ import { SubTabs } from "@/components/ui/sub-tabs";
 import { DatePicker } from "@/components/ui/date-picker";
 import { portal, useScrollLock } from "@/components/ui/portal";
 import { GroupDebriefPanel } from "@/components/ui/debrief/group-debrief-panel";
+import { ReviewTab } from "@/components/ui/debrief/review/review-tab";
+import { HypothesisConfirmRow } from "@/components/ui/debrief/review/hypothesis-confirm-row";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import type { ParsedCareerEvent } from "@/lib/services/event-service";
 import type { LeagueTeamSummary } from "@/lib/services/career-service";
@@ -50,6 +52,14 @@ import {
 
 import { apiFetch } from "@/lib/platform/api-client";
 import {
+  FORMATION_USE_DEFAULT,
+  selectionForStamp,
+  stampForSelection,
+  type FormationChoice,
+  type FormationStamp,
+} from "@/lib/events/tactics-stamp";
+import { FormationSelect, formationRecordText } from "@/components/ui/debrief/formation-select";
+import {
   clearDebriefDraft,
   getOpponentSortServerSnapshot,
   getOpponentSortSnapshot,
@@ -71,12 +81,17 @@ interface DebriefViewProps {
   inGameDate?: string | null;
   /** The season a group debrief belongs to. Null when nothing is synced yet. */
   seasonNumber?: number | null;
+  /**
+   * The formations saved in Tactics, so a match can be stamped with the shape that played. Empty for a career
+   * that has never opened the Tactics tab, and the picker then offers only "not recorded".
+   */
+  formations?: FormationChoice[];
   onDebriefSubmitted: () => void;
 }
 
 import type { CompetitionContext } from "@/lib/services/competition-service";
 
-type DebriefSubTab = "MATCH" | "GROUP";
+type DebriefSubTab = "MATCH" | "GROUP" | "REVIEW";
 
 /**
  * How the match figures get in.
@@ -122,6 +137,8 @@ interface DebriefHistory {
   weaknessIdentified?: string;
   managerReflection?: string;
   matchDate?: string | null;
+  /** The shape the match was played in, stamped at the moment of the report. Absent means not recorded. */
+  formation?: FormationStamp | null;
   leagueSnapshot?: {
     opponentPosition?: number | null;
     opponentPoints?: number | null;
@@ -149,6 +166,8 @@ interface DebriefDraft {
   theirScoreInput: string;
   matchDate: string;
   venue: "HOME" | "AWAY" | "NEUTRAL";
+  /** The shape select: "same as Tactics", "not recorded", or a formation label. */
+  formationValue: string;
   competition: string;
   tacticalAdherence: number;
   standoutPlayerIds: string[];
@@ -193,6 +212,9 @@ function hasDraftContent(draft: DebriefDraft): boolean {
     draft.opponent.trim() !== "" ||
     draft.ourScoreInput !== "" ||
     draft.theirScoreInput !== "" ||
+    // Only a shape the manager actually picked counts. The default is what the form would send anyway, so it
+    // must not turn an untouched form into a stored draft.
+    draft.formationValue !== FORMATION_USE_DEFAULT ||
     draft.opponentPosition !== "" ||
     draft.opponentPoints !== "" ||
     draft.goalMinutes.some((minute) => minute.trim() !== "") ||
@@ -336,6 +358,9 @@ function resolveOpponentName(
 /** A stable empty value, so `leagueTeams = []` cannot hand the memo a new array every render. */
 const NO_LEAGUE_TEAMS: LeagueTeamSummary[] = [];
 
+/** The same guard for the formation picker, which a career with no Tactics tab work never fills. */
+const NO_FORMATIONS: FormationChoice[] = [];
+
 export function DebriefView({
   careerId,
   players,
@@ -344,6 +369,7 @@ export function DebriefView({
   clubName = "",
   inGameDate = null,
   seasonNumber = null,
+  formations = NO_FORMATIONS,
   onDebriefSubmitted,
 }: DebriefViewProps) {
   const [subTab, setSubTab] = useState<DebriefSubTab>("MATCH");
@@ -354,6 +380,18 @@ export function DebriefView({
   const [theirScoreInput, setTheirScoreInput] = useState("");
   const [matchDate, setMatchDate] = useState<string>(inGameDate ?? "");
   const [venue, setVenue] = useState<"HOME" | "AWAY" | "NEUTRAL">("HOME");
+  // A select value rather than a stamp: "same as Tactics" has to resolve at the moment of the report, and a
+  // resolved stamp held here would go stale the first time the manager changed shape mid-form.
+  const [formationValue, setFormationValue] = useState<string>(FORMATION_USE_DEFAULT);
+  /**
+   * What the Review tab knows that this tab needs: how many proposals are waiting (the tab strip count) and the
+   * points target the manager took on (the next block's band). Both are reported upward rather than fetched twice.
+   */
+  const [proposalCount, setProposalCount] = useState(0);
+  const [blockPrefill, setBlockPrefill] = useState<{ points: number; blockIndex: number } | null>(null);
+  /** The events the last save wrote, so the post-save confirm row knows what to read against the open questions. */
+  const [savedEventIds, setSavedEventIds] = useState<string[]>([]);
+
   const [competition, setCompetition] = useState("League Match");
   const [tacticalAdherence, setTacticalAdherence] = useState<number>(4);
   const [standoutPlayerIds, setStandoutPlayerIds] = useState<string[]>([]);
@@ -502,6 +540,7 @@ export function DebriefView({
       setTheirScoreInput(saved.theirScoreInput);
       setMatchDate(saved.matchDate);
       setVenue(saved.venue);
+      setFormationValue(saved.formationValue ?? FORMATION_USE_DEFAULT);
       setCompetition(saved.competition);
       setTacticalAdherence(saved.tacticalAdherence);
       setStandoutPlayerIds(saved.standoutPlayerIds);
@@ -534,6 +573,7 @@ export function DebriefView({
       theirScoreInput,
       matchDate,
       venue,
+      formationValue,
       competition,
       tacticalAdherence,
       standoutPlayerIds,
@@ -561,6 +601,7 @@ export function DebriefView({
     theirScoreInput,
     matchDate,
     venue,
+    formationValue,
     competition,
     tacticalAdherence,
     standoutPlayerIds,
@@ -921,6 +962,7 @@ export function DebriefView({
     setOpponentTeamId("");
     setOurScoreInput("");
     setTheirScoreInput("");
+    setFormationValue(FORMATION_USE_DEFAULT);
     setOpponentPosition("");
     setOpponentPoints("");
     setGoalMinutes([]);
@@ -1011,6 +1053,8 @@ export function DebriefView({
     setTheirScoreInput(text(stored.awayScore));
     setMatchDate(stored.matchDate ?? "");
     setVenue(stored.venue === "AWAY" || stored.venue === "NEUTRAL" ? stored.venue : "HOME");
+    // Read back exactly as stored, so an edit cannot quietly move a match to today's formation.
+    setFormationValue(selectionForStamp(stored.formation ?? null));
     setCompetition(stored.competition ?? "League Match");
     setTacticalAdherence(typeof stored.tacticalAdherence === "number" ? stored.tacticalAdherence : 4);
     setStandoutPlayerIds(Array.isArray(stored.standoutPlayerIds) ? stored.standoutPlayerIds : []);
@@ -1107,6 +1151,9 @@ export function DebriefView({
             ownPoints: ownPoints === "" ? null : Number(ownPoints),
           },
           venue,
+          // The shape that played, resolved here rather than server side because only the client knows what the
+          // Tactics tab currently holds. Absent means the manager said it was not recorded.
+          formation: stampForSelection(formations, formationValue),
           competition,
           tacticalAdherence,
           standoutPlayerIds,
@@ -1131,6 +1178,10 @@ export function DebriefView({
       }
 
       setMessage(editingId === null ? "Match debrief saved." : "Debrief updated.");
+      // The post-save confirm row reads the open questions against what was just written. It is set from the id
+      // the save returned, so the row can never be about a match that was not saved, and it never blocks the save:
+      // the record is already in by the time this renders.
+      if (typeof data.eventId === "string") setSavedEventIds([data.eventId]);
       // The press only follow a match the desk thinks is worth a word, and only sometimes. An edit never
       // re-asks: the question belongs to the match, not to the form.
       if (editingId === null && data.media?.asked && typeof data.eventId === "string") {
@@ -1228,20 +1279,35 @@ export function DebriefView({
     }
   };
 
+  // The banner follows the pane, so the page never claims to be a match debrief while a block review
+  // is what is on screen.
+  const debriefHeader =
+    subTab === "GROUP"
+      ? {
+          title: "Group Debrief",
+          blurb: "Fixtures first, points after. A block counts once the matches are played and reported.",
+        }
+      : subTab === "REVIEW"
+        ? {
+            title: "Review",
+            blurb: "One run of matches, read three ways: the scorelines, the figures behind them, and what else could explain both.",
+          }
+        : {
+            title: "Match Debrief",
+            blurb: "Write down what happened and what you noticed. It stays in your career history.",
+          };
+
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
-      {/* Header Banner */}
+    <div className="space-y-6 max-w-6xl mx-auto">      {/* Header Banner */}
       <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl flex flex-wrap items-center justify-between gap-4">
         <div>
           <span className="text-xs font-sub font-bold uppercase tracking-wider text-[#E11D48] dark:text-[#FF8C7A]">
             Match Review
           </span>
           <h1 className="font-heading text-2xl text-slate-900 dark:text-slate-100 uppercase tracking-wide mt-0.5">
-            Match Debrief
+            {debriefHeader.title}
           </h1>
-          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-            Write down what happened and what you noticed. It stays in your career history.
-          </p>
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">{debriefHeader.blurb}</p>
         </div>
       </div>
 
@@ -1249,17 +1315,39 @@ export function DebriefView({
         tabs={[
           { id: "MATCH", label: "Match debrief" },
           { id: "GROUP", label: "Group debrief" },
+          {
+            id: "REVIEW",
+            label: "Review",
+            tour: "debrief-subtab-REVIEW",
+            // The count is the only badge on this strip, and it appears only when there is something to test.
+            ...(proposalCount > 0 ? { badge: String(proposalCount) } : {}),
+          },
         ]}
         active={subTab}
         onChange={setSubTab}
       />
 
-      {subTab === "GROUP" ? (
+      {subTab === "REVIEW" ? (
+        careerId ? (
+          <ReviewTab
+            careerId={careerId}
+            seasonNumber={seasonNumber}
+            onProposalCount={setProposalCount}
+            onPrefillChange={setBlockPrefill}
+          />
+        ) : (
+          <p className="font-sans text-xs text-slate-600 dark:text-slate-400">
+            Sync a career from the Portal to read a block back.
+          </p>
+        )
+      ) : subTab === "GROUP" ? (
         careerId ? (
           <GroupDebriefPanel
             careerId={careerId}
             seasonNumber={seasonNumber}
             leagueTeams={leagueTeams}
+            formations={formations}
+            pointsTarget={blockPrefill}
           />
         ) : (
           <p className="font-sans text-xs text-slate-600 dark:text-slate-400">
@@ -1281,6 +1369,14 @@ export function DebriefView({
             ✕
           </button>
         </div>
+      )}
+
+      {/*
+        The post-save confirm row. It sits under the save message because that is where a manager looks after saving,
+        and it renders nothing at all when no open question speaks to the match just written.
+      */}
+      {savedEventIds.length > 0 && (
+        <HypothesisConfirmRow careerId={careerId ?? ""} eventIds={savedEventIds} />
       )}
 
           {overperformance && (
@@ -1534,6 +1630,23 @@ export function DebriefView({
               <span className="text-[10px] font-sub uppercase tracking-wider text-slate-400 dark:text-slate-500">
                 {venueLabel(venue)}
               </span>
+            </div>
+
+            {/*
+              The shape that played. Kept inside this card rather than in the meta row above, because it belongs
+              to the match itself: the Tactics tab holds today's answer, and a report read back in three months
+              has to say what was actually out there.
+            */}
+            <div className="border-t border-slate-200 pt-3 dark:border-slate-800">
+              <FormationSelect
+                value={formationValue}
+                formations={formations}
+                onChange={setFormationValue}
+                className="block sm:max-w-xs"
+              />
+              <p className="mt-1.5 font-sans text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
+                What you played. Same as Tactics follows whatever is set there, read when you save this report.
+              </p>
             </div>
           </div>
 
@@ -2460,6 +2573,7 @@ function DebriefDetailModal({
     { label: "Match date", value: payload.matchDate ?? "not recorded" },
     { label: "Competition", value: payload.competition ?? "not recorded" },
     { label: "Venue", value: payload.venue ? venueLabel(payload.venue) : "not recorded" },
+    { label: "Formation", value: formationRecordText(payload.formation ?? null) },
     {
       label: "Scoreline",
       value: `${payload.scoreline ?? "0-0"} (${resultLabel(payload.result ?? "DRAW")})`,

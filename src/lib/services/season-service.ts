@@ -664,6 +664,52 @@ export class SeasonService {
       changes++;
     }
 
+    changes += await this.markSeasonBoundaries(careerId, seasons);
+
+    return changes;
+  }
+
+  /**
+   * Writes one `SEASON_ENDED` event per completed season, which is what stops two seasons reading as one
+   * unbroken run in the diary.
+   *
+   * The id is derived from the career and the season, so the pass is idempotent: a career revisited fifty times
+   * keeps the same single row per season. The payload carries the position and the points because that is what a
+   * reader of the timeline wants at the boundary, and it is the save's own record rather than a re-derivation.
+   */
+  private async markSeasonBoundaries(careerId: string, seasons: SeasonRecord[]): Promise<number> {
+    const complete = seasons.filter((season) => season.complete);
+    if (complete.length === 0) return 0;
+
+    const existing = await db
+      .select({ id: careerEvents.id })
+      .from(careerEvents)
+      .where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "SEASON_ENDED")));
+    const known = new Set(existing.map((row) => row.id));
+
+    let changes = 0;
+    for (const season of complete) {
+      const id = `evt_season_ended_${careerId}_${season.season}`.replace(/[^A-Za-z0-9_:-]/g, "_");
+      if (known.has(id)) continue;
+      await db.insert(careerEvents).values({
+        id,
+        careerId,
+        snapshotId: await this.latestSnapshotId(careerId),
+        eventType: "SEASON_ENDED",
+        source: "DERIVED",
+        entityType: "CAREER",
+        entityId: careerId,
+        payloadJson: JSON.stringify({
+          season: season.season,
+          tablePosition: season.tablePosition,
+          points: season.points,
+          played: season.gamesPlayed,
+          leagueObjectiveResult: season.leagueObjectiveResult,
+        }),
+        timestamp: new Date().toISOString(),
+      });
+      changes++;
+    }
     return changes;
   }
 

@@ -13,6 +13,15 @@ import { deleteCareer, patchCareer, readCareer } from "../operations/career";
 import { deleteDebrief, logMatchDebrief, updateDebrief } from "../operations/debrief";
 import { readDiagnostics } from "../operations/diagnostics";
 import { readFinanceReport, saveFinanceInputs } from "../operations/finance";
+import { readReview, recordReviewDecision } from "../operations/review";
+import { createHypothesis, deleteHypothesis, readHypotheses, updateHypothesis } from "../operations/hypotheses";
+import {
+  createAssignment,
+  deleteAssignment,
+  readAssignments,
+  updateAssignment,
+} from "../operations/assignments";
+import { readRulesProfile, saveRulesProfile } from "../operations/rules-profile";
 import { deleteObjective, readObjectives, saveObjective } from "../operations/objectives";
 import { parseAndSyncSave } from "../operations/parse-save";
 import {
@@ -28,6 +37,7 @@ import { saveFootOverride, searchScoutPool } from "../operations/scouting-search
 import { deleteScoutTarget, readScoutingBoard, saveScoutTarget } from "../operations/scouting";
 import { deleteTargetBlock, readTargetBlocks, saveTargetBlock } from "../operations/season-blocks";
 import { readSeasonDossier } from "../operations/season-dossier";
+import { readSeasonReview, recordCarryOver, runSeasonTransition } from "../operations/season-review";
 import { readDivisionTables } from "../operations/season-divisions";
 import { readSeasonState, recordSeason } from "../operations/season";
 import { patchSettings, readSettings } from "../operations/settings";
@@ -157,8 +167,58 @@ async function dispatch(call: Call): Promise<OperationResult<unknown>> {
     case "DELETE /api/season/blocks":
       return deleteTargetBlock(params.get("careerId"), params.get("id"));
 
+    case "GET /api/review":
+      return readReview(params.get("careerId"), {
+        blockId: params.get("blockId"),
+        from: params.get("from"),
+        to: params.get("to"),
+        count: params.get("count"),
+      });
+    case "POST /api/review":
+      return recordReviewDecision(raw ?? "");
+
+    case "GET /api/hypotheses":
+      return readHypotheses(params.get("careerId"), {
+        blockId: params.get("blockId"),
+        from: params.get("from"),
+        to: params.get("to"),
+        count: params.get("count"),
+        eventIds: params.get("eventIds"),
+      });
+    case "POST /api/hypotheses":
+      return createHypothesis(raw ?? "");
+    case "PUT /api/hypotheses":
+      return updateHypothesis(raw ?? "");
+    case "DELETE /api/hypotheses":
+      return deleteHypothesis(params.get("careerId"), params.get("id"));
+
+    case "GET /api/assignments":
+      return readAssignments(params.get("careerId"), {
+        blockId: params.get("blockId"),
+        from: params.get("from"),
+        to: params.get("to"),
+        count: params.get("count"),
+      });
+    case "POST /api/assignments":
+      return createAssignment(raw ?? "");
+    case "PUT /api/assignments":
+      return updateAssignment(raw ?? "");
+    case "DELETE /api/assignments":
+      return deleteAssignment(params.get("careerId"), params.get("id"));
+
+    case "GET /api/rules-profile":
+      return readRulesProfile(params.get("careerId"));
+    case "PUT /api/rules-profile":
+      return saveRulesProfile(raw ?? "");
+
     case "GET /api/season/dossier":
       return readSeasonDossier(params.get("careerId"), params.get("season"));
+    case "GET /api/season/review":
+      return params.get("action") === "transition"
+        ? runSeasonTransition(params.get("careerId"))
+        : readSeasonReview(params.get("careerId"), params.get("season"));
+    case "POST /api/season/review":
+      return recordCarryOver(raw ?? "");
     case "GET /api/season/divisions":
       return readDivisionTables(params.get("careerId"), params.get("leagueId"));
     case "GET /api/season":

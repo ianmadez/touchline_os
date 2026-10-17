@@ -332,11 +332,88 @@ p {
   transform: rotateY(180deg);
 }
 
-@keyframes shimmer {
-  100% {
-    transform: translateX(100%);
+/*
+  The OS launch. This is the screen between the entry menu and the app itself, and it is the one place in the product
+  where motion is allowed to be deliberate: it is seen twice per session at most, and its job is to make the handover
+  from "menu" to "the thing" feel like a machine starting rather than a page swapping.
+
+  Only `opacity`, `transform` and `filter` are animated. The mark settles from 0.94 rather than 0, because nothing
+  real appears from nothing, and the words follow it by 80ms so the eye reads the mark first.
+*/
+@keyframes osLaunchCover {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
+
+@keyframes osLaunchMark {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes osLaunchWord {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-os-cover {
+  animation: osLaunchCover 180ms var(--ease-brand) both;
+}
+
+.animate-os-cover-out {
+  animation: osLaunchCoverOut 260ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+@keyframes osLaunchCoverOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.animate-os-mark {
+  animation: osLaunchMark 420ms var(--ease-brand) both;
+}
+
+.animate-os-word {
+  animation: osLaunchWord 320ms var(--ease-brand) both;
+}
+
+/* The app settling in after the launch cover lifts. Short and small: it is a bridge, not an entrance. */
+@keyframes appSettleIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-app-settle {
+  animation: appSettleIn 300ms cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
 
 /* While a tour is up, the navigation tabs lose their clicks and keep their highlight.
    The tour's backdrop leaves a real gap over the control it is describing, so that control stays
@@ -348,8 +425,9 @@ html[data-tour-open] [data-tour^="tab-"] {
   pointer-events: none;
 }
 
-/* The app shipped with no reduced-motion guard at all. This neutralises every animation and
-   transition for users who ask the OS for less motion, without removing the state change. */
+/* The app shipped with no reduced-motion guard at all. This neutralises movement for users who ask the OS for less
+   motion, without removing the state change: the branded entrances keep a plain cross-fade, so a screen settles in
+   instead of snapping, and everything that moves position, scale or blur becomes still. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -358,5 +436,21 @@ html[data-tour-open] [data-tour^="tab-"] {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .animate-os-cover,
+  .animate-os-mark,
+  .animate-os-word,
+  .animate-app-settle,
+  .animate-splash-logo,
+  .animate-fade-in-up,
+  .animate-page-in,
+  .animate-overlay-in,
+  .animate-panel-in,
+  .animate-drawer-in {
+    animation-name: overlayFadeIn !important;
+    animation-duration: 180ms !important;
+    animation-timing-function: linear !important;
+    animation-delay: 0ms !important;
   }
 }

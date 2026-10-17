@@ -476,6 +476,91 @@ export const SCHEMA_DDL = `
     );
     CREATE UNIQUE INDEX IF NOT EXISTS uq_career_finance_inputs_career ON career_finance_inputs(career_id);
 
+    -- 21b. REVIEW DECISIONS (which option the manager took; USER provenance, never written by the engine)
+    CREATE TABLE IF NOT EXISTS review_decisions (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      review_key TEXT NOT NULL,
+      option_id TEXT NOT NULL,
+      decision TEXT NOT NULL DEFAULT 'PENDING',
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_review_decisions_career_id ON review_decisions(career_id);
+    CREATE INDEX IF NOT EXISTS idx_review_decisions_review_key ON review_decisions(career_id, review_key);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_review_decisions_career_review_option ON review_decisions(career_id, review_key, option_id);
+
+    -- 21c. HYPOTHESES (the questions the manager chose to keep asking; USER provenance, never staled by the engine)
+    CREATE TABLE IF NOT EXISTS hypotheses (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      season_number INTEGER,
+      claim TEXT NOT NULL,
+      question TEXT,
+      rule_key TEXT,
+      origin TEXT NOT NULL DEFAULT 'ACCEPTED',
+      status TEXT NOT NULL DEFAULT 'EMERGING',
+      kind TEXT NOT NULL,
+      review_after_matches INTEGER NOT NULL DEFAULT 5,
+      matches_seen INTEGER NOT NULL DEFAULT 0,
+      formation_label TEXT,
+      player_ids_json TEXT NOT NULL DEFAULT '[]',
+      objective_id TEXT,
+      storyline_id TEXT,
+      manager_note TEXT,
+      verdict_reason TEXT,
+      opened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_hypotheses_career_id ON hypotheses(career_id);
+    CREATE INDEX IF NOT EXISTS idx_hypotheses_career_status ON hypotheses(career_id, status);
+
+    -- 21d. HYPOTHESIS EVIDENCE (one row per match read against a question, so a re-save writes nothing)
+    CREATE TABLE IF NOT EXISTS hypothesis_evidence (
+      id TEXT PRIMARY KEY,
+      hypothesis_id TEXT NOT NULL REFERENCES hypotheses(id) ON DELETE CASCADE,
+      event_id TEXT NOT NULL REFERENCES career_events(id) ON DELETE CASCADE,
+      stance TEXT NOT NULL,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_hypothesis_evidence_hypothesis ON hypothesis_evidence(hypothesis_id);
+    CREATE INDEX IF NOT EXISTS idx_hypothesis_evidence_event ON hypothesis_evidence(event_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_hypothesis_evidence_hypothesis_event ON hypothesis_evidence(hypothesis_id, event_id);
+
+    -- 21e. ASSIGNMENTS (what the manager took out of a review; USER provenance)
+    CREATE TABLE IF NOT EXISTS assignments (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      season_number INTEGER,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      target_points INTEGER,
+      formation_label TEXT,
+      matches_target INTEGER,
+      player_id TEXT,
+      block_index INTEGER,
+      verdict TEXT,
+      review_key TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      closed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_assignments_career_id ON assignments(career_id);
+    CREATE INDEX IF NOT EXISTS idx_assignments_career_status ON assignments(career_id, status);
+
+    -- 21f. RULES PROFILE (one row per career; the toggles only ever remove options)
+    CREATE TABLE IF NOT EXISTS rules_profile (
+      id TEXT PRIMARY KEY,
+      career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE,
+      toggles_json TEXT NOT NULL DEFAULT '{}',
+      notes TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_rules_profile_career ON rules_profile(career_id);
+
     -- 22. SCOUT TARGETS (the manager's own scouting board; USER provenance)
     CREATE TABLE IF NOT EXISTS scout_targets (
       id TEXT PRIMARY KEY,
@@ -887,4 +972,26 @@ export const SCHEMA_MIGRATIONS: string[] = [
     "ALTER TABLE transfer_inputs ADD COLUMN kind TEXT NOT NULL DEFAULT 'TRANSFER';",
     "ALTER TABLE transfer_inputs ADD COLUMN salary INTEGER;",
     "ALTER TABLE transfer_inputs ADD COLUMN wage_share_pct INTEGER;",
+    // Which option the manager took out of a review. Brand new, so the DDL block has already created it; the
+    // statements are repeated here because every other new table is listed in this array and the indexes have to
+    // exist on a database that was opened before this shipped.
+    "CREATE TABLE IF NOT EXISTS review_decisions (id TEXT PRIMARY KEY, career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE, review_key TEXT NOT NULL, option_id TEXT NOT NULL, decision TEXT NOT NULL DEFAULT 'PENDING', note TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
+    "CREATE INDEX IF NOT EXISTS idx_review_decisions_career_id ON review_decisions(career_id);",
+    "CREATE INDEX IF NOT EXISTS idx_review_decisions_review_key ON review_decisions(career_id, review_key);",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_review_decisions_career_review_option ON review_decisions(career_id, review_key, option_id);",
+    // Phases 3 to 5: hypotheses, the evidence read against them, assignments, and the rules profile. Brand new, so
+    // the DDL block has already created them; repeated here so every new table is listed beside the rest, and every
+    // statement is IF NOT EXISTS because the repeat runs on a database that already has them.
+    "CREATE TABLE IF NOT EXISTS hypotheses (id TEXT PRIMARY KEY, career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE, season_number INTEGER, claim TEXT NOT NULL, question TEXT, rule_key TEXT, origin TEXT NOT NULL DEFAULT 'ACCEPTED', status TEXT NOT NULL DEFAULT 'EMERGING', kind TEXT NOT NULL, review_after_matches INTEGER NOT NULL DEFAULT 5, matches_seen INTEGER NOT NULL DEFAULT 0, formation_label TEXT, player_ids_json TEXT NOT NULL DEFAULT '[]', objective_id TEXT, storyline_id TEXT, manager_note TEXT, verdict_reason TEXT, opened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT);",
+    "CREATE INDEX IF NOT EXISTS idx_hypotheses_career_id ON hypotheses(career_id);",
+    "CREATE INDEX IF NOT EXISTS idx_hypotheses_career_status ON hypotheses(career_id, status);",
+    "CREATE TABLE IF NOT EXISTS hypothesis_evidence (id TEXT PRIMARY KEY, hypothesis_id TEXT NOT NULL REFERENCES hypotheses(id) ON DELETE CASCADE, event_id TEXT NOT NULL REFERENCES career_events(id) ON DELETE CASCADE, stance TEXT NOT NULL, note TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
+    "CREATE INDEX IF NOT EXISTS idx_hypothesis_evidence_hypothesis ON hypothesis_evidence(hypothesis_id);",
+    "CREATE INDEX IF NOT EXISTS idx_hypothesis_evidence_event ON hypothesis_evidence(event_id);",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_hypothesis_evidence_hypothesis_event ON hypothesis_evidence(hypothesis_id, event_id);",
+    "CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE, season_number INTEGER, type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'ACTIVE', target_points INTEGER, formation_label TEXT, matches_target INTEGER, player_id TEXT, block_index INTEGER, verdict TEXT, review_key TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, closed_at TEXT);",
+    "CREATE INDEX IF NOT EXISTS idx_assignments_career_id ON assignments(career_id);",
+    "CREATE INDEX IF NOT EXISTS idx_assignments_career_status ON assignments(career_id, status);",
+    "CREATE TABLE IF NOT EXISTS rules_profile (id TEXT PRIMARY KEY, career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE, toggles_json TEXT NOT NULL DEFAULT '{}', notes TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_rules_profile_career ON rules_profile(career_id);",
   ];

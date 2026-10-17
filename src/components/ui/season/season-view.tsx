@@ -6,6 +6,7 @@ import type { TargetBlock } from "@/lib/services/target-block-service";
 import { leagueLabel } from "@/lib/ui/leagues";
 import { SeasonPanel } from "@/components/ui/dashboard/season-panel";
 import { SeasonVaultView } from "./season-vault-view";
+import { SeasonHandoverBanner } from "./season-handover-banner";
 import { TrophyCabinet } from "./trophy-cabinet";
 import { BoardObjectivesPanel } from "./board-objectives-panel";
 import { DivisionTablesPanel } from "./division-tables-panel";
@@ -142,6 +143,17 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-hidden">
+      {careerId !== "" && (
+        <SeasonHandoverBanner
+          careerId={careerId}
+          seasons={seasons}
+          currentSeason={currentSeason}
+          onOpenSeason={(season) => {
+            setSelectedVaultSeason(season);
+            setActiveSubTab("VAULT");
+          }}
+        />
+      )}
       {/* Header + sub-nav — fixed, never scrolls */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90 dark:shadow-md dark:shadow-slate-950/50">
         <div>

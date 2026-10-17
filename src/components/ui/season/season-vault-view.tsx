@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { SeasonRecord } from "@/lib/services/season-service";
 import { HeadToHeadPanel } from "./head-to-head-panel";
+import { SeasonReviewPanel } from "./season-review-panel";
 import type {
   SeasonDebriefDigest,
   SeasonDossier,
@@ -172,6 +173,9 @@ export function SeasonVaultView({
       {dossier && (
         <div className="space-y-6">
           <DossierHeader dossier={dossier} />
+          {/* The closing page comes before the halves it is built from: a manager opening an old season wants the
+              summary first, and the detail below it, not the other way round. */}
+          {careerId !== "" && <SeasonReviewPanel careerId={careerId} season={dossier.season} />}
           <CoverageBanner dossier={dossier} />
           <SaveHalf dossier={dossier} />
           {dossier.observed ? (

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The news desk.
  *
  * A PURE FUNCTION over facts the app already holds, and everything here follows from two rules.
@@ -35,6 +35,7 @@
  */
 
 import { bylineFor, type OutletStance, type PressByline } from "./outlets";
+import { normaliseNote, weaknessFamily } from "../events/weakness-family";
 import { describeTimeOut, injuryBand, type InjuryBand } from "../squad/injury";
 import { momentOf, phasePhrase, seasonPhase, type SeasonProgress } from "./moment";
 import { formatExpectedGoals } from "../ui/format";
@@ -421,7 +422,7 @@ export function foldName(name: string): string {
  * Whether two names are the same player.
  *
  * The desk matches names across two sources that spell them differently: the squad list, which the save
- * fills with accents - "C. Patiño" - and a match contribution, which is whatever was recorded at the
+ * fills with accents - "C. PatiÃ±o" - and a match contribution, which is whatever was recorded at the
  * time. Comparing the raw strings would silently lose a goalscorer's whole story over a tilde, so every
  * comparison here goes through the fold and the spelling that was recorded is what gets printed.
  */
@@ -660,7 +661,7 @@ function currencySymbol(currency: string): string {
 /**
  * A sum of money as a paper writes it, rounded to the band a reporter would actually say.
  *
- * Exact change is not how money is reported. "£12,400,000" is a spreadsheet reading and "about £12m" is a
+ * Exact change is not how money is reported. "Â£12,400,000" is a spreadsheet reading and "about Â£12m" is a
  * sentence, and the difference matters more here than anywhere else in the desk, because a story about money
  * that reads like a ledger is a story nobody finishes. The exact figure stays in the story's own evidence,
  * with the rest of the app's reasoning.
@@ -789,78 +790,18 @@ function leadChanges(match: NewsMatch): number {
  * The manager's note is his own shorthand and it is not written for print: "Switched off after scoring"
  * is a note to self, not a sentence in a paper, and printing it verbatim is the most obvious way this
  * desk could read as an app quoting a field.
+ *
+ * The table itself now lives in `events/weakness-family.ts`, because the review reads the same notes and
+ * two tables would let the paper and the review disagree about what one note is about.
  */
-function normaliseNote(note: string): string {
-  return note
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 /**
  * What a weakness note amounts to, in the language of a match report.
  *
  * The note is matched to a family and the family supplies the wording, so the paper never prints the
- * manager's own shorthand and never guesses at a specific. The `key` is stable per family, which is
- * what the story id is built from - an id that embedded the note itself would change with a stray
- * capital letter and republish a story the reader had already seen.
- *
- * A note that matches nothing returns null and the caller falls back to the generic line, which is a
- * weaker sentence but never a wrong one.
+ * manager's own shorthand and never guesses at a specific.
  */
-function weaknessFamily(note: string): { key: string; line: string } | null {
-  const text = normaliseNote(note);
-  if (text.length === 0) return null;
-  const families: { key: string; test: RegExp; line: string }[] = [
-    {
-      key: "switching-off",
-      test: /switch(ed|ing)? off|concentrat|focus|complacen|mentali|off the pace/,
-      line: "a spell of switching off after the goal",
-    },
-    {
-      key: "set-pieces",
-      test: /set piece|setpiece|corner|free kick|dead ball|cross/,
-      line: "the set pieces",
-    },
-    {
-      key: "counter-attack",
-      test: /counter|break|transition|caught on|exposed|played through/,
-      line: "the way the side was caught upfield",
-    },
-    {
-      key: "finishing",
-      test: /finish|chance|wasteful|clinical|missed|proflig|conversion/,
-      line: "what happened in front of goal",
-    },
-    {
-      key: "passing",
-      test: /pass|possession|control|sloppy|loose|giveaway|gave the ball/,
-      line: "the passing",
-    },
-    {
-      key: "tempo",
-      test: /press|intensity|energy|slow|lethargic|flat|tempo/,
-      line: "the tempo",
-    },
-    {
-      key: "shape",
-      test: /defen|back line|backline|shape|offside|discipline|foul/,
-      line: "the shape without the ball",
-    },
-    {
-      key: "late-on",
-      test: /fitness|tired|legs|fade|stamina|late/,
-      line: "the way the match ran away late on",
-    },
-    { key: "injuries", test: /injur|knock|fitness doubt/, line: "the injuries" },
-    { key: "goalkeeping", test: /keeper|goalkeep|goalie|shot stopping/, line: "the goalkeeping" },
-    { key: "width", test: /width|wing|flank|wide/, line: "the width" },
-    { key: "bench", test: /sub|bench|changes|rotation/, line: "the changes from the bench" },
-  ];
-  const found = families.find((family) => family.test.test(text));
-  return found ? { key: found.key, line: found.line } : null;
-}
+
 
 /**
  * The final pass over a sentence, for the seams that composing fragments leaves behind.
@@ -1416,7 +1357,7 @@ export function buildNews(input: NewsInput, options: { maxStories?: number } = {
  * THE FIRST VERSION WAS A LIST. It concatenated three independent sentences - who scored, who else
  * conceded, who the manager noticed - in one of two orders, which produced copy like
  *
- *   "I. Olaofe got the goals. J. Koroma, I. Olaofe and C. Patiño drew the eye above all."
+ *   "I. Olaofe got the goals. J. Koroma, I. Olaofe and C. PatiÃ±o drew the eye above all."
  *
  * and that is not a report. It names the same player twice in two sentences, it says nothing the
  * scoreline did not already say, and it has no view of the match in it at all.

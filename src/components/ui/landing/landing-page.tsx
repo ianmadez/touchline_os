@@ -104,7 +104,7 @@ export function LandingPage({
     },
     {
       q: "Is TouchlineOS free, and is my data sent to any cloud servers?",
-      a: "TouchlineOS is 100% free and open-source. Your save is parsed on your own device, nothing is uploaded, and there is no cloud database holding your career. On the desktop build the career database is a local file, and in the browser build it stays in this browser's own private storage on your machine.",
+      a: "TouchlineOS is free and open-source. Your save is parsed on your own device, nothing is uploaded, and there is no cloud database holding your career. On the desktop build the career database is a local file, and in the browser build it stays in this browser's own private storage on your machine.",
     },
     {
       q: "How is this different from tracking my career in Google Sheets or Excel?",
@@ -112,7 +112,11 @@ export function LandingPage({
     },
     {
       q: "What happens if I connect TouchlineOS halfway through an existing career?",
-      a: "TouchlineOS reads your save at its current state and establishes an initial baseline snapshot. Every sync from that point forward tracks transfers, squad progression, and rating changes seamlessly.",
+      a: "It reads your save where it is now and takes a baseline from that. Every sync after it picks up transfers, squad progression and rating changes, and anything before the baseline is simply not there to see.",
+    },
+    {
+      q: "Does TouchlineOS make the calls for me?",
+      a: "No. It proposes a finding, a verdict or a points target and shows what each one rests on. You accept or reject it, and the decision stays with the block it belongs to.",
     },
   ];
 
@@ -130,7 +134,8 @@ export function LandingPage({
         </h1>
 
         <p className="font-sans text-slate-600 dark:text-slate-300 max-w-lg text-xs sm:text-sm mb-5 leading-relaxed font-medium">
-          TouchlineOS runs beside your career mode—remembering every squad change, tracking your manager philosophy, and giving every season real narrative weight.
+          It reads your save, remembers every squad change it finds, and reads each block of matches back to
+          you: what the numbers support, what they do not, and what is worth testing next.
         </p>
 
         {/* Local Save Detector Box */}
@@ -158,7 +163,7 @@ export function LandingPage({
           <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-md mb-5 text-center space-y-2">
             <span className="font-sub text-xs text-slate-500 dark:text-slate-400 block">
               {rememberedSave === "needs-permission"
-                ? "Your save file is still remembered — confirm access to carry on"
+                ? "Your save file is still remembered. Confirm access to carry on"
                 : noSaveDetected
                   ? saveEmptyLabel(saveSourceMode)
                   : saveScanningLabel(saveSourceMode)}
@@ -167,7 +172,7 @@ export function LandingPage({
               <>
                 <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
                   Browsers never let a page reopen a file on its own. One click restores the save you
-                  already picked — there is no need to find it again.
+                  already picked, so there is no need to find it again.
                 </p>
                 <button
                   onClick={onRegrant}
@@ -284,8 +289,11 @@ export function LandingPage({
       <section id="features" className="scroll-mt-24 space-y-8">
         <div className="text-center max-w-2xl mx-auto">
           <h2 className="font-heading text-2xl sm:text-4xl text-slate-900 dark:text-slate-100 uppercase">
-            Deep Product Capabilities
+            What It Actually Does
           </h2>
+          <p className="font-sans text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-3 leading-relaxed">
+            Seven screens, one career. Everything below reads the save you already have.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
@@ -297,7 +305,7 @@ export function LandingPage({
               </h3>
               <p className="font-sans text-xs sm:text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
                 All 21,000 professionals in your career, searchable by rating, age, position and what you
-                can actually afford. Four strategies — Balanced, Immediate, Prospect and Value — rank
+                can actually afford. Four strategies (Balanced, Immediate, Prospect and Value) rank
                 them the way a manager shops, with a value band and a confidence tag on every one.
               </p>
             </div>
@@ -350,8 +358,8 @@ export function LandingPage({
                 Full Player Dossiers
               </h3>
               <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                Every face stat the save holds — pace, shooting, passing, dribbling, defending and
-                physical — alongside weak foot, skill moves and where his value sits.
+                Every face stat the save holds, from pace and shooting through to physical, alongside
+                weak foot, skill moves and where his value sits.
               </p>
             </div>
 
@@ -404,7 +412,7 @@ export function LandingPage({
                 Finances You Can Audit
               </h3>
               <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                Every figure is labelled with where it came from — read from the save, worked out by
+                Every figure is labelled with where it came from: read from the save, worked out by
                 TouchlineOS, or entered by you. Where the game stores nothing, you state it yourself.
               </p>
             </div>
@@ -457,10 +465,89 @@ export function LandingPage({
               +
             </span>
             <h3 className="font-heading text-lg uppercase">
-              ...And Much More!
+              ...And The Rest
             </h3>
             <p className="font-sans text-xs text-slate-300 leading-relaxed">
-              Including post-match debriefs, board objective tracking and local database exports.
+              Match facts scanning, loan deals with wage splits, board objective tracking, and a local
+              database you can export.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* THE BLOCK LOOP */}
+      <section id="block-loop" className="scroll-mt-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 sm:p-12 shadow-xl">
+        <div className="max-w-2xl mb-10">
+          <span className="font-sub text-xs text-[#E11D48] uppercase tracking-widest font-bold block mb-1">
+            Review Cycle
+          </span>
+          <h2 className="font-heading text-2xl sm:text-4xl text-slate-900 dark:text-slate-100 uppercase">
+            Five Matches, Then Read It Back
+          </h2>
+          <p className="font-sans text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-3 leading-relaxed">
+            A block is five matches, three at the shortest. You log the results, the engine looks across
+            them, and you leave with one claim worth testing in the next block.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 p-5">
+            <span className="font-sub text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider block mb-2">
+              Step 1
+            </span>
+            <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mb-2">
+              Log The Block
+            </h4>
+            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Type the scorelines in, or scan the match facts screen if you have it. The same fixture
+              logged twice is counted once.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 p-5">
+            <span className="font-sub text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider block mb-2">
+              Step 2
+            </span>
+            <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mb-2">
+              Read The Findings
+            </h4>
+            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Every finding shows what it rests on and how much of it, so a run of two is not dressed up
+              as a pattern.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 p-5">
+            <span className="font-sub text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider block mb-2">
+              Step 3
+            </span>
+            <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mb-2">
+              Set One Thing
+            </h4>
+            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              A points target for the next block, an experiment to run, or a claim to test. One, not four.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+            <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mb-2">
+              Claims Get Tested, Not Believed
+            </h4>
+            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              A claim you confirm becomes a hypothesis with evidence behind it. It carries into the next
+              block, gets the same treatment, and ends supported, contradicted, or still open.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 p-5">
+            <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mb-2">
+              Seasons Close Before The Next One Opens
+            </h4>
+            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              A closing page reads the season back: record, objectives, shape, squad movement, money. You
+              choose what carries over, and the new season starts with it.
             </p>
           </div>
         </div>
@@ -492,40 +579,46 @@ export function LandingPage({
 
           <div className="border-l-2 border-slate-300 dark:border-slate-700 pl-4">
             <span className="font-sub text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider block">
-              v0.2
+              v0.2 (Shipped)
             </span>
             <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mt-0.5 mb-1">
-              Dynamic Debriefs (Shipped)
+              Dynamic Debriefs
             </h4>
             <p className="font-sans text-xs text-slate-600 dark:text-slate-300">
               Anomaly-triggered post-match questions, storyline tracking, and basic analytics graphs.
             </p>
           </div>
 
-          <div className="border-l-2 border-[#E11D48] pl-4">
-            <span className="font-sub text-[10px] text-[#E11D48] font-bold uppercase tracking-wider block">
-              v0.3.2 (Active)
+          <div className="border-l-2 border-slate-300 dark:border-slate-700 pl-4">
+            <span className="font-sub text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider block">
+              v0.3 (Shipped)
             </span>
             <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mt-0.5 mb-1">
-              Transfers & Youth
+              Transfers, Youth & Facts
             </h4>
             <p className="font-sans text-xs text-slate-600 dark:text-slate-300">
-              Explainable shortlist fit scores, scouting memory, and youth prospect tracking.
+              Shortlist fit scores with the reasons shown, loan deals with wage splits, and a reader for
+              the match facts screen.
             </p>
           </div>
 
-          <div className="border-l-2 border-slate-300 dark:border-slate-700 pl-4">
-            <span className="font-sub text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider block">
-              v1.0
+          <div className="border-l-2 border-[#E11D48] pl-4">
+            <span className="font-sub text-[10px] text-[#E11D48] font-bold uppercase tracking-wider block">
+              v0.4 (Active)
             </span>
             <h4 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase mt-0.5 mb-1">
-              Grounded AI Layer
+              Reasoning Engine
             </h4>
             <p className="font-sans text-xs text-slate-600 dark:text-slate-300">
-              Local Ollama & Groq router for grounded, retcon-free managerial narrative generation.
+              Blocks of five get reviewed, claims become testable hypotheses, and each season is closed
+              out before the next one starts.
             </p>
           </div>
         </div>
+
+        <p className="font-sans text-xs text-slate-500 dark:text-slate-400 mt-8 text-left max-w-2xl leading-relaxed">
+          {`v1.0 is the model layer: a local model that writes the narrative this data already supports, with no invented results and no invented quotes.`}
+        </p>
       </section>
 
       {/* FAQ SECTION */}
@@ -570,10 +663,11 @@ export function LandingPage({
       {/* CALL TO ACTION BANNER */}
       <section className="bg-gradient-to-r from-slate-900 to-slate-950 text-white rounded-3xl p-8 sm:p-12 text-center shadow-2xl relative overflow-hidden">
         <h2 className="font-heading text-2xl sm:text-4xl uppercase tracking-wide mb-3">
-          Ready To Command Your Save?
+          Bring Your Save In
         </h2>
-        <p className="font-sans text-slate-300 text-sm max-w-lg mx-auto mb-6">
-          Connect your EA SPORTS FC save file and experience persistent, intelligent career tracking today.
+        <p className="font-sans text-slate-300 text-sm max-w-lg mx-auto mb-6 leading-relaxed">
+          Point it at the career you are already playing. First read takes a minute, and the history starts
+          from there.
         </p>
         <button
           onClick={onEnterPortal}

@@ -81,7 +81,7 @@ const MIN_READ_MS = 900;
  * `reconcileTourRevision`, which takes this value rather than deriving one, because "worth reshowing"
  * is an editorial call and cannot be computed.
  */
-const TOUR_REVISION = "2026-10-17-honours-and-block-points";
+const TOUR_REVISION = "2026-10-17-reasoning-engine";
 
 /**
  * The fewest steps worth showing. A tour that survived filtering down to its tab button alone would
@@ -509,6 +509,53 @@ const TOURS: Record<string, TourStep[]> = {
       anchor: "group-blocks",
       title: "Your blocks",
       body: "Each block adds up to one run of form you can point at. Open one to correct it, or delete it and write it again.",
+    },
+  ],
+  "DEBRIEF::REVIEW": [
+    {
+      anchor: "debrief-subtab-REVIEW",
+      title: "The review",
+      body: "This is where a run of matches gets read back. It says what the data supports, what it does not, and what else could be behind the same numbers.",
+    },
+    {
+      anchor: "review-picker",
+      title: "Choose what to read",
+      body: "Read a saved block, or the newest matches in a window: five by default, never fewer than three. A block keeps its own points band beside the review; a window has no band because it never had one.",
+    },
+    {
+      anchor: "review-card",
+      title: "The short card",
+      body: "The record, the two matches worth putting next to each other, and the findings that matter most. The label under each finding says how much it rests on, from a thin sample to five matches.",
+    },
+    {
+      anchor: "review-decision",
+      title: "Your call",
+      body: "Every option names what accepting it would create in the next block. Nothing is applied until you take it, and the rules profile only ever removes options rather than adding them.",
+    },
+    {
+      anchor: "review-full-report",
+      title: "The full report",
+      body: "Eight sections: the window, what the figures support, what the scores alone say, the key contrast, the block before this one, what the review is not claiming, what it rests on, and the questions it leaves open.",
+    },
+    {
+      anchor: "hypothesis-inbox",
+      title: "Worth testing",
+      body: "A repeated signal, offered as a question. Track it and the app keeps reading new matches against it; turn it down and it stops being offered. Nothing is tracked until you say so.",
+    },
+    {
+      anchor: "assignment-panel",
+      title: "What you have taken on",
+      body: "Anything you took from a review lives here with its progress against the matches since, and the two shapes or the two blocks it is being judged against. Nothing is marked met or missed without you closing it.",
+    },
+    {
+      anchor: "hypothesis-list",
+      title: "Questions you are tracking",
+      body: "Each question shows how many matches have been read against it and what would settle it. Amend the wording, drop it, or write one of your own at the bottom.",
+    },
+    {
+      anchor: "rules-profile",
+      title: "Your rules profile",
+      body: "Four toggles that only ever take options away. Nothing here adds a finding or changes a figure, and a toggle with nothing to act on says so rather than pretending it is working.",
     },
   ],
   "SETTINGS::TIMELINE": [

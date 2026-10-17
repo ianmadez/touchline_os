@@ -85,13 +85,13 @@ export function Navbar({
       {/* Brand Logo */}
       <div
         onClick={() => onSelectTab("LANDING")}
-        className="flex items-center gap-2 min-w-0 cursor-pointer group justify-self-start"
+        className="flex items-center gap-2 min-w-0 overflow-hidden cursor-pointer group justify-self-start"
       >
-        <span className="font-heading text-lg sm:text-xl text-slate-900 dark:text-white tracking-wider shrink-0">
+        <span className="font-heading text-base sm:text-lg lg:text-xl text-slate-900 dark:text-white tracking-wider shrink-0">
           TOUCHLINE<span className="text-[#E11D48]">OS</span>
         </span>
         {!isLanding && (clubBadgeUrl !== "" || hasClubName) && (
-          <span className="text-xs font-sub text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-slate-800 pl-2.5 ml-1 hidden md:inline-flex items-center gap-2 min-w-0">
+          <span className="text-xs font-sub text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-slate-800 pl-2.5 ml-1 hidden xl:inline-flex items-center gap-2 min-w-0">
             {clubBadgeUrl !== "" && (
               /* eslint-disable-next-line @next/next/no-img-element */
               <img
@@ -121,6 +121,9 @@ export function Navbar({
             </a>
             <a href="#features" className="hover:text-slate-900 dark:hover:text-white transition-colors">
               Features
+            </a>
+            <a href="#block-loop" className="hover:text-slate-900 dark:hover:text-white transition-colors">
+              Blocks
             </a>
             <a href="#roadmap" className="hover:text-slate-900 dark:hover:text-white transition-colors">
               Roadmap

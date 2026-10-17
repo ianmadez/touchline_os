@@ -962,6 +962,231 @@ export const targetBlocks = sqliteTable(
 export type TargetBlockRow = typeof targetBlocks.$inferSelect;
 
 // ============================================================================
+// REVIEW DECISIONS (which option the manager took, all USER provenance)
+// ============================================================================
+//
+// A review is regenerated on every read, so the decision it produced has to be stored somewhere else or it would
+// vanish with the next visit. One row per (career, review, option): the manager either took an option, dropped it,
+// or left it pending, and the engine never writes here.
+//
+// The review key is the block id or `window:<from>:<to>`, which means a decision is attached to the evidence that
+// produced it. Regenerating the same window finds it again; a different window is a different decision.
+//
+// The engine deliberately does not read these rows when it composes, so a decision can never change what the data
+// says. It only changes what the screen says about the decision.
+
+export const reviewDecisionEnum = ["ACCEPTED", "DROPPED", "PENDING"] as const;
+export type ReviewDecisionValue = (typeof reviewDecisionEnum)[number];
+
+export const reviewDecisions = sqliteTable(
+  "review_decisions",
+  {
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    /** The block id, `window:<from>:<to>`, or `carry:<season>` for a carry-over answer. */
+    reviewKey: text("review_key").notNull(),
+    optionId: text("option_id").notNull(),
+    decision: text("decision", { enum: reviewDecisionEnum }).notNull().default("PENDING"),
+    note: text("note"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerIdx: index("idx_review_decisions_career_id").on(table.careerId),
+    reviewIdx: index("idx_review_decisions_review_key").on(table.careerId, table.reviewKey),
+    uniqueOption: uniqueIndex("uq_review_decisions_career_review_option").on(
+      table.careerId,
+      table.reviewKey,
+      table.optionId
+    ),
+  })
+);
+
+export type ReviewDecisionRow = typeof reviewDecisions.$inferSelect;
+
+// ============================================================================
+// HYPOTHESES (the questions the manager has chosen to keep asking)
+// ============================================================================
+//
+// WHY A SIBLING TABLE RATHER THAN A STORYLINE. Storylines are DERIVED: the evaluator adopts and stales them by
+// subject on every hydration. A hypothesis is the opposite - the manager has accepted it, so its status is his and
+// nothing else may move it. Two owners on one status column would end with the evaluator closing a question the
+// manager was still asking.
+//
+// A hypothesis is only ever created by accepting a proposal or writing one of his own. The engine proposes; it never
+// accepts on his behalf.
+
+export const hypothesisOriginEnum = ["RULE", "ACCEPTED", "MANAGER"] as const;
+export type HypothesisOrigin = (typeof hypothesisOriginEnum)[number];
+
+export const hypothesisStatusEnum = [
+  "EMERGING",
+  "INVESTIGATING",
+  "SUPPORTED",
+  "WEAKENED",
+  "RESOLVED",
+  "INCONCLUSIVE",
+] as const;
+export type HypothesisStatus = (typeof hypothesisStatusEnum)[number];
+
+export const hypothesisKindEnum = [
+  "PERFORMANCE",
+  "TACTICAL",
+  "PLAYER",
+  "SET_PIECE",
+  "DISCIPLINE",
+] as const;
+export type HypothesisKind = (typeof hypothesisKindEnum)[number];
+
+export const hypotheses = sqliteTable(
+  "hypotheses",
+  {
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    seasonNumber: integer("season_number"),
+    /** The question, in the manager's voice. Editable; the engine never rewrites it after creation. */
+    claim: text("claim").notNull(),
+    /** The extra question asked after a save, when this is the one closest to its verdict. */
+    question: text("question"),
+    /**
+     * Which rule proposed it, e.g. `performance:late-goals`, or null when the manager wrote it himself.
+     *
+     * Stored rather than re-derived from the claim: the evidence writer has to know what a match is supposed to
+     * show before it can say whether it does, and guessing from wording would make the classification copy-dependent.
+     */
+    ruleKey: text("rule_key"),
+    origin: text("origin", { enum: hypothesisOriginEnum }).notNull().default("ACCEPTED"),
+    status: text("status", { enum: hypothesisStatusEnum }).notNull().default("EMERGING"),
+    kind: text("kind", { enum: hypothesisKindEnum }).notNull(),
+    /** How many matches it takes before a verdict is offered. */
+    reviewAfterMatches: integer("review_after_matches").notNull().default(5),
+    /** How many matches have been read against it, counted once per match. */
+    matchesSeen: integer("matches_seen").notNull().default(0),
+    formationLabel: text("formation_label"),
+    playerIdsJson: text("player_ids_json").notNull().default("[]"),
+    objectiveId: text("objective_id"),
+    /** A pointer, not a relation: the thread and the hypothesis each keep their own status. */
+    storylineId: text("storyline_id"),
+    managerNote: text("manager_note"),
+    verdictReason: text("verdict_reason"),
+    openedAt: text("opened_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    resolvedAt: text("resolved_at"),
+  },
+  (table) => ({
+    careerIdx: index("idx_hypotheses_career_id").on(table.careerId),
+    statusIdx: index("idx_hypotheses_career_status").on(table.careerId, table.status),
+  })
+);
+
+export type HypothesisRow = typeof hypotheses.$inferSelect;
+
+export const hypothesisStanceEnum = ["FOR", "AGAINST"] as const;
+export type HypothesisStance = (typeof hypothesisStanceEnum)[number];
+
+export const hypothesisEvidence = sqliteTable(
+  "hypothesis_evidence",
+  {
+    id: text("id").primaryKey(),
+    hypothesisId: text("hypothesis_id")
+      .notNull()
+      .references(() => hypotheses.id, { onDelete: "cascade" }),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => careerEvents.id, { onDelete: "cascade" }),
+    stance: text("stance", { enum: hypothesisStanceEnum }).notNull(),
+    note: text("note"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    hypothesisIdx: index("idx_hypothesis_evidence_hypothesis").on(table.hypothesisId),
+    eventIdx: index("idx_hypothesis_evidence_event").on(table.eventId),
+    uniqueEvent: uniqueIndex("uq_hypothesis_evidence_hypothesis_event").on(
+      table.hypothesisId,
+      table.eventId
+    ),
+  })
+);
+
+export type HypothesisEvidenceRow = typeof hypothesisEvidence.$inferSelect;
+
+// ============================================================================
+// ASSIGNMENTS (what the manager took out of a review, and how it went)
+// ============================================================================
+//
+// An assignment is the only kind of object here that asks him to do something, so it is also the only one with a
+// lifecycle that ends: active, then met, missed, concluded or dropped. Nothing infers a verdict from the data alone;
+// an experiment produces a proposal and the manager closes it.
+
+export const assignmentTypeEnum = ["POINTS_TARGET", "TACTICAL_EXPERIMENT", "PLAYER_WATCH"] as const;
+export type AssignmentType = (typeof assignmentTypeEnum)[number];
+
+export const assignmentStatusEnum = ["ACTIVE", "MET", "MISSED", "CONCLUDED", "DROPPED"] as const;
+export type AssignmentStatus = (typeof assignmentStatusEnum)[number];
+
+export const assignments = sqliteTable(
+  "assignments",
+  {
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    seasonNumber: integer("season_number"),
+    type: text("type", { enum: assignmentTypeEnum }).notNull(),
+    status: text("status", { enum: assignmentStatusEnum }).notNull().default("ACTIVE"),
+    targetPoints: integer("target_points"),
+    formationLabel: text("formation_label"),
+    matchesTarget: integer("matches_target"),
+    playerId: text("player_id"),
+    blockIndex: integer("block_index"),
+    verdict: text("verdict"),
+    /** The review that produced it, so an assignment can be traced back to its evidence. */
+    reviewKey: text("review_key"),
+    createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+    closedAt: text("closed_at"),
+  },
+  (table) => ({
+    careerIdx: index("idx_assignments_career_id").on(table.careerId),
+    statusIdx: index("idx_assignments_career_status").on(table.careerId, table.status),
+  })
+);
+
+export type AssignmentRow = typeof assignments.$inferSelect;
+
+// ============================================================================
+// RULES PROFILE (the manager's own guard rails, one row per career)
+// ============================================================================
+//
+// Four toggles and a notes box. The toggles only ever REMOVE options from a review, which is why the defaults are
+// all off: an untouched profile offers everything, and every restriction on screen is one the manager set himself.
+//
+// The notes are never read by code. They are a place to think, and a test asserts the review is identical with and
+// without them - the moment the engine parsed them, the advice would depend on wording rather than on state.
+
+export const rulesProfiles = sqliteTable(
+  "rules_profile",
+  {
+    id: text("id").primaryKey(),
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    togglesJson: text("toggles_json").notNull().default("{}"),
+    notes: text("notes"),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerUnique: uniqueIndex("uq_rules_profile_career").on(table.careerId),
+  })
+);
+
+export type RulesProfileRow = typeof rulesProfiles.$inferSelect;
+
+// ============================================================================
 // CAREER FINANCE INPUTS (manager-stated budgets, all USER provenance)
 // ============================================================================
 //

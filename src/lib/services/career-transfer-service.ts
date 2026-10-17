@@ -44,6 +44,11 @@ import {
   worldPlayerOverrides,
   worldPlayers,
   youthProspects,
+  reviewDecisions,
+  hypotheses,
+  hypothesisEvidence,
+  assignments,
+  rulesProfiles,
 } from "../db/schema";
 
 /** Raised for a payload that is not a readable backup, or cannot be applied as one. A 400. */
@@ -79,10 +84,11 @@ export const TRANSFER_SCHEMA_VERSION = 2;
 interface CareerTableSpec {
   table: AnySQLiteTable;
   /**
-   * `career` filters on the table's own `career_id`. `storyline` is the one exception:
-   * `storyline_events` has no `career_id` column and reaches its career through its storyline.
+   * `career` filters on the table's own `career_id`. `storyline` and `hypothesis` are the exceptions:
+   * `storyline_events` and `hypothesis_evidence` have no `career_id` column and reach their career through their
+   * parent row.
    */
-  scope: "career" | "storyline";
+  scope: "career" | "storyline" | "hypothesis";
 }
 
 /**
@@ -122,6 +128,12 @@ const CAREER_TABLES: CareerTableSpec[] = [
   { table: competitionTeams, scope: "career" },
   { table: boardObjectives, scope: "career" },
   { table: youthProspects, scope: "career" },
+  { table: reviewDecisions, scope: "career" },
+  { table: rulesProfiles, scope: "career" },
+  { table: assignments, scope: "career" },
+  // Parent before child: the evidence rows point at a hypothesis, so a restore must create the hypotheses first.
+  { table: hypotheses, scope: "career" },
+  { table: hypothesisEvidence, scope: "hypothesis" },
   { table: storylineEvents, scope: "storyline" },
 ];
 
@@ -130,11 +142,17 @@ const ALL_CAREER_TABLES = CAREER_TABLES.map((spec) => getTableName(spec.table));
 
 /** Reads one table's rows for a career. */
 function readCareerRows(name: string, spec: CareerTableSpec, careerId: string): Row[] {
-  return spec.scope === "storyline"
-    ? db.all<Row>(
-        sql`SELECT * FROM ${sql.identifier(name)} WHERE storyline_id IN (SELECT id FROM storylines WHERE career_id = ${careerId})`
-      )
-    : db.all<Row>(sql`SELECT * FROM ${sql.identifier(name)} WHERE career_id = ${careerId}`);
+  if (spec.scope === "storyline") {
+    return db.all<Row>(
+      sql`SELECT * FROM ${sql.identifier(name)} WHERE storyline_id IN (SELECT id FROM storylines WHERE career_id = ${careerId})`
+    );
+  }
+  if (spec.scope === "hypothesis") {
+    return db.all<Row>(
+      sql`SELECT * FROM ${sql.identifier(name)} WHERE hypothesis_id IN (SELECT id FROM hypotheses WHERE career_id = ${careerId})`
+    );
+  }
+  return db.all<Row>(sql`SELECT * FROM ${sql.identifier(name)} WHERE career_id = ${careerId}`);
 }
 
 /** Clears one table's rows for a career. Only used ahead of a replace. */
@@ -148,6 +166,12 @@ function deleteCareerRows(
   if (spec.scope === "storyline") {
     tx.run(
       sql`DELETE FROM ${target} WHERE storyline_id IN (SELECT id FROM storylines WHERE career_id = ${careerId})`
+    );
+    return;
+  }
+  if (spec.scope === "hypothesis") {
+    tx.run(
+      sql`DELETE FROM ${target} WHERE hypothesis_id IN (SELECT id FROM hypotheses WHERE career_id = ${careerId})`
     );
     return;
   }

@@ -13,6 +13,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { targetBlocks } from "../db/schema";
+import { normaliseFormationStamp, type FormationStamp } from "../events/tactics-stamp";
 
 /** League points for one match: a loss, a draw, or a win. */
 export type MatchPoints = 0 | 1 | 3;
@@ -36,6 +37,13 @@ export interface BlockMatch {
   goalsAgainst: number | null;
   /** What actually happened, in the manager's own words. */
   note: string | null;
+  /**
+   * The shape this match was played in, when the manager recorded one.
+   *
+   * Stored per match rather than per block because a block is five fixtures and a manager can change shape in the
+   * middle of one. Null means it was never recorded, which is not the same as "no formation".
+   */
+  formation: FormationStamp | null;
 }
 
 export interface TargetBlock {
@@ -134,6 +142,7 @@ function normaliseMatches(raw: Array<Partial<BlockMatch>> | undefined): BlockMat
       goalsFor: toOptionalInt(entry.goalsFor),
       goalsAgainst: toOptionalInt(entry.goalsAgainst),
       note: typeof entry.note === "string" && entry.note.trim() ? entry.note.trim() : null,
+      formation: normaliseFormationStamp(entry.formation),
     };
   });
 }

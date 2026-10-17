@@ -8,6 +8,7 @@ import { careerEvents, debriefMarks } from "../db/schema";
 import { and, eq } from "drizzle-orm";
 import { MatchContribution } from "../events/types";
 import { normaliseMatchStats, type MatchStats } from "../events/match-stats";
+import { normaliseFormationStamp, type FormationStamp } from "../events/tactics-stamp";
 import { at, failed, ok, type OperationResult } from "./types";
 
 export interface MatchDebriefPayload {
@@ -61,6 +62,8 @@ export interface MatchDebriefPayload {
    * him and accepting it, which is his record of what he saw, not the app's read of a save file. The
    * optional `capture` marker records only the method, and its absence means the manager typed it.
    */
+  /** The shape the match was played in, as reported. Null when nothing was recorded. */
+  formation?: FormationStamp | null;
   matchStats?: MatchStats | null;
   /**
    * Where the two clubs stood in the league when they met.
@@ -100,6 +103,7 @@ interface NormalisedDebrief {
   dynamicPrompts: Array<{ id: string; question: string; answer: string }>;
   goalMinutes: number[];
   concededMinutes: number[];
+  formation: FormationStamp | null;
   matchStats: MatchStats | null;
 }
 
@@ -166,8 +170,9 @@ function normaliseDebrief(body: MatchDebriefPayload, carryOver?: MatchStats | nu
     .filter((prompt) => prompt.question.length > 0 && prompt.answer.length > 0);
   const goalMinutes = minutesOf(body.goalMinutes);
   const concededMinutes = minutesOf(body.concededMinutes);
+  const formation = normaliseFormationStamp(body.formation);
   const matchStats = normaliseMatchStats(body.matchStats, carryOver);
-  return { standoutPlayerIds, standoutPlayerNames, contributions, dynamicPrompts, goalMinutes, concededMinutes, matchStats };
+  return { standoutPlayerIds, standoutPlayerNames, contributions, dynamicPrompts, goalMinutes, concededMinutes, formation, matchStats };
 }
 
 /**
@@ -198,6 +203,9 @@ function composeDebriefPayload(body: MatchDebriefPayload, normalised: Normalised
     dynamicPrompts: normalised.dynamicPrompts,
     goalMinutes: normalised.goalMinutes,
     concededMinutes: normalised.concededMinutes,
+    // The shape it was played in, written at the moment of the report and never recomputed: the Tactics tab holds
+    // today's formation, which is a different claim from the one that played.
+    formation: normalised.formation,
     matchStats: normalised.matchStats,
     result: body.homeScore > body.awayScore ? "WIN" : body.homeScore < body.awayScore ? "LOSS" : "DRAW",
     matchDate: asMatchDate(body.matchDate),

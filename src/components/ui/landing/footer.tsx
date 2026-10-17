@@ -12,7 +12,8 @@ export function Footer() {
             TOUCHLINE<span className="text-[#E11D48]">OS</span>
           </span>
           <p className="font-sub text-xs text-slate-500 dark:text-slate-400 mt-0.5 max-w-md">
-            TouchlineOS runs beside your career mode—remembering every squad change, tracking your manager philosophy, and giving every season real narrative weight.
+            It reads your save, remembers every squad change it finds, and reads each block of matches
+            back to you: what the numbers support, what they do not, and what is worth testing next.
           </p>
         </div>
 
