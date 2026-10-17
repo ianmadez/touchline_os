@@ -768,7 +768,7 @@ function DebriefDigest({ digest }: { digest: SeasonDebriefDigest }) {
             <ul className="divide-y divide-slate-100 md:hidden dark:divide-slate-800/60">
               {contributors.map((player) => (
                 <li key={player.name} className="flex items-center gap-3 px-3 py-2 text-xs">
-                  <span className="min-w-0 flex-1 truncate font-sub text-slate-700 dark:text-slate-200">
+                  <span className="min-w-0 flex-1 break-words font-sub text-slate-700 dark:text-slate-200">
                     {player.name}
                   </span>
                   <span className="shrink-0 text-right font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">

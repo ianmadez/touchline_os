@@ -231,13 +231,13 @@ export function DashboardView({
                 {seasonState.outlook?.gamesPlayed ?? 0} matches played
               </span>
             </div>
-            <h2 className="font-heading text-lg text-slate-900 dark:text-slate-100 uppercase tracking-wide truncate">
+            <h2 className="truncate font-heading text-lg text-slate-900 max-md:overflow-visible max-md:whitespace-normal dark:text-slate-100 uppercase tracking-wide">
               {seasonState.objectivePair?.user?.text ??
                 (seasonState.objectivePair?.save?.saveObjectiveCode !== null && seasonState.objectivePair?.save?.saveObjectiveCode !== undefined
                   ? `Save Objective Code: ${seasonState.objectivePair.save.saveObjectiveCode}`
                   : "Target Top 6 Finish")}
             </h2>
-            <div className="flex items-center gap-4 text-xs font-sub text-slate-600 dark:text-slate-400 pt-0.5">
+            <div className="flex flex-wrap items-center gap-4 text-xs font-sub text-slate-600 max-md:gap-x-3 max-md:gap-y-1 dark:text-slate-400 pt-0.5">
               {/* The record and the league position are different universes, so they are labelled
                   apart rather than listed as one run of figures. */}
               <span>
@@ -253,7 +253,7 @@ export function DashboardView({
                   per match
                 </strong>
               </span>
-              <span>•</span>
+              <span className="max-md:hidden">•</span>
               <span>
                 League position:{" "}
                 <strong className="text-emerald-600 dark:text-emerald-400 font-bold">
@@ -268,7 +268,7 @@ export function DashboardView({
           <button
             type="button"
             onClick={() => onNavigateTab("SEASON")}
-            className="px-5 py-2.5 bg-slate-900 dark:bg-slate-100 hover:bg-[#E11D48] dark:hover:bg-[#FF8C7A] text-white dark:text-slate-900 hover:text-white font-sub font-bold text-xs uppercase tracking-wider rounded-xl transition-colors shadow-md cursor-pointer shrink-0 flex items-center gap-2"
+            className="px-5 py-2.5 bg-slate-900 dark:bg-slate-100 hover:bg-[#E11D48] dark:hover:bg-[#FF8C7A] text-white dark:text-slate-900 hover:text-white font-sub font-bold text-xs uppercase tracking-wider rounded-xl transition-colors shadow-md cursor-pointer shrink-0 flex items-center gap-2 max-md:w-full max-md:justify-center"
           >
             <span>View Season Hub</span>
             <span className="text-sm">→</span>
@@ -281,8 +281,8 @@ export function DashboardView({
         <div className="lg:col-span-2 space-y-6">
           {/* Dynamic Storylines Feed: What Matters Right Now */}
           <div data-tour="dashboard-storylines" className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <h2 className="flex min-w-0 flex-wrap items-center gap-2 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
                 <span>What Matters Right Now</span>
                 {unseenStorylines > 0 && (
                   <span
@@ -293,7 +293,7 @@ export function DashboardView({
                   </span>
                 )}
               </h2>
-              <span className="text-xs font-sub text-slate-400 tabular-nums">
+              <span className="max-md:w-full max-md:text-[11px] text-xs font-sub text-slate-400 tabular-nums">
                 {activeStorylineCount} active · Tracked from your save
               </span>
             </div>
@@ -307,11 +307,11 @@ export function DashboardView({
                   return (
                     <div
                       key={story.id}
-                      className="group rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md transition-[border-color,box-shadow] duration-200"
+                      className="group relative rounded-2xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md transition-[border-color,box-shadow] duration-200"
                     >
                       <div className="p-4 space-y-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 max-md:pr-7">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
                             <span
                               className={`shrink-0 text-[10px] font-sub font-bold px-2 py-0.5 rounded-md border ${
                                 CATEGORY_COLOURS[story.category] || CATEGORY_COLOURS.SQUAD_DEPTH
@@ -326,16 +326,18 @@ export function DashboardView({
                             >
                               {severityLabel(story.severity)}
                             </span>
-                            <span className="text-[10px] font-sub text-slate-400 truncate">
+                            <span className="truncate text-[10px] font-sub text-slate-400 max-md:overflow-visible max-md:whitespace-normal">
                               {story.status === "ACTIVE"
                                 ? `${story.daysActive ?? 1} day${(story.daysActive ?? 1) === 1 ? "" : "s"} open`
                                 : statusLabel(story.status)}
                             </span>
                           </div>
-                          <DismissButton
-                            label="Dismiss this storyline"
-                            onDismiss={() => dismissStoryline(careerId, story.id)}
-                          />
+                          <span className="max-md:absolute max-md:right-1.5 max-md:top-1.5 max-md:self-start">
+                            <DismissButton
+                              label="Dismiss this storyline"
+                              onDismiss={() => dismissStoryline(careerId, story.id)}
+                            />
+                          </span>
                         </div>
 
                         {/* The whole card is the affordance, and it opens the thread rather than a tab:
@@ -424,7 +426,7 @@ export function DashboardView({
 
           {/* Operational Squad Intelligence */}
           <div data-tour="dashboard-squad-report" className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
-            <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center justify-between">
+            <h2 className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
               <span>Squad Report</span>
               <span className="text-xs font-sub font-normal text-slate-500 dark:text-slate-400">Live from your save</span>
             </h2>
@@ -432,28 +434,28 @@ export function DashboardView({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Active Formation XI Analysis */}
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800/80 space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-sub font-bold uppercase text-slate-700 dark:text-slate-300">
                     Active Formation XI
                   </span>
-                  <span className="text-[10px] font-sub font-bold px-2 py-0.5 rounded bg-[#E11D48]/15 text-[#E11D48] dark:text-[#FF8C7A] border border-[#E11D48]/30">
+                  <span className="whitespace-nowrap text-[10px] font-sub font-bold px-2 py-0.5 rounded bg-[#E11D48]/15 text-[#E11D48] dark:text-[#FF8C7A] border border-[#E11D48]/30">
                     {filledSlotsCount}/{totalSlotsCount} Pitch Slots
                   </span>
                 </div>
-                <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400 pt-1">
-                  <span>Starting XI Avg: <strong className="text-slate-900 dark:text-slate-100">{startingAvgOvr || "-"} OVR</strong></span>
-                  <span>Bench Avg: <strong className="text-slate-900 dark:text-slate-100">{benchAvgOvr || "-"} OVR</strong></span>
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-slate-600 dark:text-slate-400 pt-1">
+                  <span className="whitespace-nowrap">Starting XI Avg: <strong className="text-slate-900 dark:text-slate-100">{startingAvgOvr || "-"} OVR</strong></span>
+                  <span className="whitespace-nowrap">Bench Avg: <strong className="text-slate-900 dark:text-slate-100">{benchAvgOvr || "-"} OVR</strong></span>
                 </div>
               </div>
 
               {/* Positional Depth */}
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800/80 space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-sub font-bold uppercase text-slate-700 dark:text-slate-300">
                     Positional Depth
                   </span>
                   <span
-                    className={`text-[10px] font-sub font-bold px-2 py-0.5 rounded ${
+                    className={`whitespace-nowrap text-[10px] font-sub font-bold px-2 py-0.5 rounded ${
                       depthGaps.length > 0
                         ? "bg-amber-500/15 text-amber-600 border border-amber-500/30"
                         : "bg-emerald-500/15 text-emerald-600 border border-emerald-500/30"
@@ -548,7 +550,7 @@ export function DashboardView({
                     className="min-w-0 flex-1 text-left p-3 space-y-1 cursor-pointer"
                   >
                     <div className="flex items-center justify-between gap-2 text-[10px] font-sub font-bold uppercase tracking-wider">
-                      <span className="text-[#E11D48] dark:text-[#FF8C7A] truncate">
+                      <span className="min-w-0 truncate text-[#E11D48] max-md:overflow-visible max-md:whitespace-normal dark:text-[#FF8C7A]">
                         {eventLabel(evt.eventType)}
                       </span>
                       <span className="shrink-0 text-slate-400 dark:text-slate-500 normal-case font-medium tracking-normal">

@@ -230,7 +230,7 @@ export function DivisionTablesPanel({ careerId }: { careerId: string }) {
                       {table.division.orderBasis === "SAVE" ? (row.position ?? "-") : index + 1}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-slate-800 dark:text-slate-200">
+                      <span className="block break-words text-sm font-medium text-slate-800 dark:text-slate-200">
                         {row.name}
                       </span>
                       {table.division.hasRecord && (

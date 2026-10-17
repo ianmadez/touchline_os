@@ -1579,17 +1579,18 @@ export function DebriefView({
 
           {/* Scoreline & Venue Row */}
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="font-sub text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                Scoreline & Venue
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+              <span className="whitespace-nowrap font-sub text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                Scoreline &amp; Venue
               </span>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 max-md:w-full">
                 {(["HOME", "AWAY", "NEUTRAL"] as const).map((v) => (
                   <button
                     type="button"
                     key={v}
+                    data-compact
                     onClick={() => setVenue(v)}
-                    className={`px-3 py-1 rounded-lg text-[10px] font-sub font-bold uppercase cursor-pointer border ${
+                    className={`px-3 py-1 rounded-lg text-[10px] font-sub font-bold uppercase cursor-pointer border max-md:min-h-9 max-md:flex-1 max-md:px-1 ${
                       venue === v
                         ? "bg-[#E11D48] text-white border-[#E11D48]"
                         : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800"
@@ -1676,7 +1677,7 @@ export function DebriefView({
 
               {goalSlots > 0 && (
                 <div className="space-y-2">
-                  <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 max-md:overflow-visible max-md:whitespace-normal dark:text-slate-400">
                     {clubName || "Your club"}
                   </span>
                   <div className="flex flex-wrap gap-2">
@@ -1697,7 +1698,7 @@ export function DebriefView({
 
               {concededSlots > 0 && (
                 <div className="space-y-2">
-                  <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 max-md:overflow-visible max-md:whitespace-normal dark:text-slate-400">
                     {opponentLabel || "Opponent"}
                   </span>
                   <div className="flex flex-wrap gap-2">
@@ -1861,7 +1862,7 @@ export function DebriefView({
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 max-md:overflow-visible max-md:whitespace-normal dark:text-slate-400">
                   {clubName || "Your club"}
                 </span>
                 <div className="flex items-end gap-3">
@@ -1887,7 +1888,7 @@ export function DebriefView({
               </div>
 
               <div className="space-y-2">
-                <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 max-md:overflow-visible max-md:whitespace-normal dark:text-slate-400">
                   {opponentLabel || "Opponent"}
                 </span>
                 <div className="flex items-end gap-3">
@@ -1984,11 +1985,11 @@ export function DebriefView({
             )}
 
             <div>
-              <div className="flex items-center justify-between mb-1.5">
+              <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
                 <label className="font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
                   Tactical Plan Adherence (1 to 5)
                 </label>
-                <span className="font-sub text-xs font-bold text-[#E11D48] dark:text-[#FF8C7A]">
+                <span className="shrink-0 font-sub text-xs font-bold tabular-nums text-[#E11D48] dark:text-[#FF8C7A]">
                   {tacticalAdherence} / 5
                 </span>
               </div>

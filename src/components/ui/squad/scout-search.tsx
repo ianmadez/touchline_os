@@ -592,7 +592,7 @@ export function ScoutSearch({ careerId, query }: { careerId: string; query: stri
                         </span>
                         <span className="min-w-0 flex-1">
                           {row.nameResolved ? (
-                            <span className="block truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+                            <span className="block break-words text-sm font-bold text-slate-900 dark:text-slate-100">
                               {row.name}
                             </span>
                           ) : (

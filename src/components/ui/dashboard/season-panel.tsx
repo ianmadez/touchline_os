@@ -84,15 +84,15 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
   };
 
   return (
-    <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 backdrop-blur-xl shadow-xl space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-2">
+    <div className="bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-md:p-4 backdrop-blur-xl shadow-xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <h2 className="flex min-w-0 flex-wrap items-center gap-2 font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
           <span>{outlook.seasonLabel}</span>
-          <span className="text-[10px] font-sub font-bold px-2 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-700">
+          <span className="whitespace-nowrap rounded border border-slate-300 bg-slate-200/70 px-2 py-0.5 text-[10px] font-sub font-bold text-slate-600 max-md:px-1.5 max-md:text-[9px] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
             From your save
           </span>
         </h2>
-        <span className="text-xs font-sub text-slate-400">Tracked from your save</span>
+        <span className="text-xs font-sub text-slate-400 max-md:hidden">Tracked from your save</span>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

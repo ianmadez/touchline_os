@@ -713,7 +713,7 @@ export function PlayerDrawer({
                       className="flex items-center justify-between gap-3"
                     >
                       <span className="min-w-0 font-sans text-xs text-slate-700 dark:text-slate-200">
-                        <span className="truncate">{match.opponent}</span>
+                        <span className="min-w-0 flex-1 break-words">{match.opponent}</span>
                         {match.venue && (
                           <span className="ml-1.5 font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
                             {venueLabel(match.venue)}

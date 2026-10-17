@@ -171,7 +171,9 @@ function Segmented<T extends string>({
     <div
       role="radiogroup"
       aria-label={name}
-      className="flex w-full min-w-0 flex-wrap gap-1 p-1 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800"
+      className={`flex w-full min-w-0 flex-wrap gap-1 p-1 rounded-xl bg-slate-100 max-md:grid max-md:gap-1.5 ${
+        options.length === 3 ? "max-md:grid-cols-3" : "max-md:grid-cols-2"
+      } dark:bg-slate-950 border border-slate-200 dark:border-slate-800`}
     >
       {options.map((option) => {
         const active = value === option;
@@ -182,8 +184,9 @@ function Segmented<T extends string>({
             role="radio"
             aria-checked={active}
             disabled={disabled}
+            data-compact
             onClick={() => onChange(option)}
-            className={`max-w-full whitespace-normal text-center px-3 py-1.5 rounded-lg font-sub text-[11px] font-bold uppercase cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            className={`max-w-full whitespace-normal text-center px-3 py-1.5 rounded-lg font-sub text-[11px] font-bold uppercase cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed max-md:min-h-10 max-md:w-full max-md:whitespace-nowrap max-md:px-2 max-md:py-2 max-md:text-[10px] ${
               active
                 ? "bg-[#E11D48] text-white"
                 : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800"

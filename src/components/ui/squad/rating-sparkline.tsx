@@ -237,7 +237,7 @@ export function RatingSparkline({
       <div className="mt-1.5 flex min-h-[2.25rem] items-center justify-between gap-3">
         <div className="min-w-0">
           {active ? (
-            <p className="truncate font-sans text-xs text-slate-700 dark:text-slate-200">
+            <p className="break-words font-sans text-xs text-slate-700 dark:text-slate-200">
               <span className="font-bold">{active.opponent}</span>
               {active.venue && (
                 <span className="ml-1.5 font-sub text-[10px] uppercase tracking-wider text-slate-400 dark:text-slate-500">

@@ -68,7 +68,7 @@ export function Navbar({
         only appear once there is something to separate the bar from - so the resting page looks flat
         and the scrolled page has a defined edge. */}
     <header
-      className={`sticky top-0 z-50 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b px-4 py-3 text-slate-900 transition-[background-color,border-color,box-shadow] duration-200 dark:text-white ${
+      className={`sticky top-0 z-50 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b px-4 py-3 max-md:gap-2 max-md:px-3 text-slate-900 transition-[background-color,border-color,box-shadow] duration-200 dark:text-white ${
         scrolled
           ? "bg-white/95 dark:bg-slate-950/95 border-slate-200 dark:border-slate-800 backdrop-blur-xl shadow-sm dark:shadow-2xl"
           : "bg-white/80 dark:bg-slate-950/70 border-transparent backdrop-blur-md"
@@ -154,7 +154,7 @@ export function Navbar({
       </nav>
 
       {/* Right Action Cluster */}
-      <div className="flex items-center gap-2 sm:gap-3 justify-self-end shrink-0">
+      <div className="flex items-center gap-2 max-md:gap-1.5 sm:gap-3 justify-self-end shrink-0">
         {/*
           Landing only, and inside this cluster rather than as its own grid child: as a separate
           child it was the header's fourth item in a three-column grid, so it pushed the theme
@@ -206,9 +206,10 @@ export function Navbar({
         {isLanding && (
           <button
             onClick={() => onSelectTab("PORTAL")}
-            className="px-4 py-2 bg-[#E11D48] hover:bg-[#FF8C7A] text-white font-heading text-xs font-bold uppercase rounded-xl shadow-md transition-[background-color,box-shadow,transform] duration-200 hover:scale-102 active:scale-[0.96] hover:-translate-y-0.5 cursor-pointer"
+            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl bg-[#E11D48] px-4 py-2 text-white font-heading text-xs font-bold uppercase shadow-md transition-[background-color,box-shadow,transform] duration-200 hover:scale-102 hover:bg-[#FF8C7A] active:scale-[0.96] hover:-translate-y-0.5 max-md:min-h-10 max-md:shrink-0 max-md:gap-1 max-md:px-3 max-md:py-0 max-md:text-[10px] max-md:tracking-wide cursor-pointer"
           >
-            Enter Portal →
+            <span>Enter Portal</span>
+            <span aria-hidden="true">→</span>
           </button>
         )}
       </div>

@@ -181,7 +181,7 @@ export function AttributeBars({
                 const value = typeof raw === "number" ? raw : null;
                 return (
                   <li key={field.key} className="flex items-center gap-3">
-                    <span className="w-32 shrink-0 truncate font-sans text-dense text-slate-600 dark:text-slate-300">
+                    <span className="w-32 shrink-0 truncate font-sans text-dense text-slate-600 max-md:w-24 max-md:overflow-visible max-md:whitespace-normal dark:text-slate-300">
                       {field.label}
                     </span>
                     <span className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">

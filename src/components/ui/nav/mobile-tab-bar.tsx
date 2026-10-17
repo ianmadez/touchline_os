@@ -46,10 +46,10 @@ export function MobileTabBar({
                 data-tour={`tab-${tab.id}`}
                 aria-current={isActive ? "page" : undefined}
                 onClick={() => onSelectTab(tab.id)}
-                className={`flex min-h-14 flex-col items-center justify-center gap-0.5 px-1 font-sub text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                className={`mx-1 my-1 flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl px-1 font-sub text-[10px] font-bold uppercase tracking-wider transition-[background-color,color,box-shadow,transform] duration-150 active:scale-[0.97] cursor-pointer ${
                   isActive
-                    ? "text-[#E11D48] dark:text-[#FF8C7A]"
-                    : "text-slate-500 dark:text-slate-400"
+                    ? "bg-slate-200/80 text-[#E11D48] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_0_rgba(15,23,42,0.10),1px_1px_0_rgba(15,23,42,0.05)] dark:bg-slate-800 dark:text-[#FF8C7A] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_0_rgba(0,0,0,0.6)]"
+                    : "text-slate-500 active:bg-slate-100 dark:text-slate-400 dark:active:bg-slate-800/60"
                 }`}
               >
                 <Icon className="h-5 w-5" />
@@ -64,10 +64,10 @@ export function MobileTabBar({
             aria-haspopup="dialog"
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen(true)}
-            className={`flex min-h-14 flex-col items-center justify-center gap-0.5 px-1 font-sub text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+            className={`mx-1 my-1 flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl px-1 font-sub text-[10px] font-bold uppercase tracking-wider transition-[background-color,color,box-shadow,transform] duration-150 active:scale-[0.97] cursor-pointer ${
               overflowActive
-                ? "text-[#E11D48] dark:text-[#FF8C7A]"
-                : "text-slate-500 dark:text-slate-400"
+                ? "bg-slate-200/80 text-[#E11D48] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_0_rgba(15,23,42,0.10),1px_1px_0_rgba(15,23,42,0.05)] dark:bg-slate-800 dark:text-[#FF8C7A] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_0_rgba(0,0,0,0.6)]"
+                : "text-slate-500 active:bg-slate-100 dark:text-slate-400 dark:active:bg-slate-800/60"
             }`}
           >
             <svg

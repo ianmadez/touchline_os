@@ -153,21 +153,21 @@ body {
     scroll-margin-block: 1.5rem 40dvh;
   }
 
-  button,
-  [role="button"],
-  select,
+  /*
+    `:not([data-compact])` rather than a `[data-compact] { min-height: revert }` override: an
+    unlayered rule here beats Tailwind's layered utilities regardless of specificity, so a compact
+    control could not set its own height. Excluding it from the selector lets `max-md:min-h-9` win.
+  */
+  button:not([data-compact]),
+  [role="button"]:not([data-compact]),
+  select:not([data-compact]),
   label:has(> input[type="checkbox"]),
   label:has(> input[type="radio"]) {
     min-height: 44px;
   }
 
-  button[aria-label] {
+  button[aria-label]:not([data-compact]) {
     min-width: 44px;
-  }
-
-  [data-compact] {
-    min-height: revert;
-    min-width: revert;
   }
 }
 
@@ -187,6 +187,19 @@ button,
   .pb-mobile-bar {
     padding-bottom: 5rem;
   }
+}
+
+/*
+  A horizontally scrolling strip keeps its own scrollbar out of the way. These strips are one row of
+  tabs on a phone, and a visible scrollbar under them reads as a broken table rather than a control.
+  The strip itself says it scrolls with an edge fade and a chevron, added by `TabStrip`.
+*/
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* Stop headings from leaving a single orphaned word on the last line. */

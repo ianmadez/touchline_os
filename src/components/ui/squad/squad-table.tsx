@@ -654,7 +654,7 @@ export function SquadTable({
                   <PlayerFace eaPlayerId={player.eaPlayerId} name={player.name} size={40} />
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline justify-between gap-2">
-                      <span className="truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+                      <span className="break-words text-sm font-bold text-slate-900 dark:text-slate-100">
                         {player.name}
                       </span>
                       <span className="shrink-0 font-heading text-sm font-bold text-amber-600 dark:text-amber-400">
@@ -721,7 +721,7 @@ export function SquadTable({
                 <span className="flex items-center gap-3">
                   <PlayerFace eaPlayerId={player.eaPlayerId} name={player.name} size={40} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-bold text-slate-900 dark:text-slate-100">
+                    <span className="block break-words text-sm font-bold text-slate-900 dark:text-slate-100">
                       {player.userProfile?.displayName || player.name}
                     </span>
                     <span className="mt-0.5 block font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">

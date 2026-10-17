@@ -5,6 +5,7 @@ import type { SeasonState, SeasonRecord } from "@/lib/services/season-service";
 import type { TargetBlock } from "@/lib/services/target-block-service";
 import { leagueLabel } from "@/lib/ui/leagues";
 import { SeasonPanel } from "@/components/ui/dashboard/season-panel";
+import { TAB_SEGMENT_CLASS, TabStrip } from "@/components/ui/sub-tabs";
 import { SeasonVaultView } from "./season-vault-view";
 import { SeasonHandoverBanner } from "./season-handover-banner";
 import { TrophyCabinet } from "./trophy-cabinet";
@@ -155,7 +156,7 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
         />
       )}
       {/* Header + sub-nav — fixed, never scrolls */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90 dark:shadow-md dark:shadow-slate-950/50">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white/90 p-6 max-md:p-4 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90 dark:shadow-md dark:shadow-slate-950/50">
         <div>
           <div className="mb-1 flex items-center gap-2 text-xs font-sub font-bold uppercase tracking-wider text-[#E11D48] dark:text-[#FF8C7A]">
             <span>{outlook ? outlook.seasonLabel : "No season synced yet"}</span>
@@ -165,17 +166,18 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
           </h1>
         </div>
 
-        <div data-tour="season-subtabs" role="tablist" className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 dark:border-slate-800 dark:bg-slate-950">
+        <TabStrip tour="season-subtabs" activeKey={activeSubTab} className="max-md:w-full">
           {SUB_TABS.map((tab) => (
             <button
               key={tab}
               type="button"
               role="tab"
               aria-selected={activeSubTab === tab}
+              data-compact
               data-subtab={tab}
               data-tour={`season-subtab-${tab}`}
               onClick={() => setActiveSubTab(tab)}
-              className={`cursor-pointer rounded-lg px-4 py-2 text-xs font-sub font-bold uppercase tracking-wider transition-[background-color,color,box-shadow] duration-200 ease-[var(--ease-brand)] ${
+              className={`${TAB_SEGMENT_CLASS} cursor-pointer rounded-lg px-4 py-2 text-xs font-sub font-bold uppercase tracking-wider transition-[background-color,color,box-shadow] duration-200 ease-[var(--ease-brand)] ${
                 activeSubTab === tab
                   ? "bg-[#E11D48] text-white shadow-sm shadow-rose-600/20"
                   : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
@@ -184,7 +186,7 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
               {SUB_TAB_LABELS[tab]}
             </button>
           ))}
-        </div>
+        </TabStrip>
       </div>
 
       {/* Body — the only scroll region on this screen */}
@@ -225,19 +227,16 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
               as one long scroll with no end. Nothing here reaches the outer sub-tab list, because a
               manager looking at his own season should not have to walk past forty other tables.
             */}
-            <div
-              role="tablist"
-              aria-label="Trends"
-              className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 dark:border-slate-800 dark:bg-slate-950"
-            >
+            <TabStrip label="Trends" activeKey={trendsTab} className="max-md:w-full">
               {TRENDS_TABS.map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   role="tab"
                   aria-selected={trendsTab === tab.id}
+                  data-compact
                   onClick={() => setTrendsTab(tab.id)}
-                  className={`cursor-pointer rounded-lg px-4 py-2 font-sub text-xs font-bold uppercase tracking-wider transition-[background-color,color,box-shadow] duration-200 ease-[var(--ease-brand)] ${
+                  className={`${TAB_SEGMENT_CLASS} cursor-pointer rounded-lg px-4 py-2 font-sub text-xs font-bold uppercase tracking-wider transition-[background-color,color,box-shadow] duration-200 ease-[var(--ease-brand)] ${
                     trendsTab === tab.id
                       ? "bg-[#E11D48] text-white shadow-sm shadow-rose-600/20"
                       : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
@@ -246,7 +245,7 @@ export function SeasonView({ careerId, seasonState, onSeasonChange, focusSubTab 
                   {tab.label}
                 </button>
               ))}
-            </div>
+            </TabStrip>
 
             {trendsTab === "SEASON" && (
               <div className="space-y-6">
@@ -307,9 +306,9 @@ function SeasonHistoryTable({
   }
 
   return (
-    <div data-tour="season-history" className="space-y-4 rounded-2xl border border-slate-200/80 bg-white/90 p-6 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90 dark:shadow-md dark:shadow-slate-950/50">
-      <div className="flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-800">
-        <div>
+    <div data-tour="season-history" className="space-y-4 rounded-2xl border border-slate-200/80 bg-white/90 p-6 max-md:p-4 shadow-sm backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-900/90 dark:shadow-md dark:shadow-slate-950/50">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3 dark:border-slate-800">
+        <div className="min-w-0">
           <h2 className="font-heading text-sm uppercase tracking-wider text-slate-900 dark:text-slate-100">
             Managerial Record
           </h2>
@@ -318,7 +317,7 @@ function SeasonHistoryTable({
             all competitions.
           </p>
         </div>
-        <span className="rounded border border-[#E11D48]/30 bg-[#E11D48]/15 px-2.5 py-1 text-xs font-sub font-bold text-[#E11D48] dark:text-[#FF8C7A]">
+        <span className="shrink-0 whitespace-nowrap rounded border border-[#E11D48]/30 bg-[#E11D48]/15 px-2.5 py-1 text-xs font-sub font-bold text-[#E11D48] max-md:px-2 max-md:text-[10px] dark:text-[#FF8C7A]">
           {seasons.length} season{seasons.length === 1 ? "" : "s"} on record
         </span>
       </div>
@@ -392,7 +391,7 @@ function SeasonHistoryTable({
                 <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">
                   {leagueLabel(s.leagueName, s.leagueId)}
                 </p>
-                <dl className="mt-2 grid grid-cols-4 gap-2 text-center">
+                <dl className="mt-2 grid grid-cols-4 gap-1.5 text-center max-md:gap-1">
                   {[
                     ["P", s.gamesPlayed ?? "—"],
                     [
@@ -404,11 +403,11 @@ function SeasonHistoryTable({
                     ["GF:GA", hasGoals ? `${s.goalsFor}:${s.goalsAgainst}` : "—"],
                     ["PTS", s.points ?? "—"],
                   ].map(([label, value]) => (
-                    <div key={String(label)} className="rounded-lg bg-slate-50 px-1 py-1.5 dark:bg-slate-950/60">
+                    <div key={String(label)} className="min-w-0 rounded-lg bg-slate-50 px-1 py-1.5 max-md:px-0.5 dark:bg-slate-950/60">
                       <dt className="font-sub text-[9px] uppercase tracking-wider text-slate-400 dark:text-slate-500">
                         {label}
                       </dt>
-                      <dd className="font-bold tabular-nums text-slate-800 dark:text-slate-200">{value}</dd>
+                      <dd className="whitespace-nowrap font-bold tabular-nums text-slate-800 max-md:text-[11px] dark:text-slate-200">{value}</dd>
                     </div>
                   ))}
                 </dl>

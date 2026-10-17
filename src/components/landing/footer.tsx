@@ -15,12 +15,12 @@ export function Footer() {
           </p>
         </div>
 
-        <div className="flex items-center gap-6 font-sub text-xs text-slate-500 dark:text-slate-400">
-          <span>Runs On Your PC</span>
-          <span>•</span>
-          <span>Full History Kept</span>
-          <span>•</span>
-          <span>Nothing Rewritten</span>
+        <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center font-sub text-xs text-slate-500 sm:gap-6 dark:text-slate-400">
+          <span className="whitespace-nowrap">Runs On Your PC</span>
+          <span aria-hidden="true">•</span>
+          <span className="whitespace-nowrap">Full History Kept</span>
+          <span aria-hidden="true">•</span>
+          <span className="whitespace-nowrap">Nothing Rewritten</span>
         </div>
       </div>
     </footer>

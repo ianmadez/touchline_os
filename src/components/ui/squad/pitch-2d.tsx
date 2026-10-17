@@ -454,7 +454,7 @@ export function Pitch2D({
                     )}
                   </div>
 
-                  <div className="text-micro font-bold text-slate-100 truncate px-0.5 sm:text-xs">
+                  <div className="line-clamp-2 break-words text-micro font-bold text-slate-100 px-0.5 max-md:leading-tight sm:text-xs md:line-clamp-none md:truncate">
                     {currentSlotData?.playerName || (
                       <span className="text-slate-500 italic font-normal text-[10px]">
                         Select Player

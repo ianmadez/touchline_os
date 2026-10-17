@@ -1448,41 +1448,41 @@ export default function TouchlineApp() {
               to more than one screen of height on a laptop, and clipping that hid the footer entirely. */}
           <div className="absolute inset-0 flex flex-col justify-between gap-6 overflow-y-auto overscroll-contain p-4 sm:p-8 lg:p-10">
               {/* Top Bar */}
-              <div className="relative z-10 flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4 animate-slide-in-top">
+              <div className="relative z-10 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-slate-200 dark:border-slate-800 pb-4 max-md:flex-col max-md:items-start max-md:gap-y-1.5 animate-slide-in-top">
                 <span className="font-heading text-xl tracking-wider text-slate-900 dark:text-slate-100">
                   TOUCHLINE<span className="text-[#E11D48]">OS</span>
                 </span>
-                <span className="font-sub text-xs text-slate-400 font-bold uppercase tracking-widest">
+                <span className="font-sub text-xs text-slate-400 font-bold uppercase tracking-widest max-md:text-[10px] max-md:tracking-[0.18em]">
                   START TRACKING YOUR SAVE
                 </span>
               </div>
 
               {/* Expansive Main Menu Grid */}
-              <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center max-w-6xl w-full mx-auto py-2">
+              <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-10 max-md:gap-5 items-center max-w-6xl w-full mx-auto py-2">
               {/* Left: the mark sits beside the words, both flush to the same left edge. The asset is
                   pre-cropped (public/touchlineOS-mark.png) because the original carried roughly 55%
                   transparent padding, which made every height setting look small.
 
                   The entrance is staged rather than one block sliding in: the mark settles first, then the words
                   follow it 80ms apart, so the eye reads the brand before the club. */}
-              <div className="lg:col-span-7 flex items-center gap-5 sm:gap-8 text-left">
+              <div className="lg:col-span-7 flex items-center gap-5 sm:gap-8 text-left max-md:flex-col max-md:items-start max-md:gap-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src="/touchlineOS-mark.png"
                   alt="TouchlineOS"
-                  className="h-24 sm:h-36 lg:h-44 w-auto shrink-0 animate-splash-logo drop-shadow-2xl"
+                  className="h-24 sm:h-36 lg:h-44 w-auto shrink-0 animate-splash-logo drop-shadow-2xl max-md:h-14"
                   onError={(e) => {
                     (e.target as HTMLElement).style.display = "none";
                   }}
                 />
                 <div className="space-y-1.5 min-w-0">
-                  <span className="animate-os-word font-sub text-xs text-[#E11D48] font-bold uppercase tracking-widest block [animation-delay:120ms]">
+                  <span className="animate-os-word font-sub text-xs text-[#E11D48] font-bold uppercase tracking-widest block max-md:text-[10px] max-md:tracking-[0.16em] [animation-delay:120ms]">
                     Turn Your Save Into A Living Managerial Career.
                   </span>
-                  <h1 className="animate-os-word font-heading text-3xl sm:text-5xl text-slate-900 dark:text-slate-100 uppercase tracking-tight leading-none break-words [animation-delay:200ms]">
+                  <h1 className="animate-os-word font-heading text-3xl sm:text-5xl text-slate-900 dark:text-slate-100 uppercase tracking-tight leading-none max-md:text-2xl max-md:leading-tight [animation-delay:200ms]">
                     {careerInfo.clubName || "TOUCHLINE HUB"}
                   </h1>
-                  <p className="animate-os-word font-sub text-sm text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider pt-1 [animation-delay:300ms]">
+                  <p className="animate-os-word font-sub text-sm text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wider pt-1 max-md:text-xs [animation-delay:300ms]">
                     MANAGER: {careerInfo.managerName || "UNASSIGNED"}
                   </p>
                 </div>
@@ -1490,7 +1490,7 @@ export default function TouchlineApp() {
 
               {/* Right Column: save sync, then the game-style action stack. It follows the words by a beat rather
                   than arriving with them, so the menu reads as one sequence rather than a wall appearing at once. */}
-              <div className="lg:col-span-5 flex flex-col space-y-3 w-full max-w-sm ml-auto animate-slide-in-bottom [animation-delay:360ms]">
+              <div className="lg:col-span-5 flex flex-col space-y-3 w-full max-w-sm ml-auto max-md:ml-0 max-md:max-w-none animate-slide-in-bottom [animation-delay:360ms]">
                 <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur px-4 py-3.5 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -1514,7 +1514,7 @@ export default function TouchlineApp() {
                     <>
                       <p className="font-sub text-xs font-bold text-slate-900 dark:text-slate-100 break-all">
                         {latestSaveCandidate.fileName}
-                        <span className="ml-2 font-normal text-slate-500 dark:text-slate-400">
+                        <span className="ml-2 whitespace-nowrap font-normal text-slate-500 dark:text-slate-400">
                           {(latestSaveCandidate.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB
                         </span>
                       </p>
