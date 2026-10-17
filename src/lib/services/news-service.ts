@@ -508,6 +508,8 @@ function toMatch(
     concededMinutes: asMinutes(payload.concededMinutes),
     shots: stats ? asNumber(stats.shots) : null,
     shotsInsideBox: stats ? asNumber(stats.shotsInsideBox) : null,
+    // Read for one reason only: the expected goals figure of a row logged before the game's own figure had a box.
+    // Nothing writes a big chance count any more, so this is null on every current debrief.
     bigChances: stats ? asNumber(stats.bigChances) : null,
     expectedGoalsReported: stats ? asNumber(stats.expectedGoalsReported) : null,
     comment: comments.get(eventId)?.comment ?? null,

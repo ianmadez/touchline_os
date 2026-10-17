@@ -1,56 +1,158 @@
 /**
  * What a post match Match Facts screen looks like, as data.
  *
- * This module is the only place in the app that knows the shape of the screen the scanner reads. Adding a new
- * game version, a new stat group, or a spelling the OCR mangles is an edit HERE and nothing else: the row
- * banding, the label matcher, the number reader and the validator all work from these tables.
+ * This module is the only place in the app that knows the shape of the screens the scanner reads. Adding a game
+ * version, a screen, or a spelling the OCR mangles is an edit HERE and nothing else: the row banding, the label
+ * matcher, the number reader and the checks all work from these tables.
  *
- * WHERE THE KNOWLEDGE COMES FROM. Five captures in `references/match-stats/`: one clean FC25 capture
- * (1280x720) and one phone photo of an FC26 TV (800x1067), which between them are row for row identical and
- * therefore pin one profile, plus three FIFA17 to 19 crops. The older games are a different screen - no tab
- * bar, no expected goals, no passes, no saves - and are deliberately NOT described here. A legacy profile is a
- * second entry in `PROFILES` when anyone wants it, and nothing else in the codebase would change.
+ * FOUR SCREENS, ONE TABLE EACH. A screen is a list of SECTIONS and a section is a list of rows, and every row
+ * carries the key its figure is stored under. The Summary screen has been measured against real captures. The
+ * other three are written from the captures the manager transcribed, and ship DISABLED until their own captures
+ * prove every required row and every check: a screen nobody has measured fills boxes with figures nobody has
+ * looked at. See `enabled` on each screen.
  *
- * THE TWO RULES THIS TABLE ENFORCES.
+ * LABELS RESOLVE INSIDE THE CLASSIFIED SCREEN AND ITS SECTION. "Set Pieces" is a row on both Shooting and
+ * Passing, and "Interceptions", "Saves" and "Yellow Cards" are rows on both Summary and Defending, so the screen
+ * is what keeps those apart, and it is decided by CONTENT rather than by the tab bar: six words in small type,
+ * where one misread letter would move the read onto another screen's rows. Within a screen the section is tried
+ * first and the rest of the screen is the fallback, so a misread section heading cannot cost a row its figure.
  *
- * 1. A row we have no field for gets `field: null`. It is still listed, because the label matcher needs it to
- *    recognise the screen, but a null bound row produces no observation, is never counted as missing, and is
- *    never reported as something the scanner failed to read. That is how "do not force the scanner to capture
- *    what a screen does not carry" is enforced in the data rather than in a conditional somewhere downstream.
+ * WHAT IS NOT READ. Possession and Events are not described at all: no capture of either has been supplied, and
+ * a screen described from imagination is a screen that claims figures nobody has looked at. The defensive line
+ * break counts are left out for the same reason.
  *
- *    Two of the app's five manual boxes, shots inside the box and big chances, are bound to no row at all,
- *    because no capture carries them. They stay manager entered figures. If a Shooting capture turns out to
- *    carry them, binding them is two lines in `SUMMARY_ROWS`.
- *
- * 2. Every row label here has been READ on a capture. Red Cards is not listed: both captures cut off above it,
- *    so its label is not evidenced, and inferring it from the Yellow Cards pairing is exactly the kind of
- *    guess this module exists to avoid. It arrives when the scrolled capture does.
+ * The row ORDER is recorded because it is a fallback: when a label fails to match, the pipeline can still read
+ * the band at that position, which only works if the order is known.
  */
 
 /**
- * The figures a row can feed.
+ * The stored keys, screen by screen.
  *
- * A named union rather than `keyof MatchStats`, so the payload's metadata keys (`capture`) and anything added
- * later cannot be bound to a row by accident. The Phase 2 group's field names join this union when that phase
- * binds them.
+ * These ARE the keys the manager's own transcription uses, so what is read off a screen and what is stored are
+ * the same names all the way through: a group of facts reads as the screen reads.
  */
-export type StatFieldKey =
+export type SummaryKey =
+  | "possessionPct"
+  | "ballRecoverySeconds"
   | "shots"
-  | "shotsInsideBox"
-  | "bigChances"
-  | "possession"
-  | "passesCompleted"
-  | "expectedGoalsReported";
+  | "expectedGoals"
+  | "passes"
+  | "tackles"
+  | "tacklesWon"
+  | "interceptions"
+  | "saves"
+  | "foulsCommitted"
+  | "offsides"
+  | "corners"
+  | "freeKicks"
+  | "penaltyKicks"
+  | "yellowCards"
+  | "redCards";
 
-/** One row of a stat table, as the label reads on screen, and the field it feeds. */
-export interface RowLabel {
+export type ShootingKey =
+  | "totalShots"
+  | "onTarget"
+  | "offTarget"
+  | "blocked"
+  | "normal"
+  | "finesse"
+  | "header"
+  | "power"
+  | "volley"
+  | "chip"
+  | "setPieces"
+  | "insideBox"
+  | "outsideBox"
+  | "nearSide"
+  | "farSide";
+
+export type PassingKey =
+  | "totalPasses"
+  | "completed"
+  | "intercepted"
+  | "offside"
+  | "other"
+  | "ground"
+  | "lob"
+  | "through"
+  | "lobbedThrough"
+  | "cross"
+  | "setPieces"
+  | "keyPass"
+  | "firstTime"
+  | "passAndGo"
+  | "downWing"
+  | "breakaway";
+
+export type DefendingKey =
+  | "standingTackles"
+  | "standingTacklesWon"
+  | "slidingTackles"
+  | "slidingTacklesWon"
+  | "interceptions"
+  | "blocks"
+  | "saves"
+  | "clearances"
+  | "offensiveDuelsWon"
+  | "defensiveDuelsWon"
+  | "aerialDuelsWon"
+  | "beatenByOpponent"
+  | "foulsCommitted"
+  | "penaltiesCommitted"
+  | "yellowCards"
+  | "redCards";
+
+/** The four screens the Match Facts pages carry that this app has any business reading. */
+export type ScreenId = "SUMMARY" | "SHOOTING" | "PASSING" | "DEFENDING";
+
+export type FactKey = SummaryKey | ShootingKey | PassingKey | DefendingKey;
+
+/** One row of a screen, as the label reads on it, and the key the figure is stored under. */
+export interface FactRow {
   /**
    * Every spelling seen on a capture, already lowercased. The matcher normalises further (case, punctuation,
    * spacing), so this is where genuine alternative wordings go rather than every mangling the OCR produces.
    */
   aliases: string[];
-  /** The field to fill, or null when this row is on the screen and is not something we record. */
-  field: StatFieldKey | null;
+  /** The key this row is stored under, or null for a row listed only to recognise the screen. */
+  key: FactKey | null;
+  /**
+   * True when the row is visible without scrolling.
+   *
+   * A group is stored all or nothing, and this is the line: every required row read, or none of the screen is
+   * kept. Half a screen is a set of figures with no way to tell which half is missing, and the sums above it
+   * would decide the truth of a group without saying so.
+   */
+  required: boolean;
+  /** True for the two figures the screen prints with a decimal. */
+  decimal?: boolean;
+}
+
+/** A run of rows under one heading. The heading is tracked so a label can be resolved inside its section. */
+export interface FactSection {
+  /**
+   * The heading as it reads on screen, lowercased, or "" for rows that sit under no evidenced heading.
+   *
+   * An empty heading is deliberately not matched: a section whose heading nobody has read yet still resolves its
+   * rows through the whole screen, where the fallback is, rather than through a heading invented to look tidy.
+   */
+  heading: string;
+  rows: FactRow[];
+}
+
+export interface FactScreen {
+  id: ScreenId;
+  /** How the screen is named in a sentence to the manager. */
+  label: string;
+  /** Words that appear only on this screen, which is how it is told apart from the others. */
+  signatures: string[];
+  sections: FactSection[];
+  /** True when the screen is taller than a capture, so a second one at another offset is normal input. */
+  scrolls: boolean;
+  /** False means the scanner does not read this screen at all. */
+  enabled: boolean;
+  /** One line on why a screen is disabled. Null when it is enabled. */
+  disabledBecause: string | null;
 }
 
 /**
@@ -65,21 +167,6 @@ export interface Columns {
   right: readonly [number, number];
 }
 
-export interface StatGroup {
-  id: string;
-  /**
-   * Words that appear only on this group's screen, used to tell the groups apart when a label match is
-   * ambiguous. Empty means the group is identified by its labels alone.
-   */
-  signatures: string[];
-  labels: RowLabel[];
-  /**
-   * True when the group is taller than the screen, so one capture cannot be complete and a second one at a
-   * different scroll offset is a normal input rather than a failure. The Summary group is 20 rows; 15 fit.
-   */
-  scrolls: boolean;
-}
-
 export interface LayoutProfile {
   /** Stored in `matchStats.capture.layout`. Internal: never shown to the manager, never chosen by them. */
   id: string;
@@ -87,7 +174,8 @@ export interface LayoutProfile {
   versions: string[];
   /** The group tab bar, in screen order, as read on the captures. */
   groupTabs: string[];
-  groups: StatGroup[];
+  /** Every screen this profile knows, in tab order. Disabled ones are described but not read. */
+  screens: FactScreen[];
   columns: Columns;
   /** Where the two club names sit, as a fraction of the image height, for the side cross-check. */
   headerBand: { top: number; bottom: number };
@@ -100,36 +188,166 @@ export interface LayoutProfile {
 /**
  * The Summary rows, in screen order, from the clean FC25 capture.
  *
- * The order is recorded because it is a fallback: when a label fails to match, the pipeline falls back to
- * reading the band at that position, which only works if the order is known.
+ * Fifteen of these are visible without scrolling, which is what makes them required. Red Cards sits below the
+ * fold: it is stored whenever it is on the capture and never counted as missing, because a screen that scrolls
+ * is not a screen that failed.
  *
- * Five of these fifteen rows feed a field we record. The other ten are listed so the screen is recognised and
- * so a label match never lands on the wrong row, and they are skipped in silence.
+ * The four defensive line break counts sit under Red Cards and are NOT listed: no capture of them has been
+ * supplied, so nothing here claims to read them.
  */
-const SUMMARY_ROWS: RowLabel[] = [
-  { aliases: ["possession %", "possession"], field: "possession" },
-  { aliases: ["ball recovery time (seconds)", "ball recovery time", "ball recovery"], field: null },
-  { aliases: ["shots"], field: "shots" },
-  { aliases: ["expected goals", "expected goal"], field: "expectedGoalsReported" },
-  { aliases: ["passes"], field: "passesCompleted" },
-  { aliases: ["tackles"], field: null },
-  { aliases: ["tackles won"], field: null },
-  { aliases: ["interceptions"], field: null },
-  { aliases: ["saves", "save"], field: null },
-  { aliases: ["fouls committed", "fouls"], field: null },
-  { aliases: ["offsides", "offside"], field: null },
-  { aliases: ["corners", "corner"], field: null },
-  { aliases: ["free kicks", "free kick"], field: null },
-  { aliases: ["penalty kicks", "penalty kick", "penalties"], field: null },
-  { aliases: ["yellow cards", "yellow card"], field: null },
+const SUMMARY_ROWS: FactRow[] = [
+  { aliases: ["possession %", "possession"], key: "possessionPct", required: true },
+  { aliases: ["ball recovery time (seconds)", "ball recovery time", "ball recovery"], key: "ballRecoverySeconds", required: true, decimal: true },
+  { aliases: ["shots"], key: "shots", required: true },
+  { aliases: ["expected goals", "expected goal"], key: "expectedGoals", required: true, decimal: true },
+  { aliases: ["passes"], key: "passes", required: true },
+  { aliases: ["tackles"], key: "tackles", required: true },
+  { aliases: ["tackles won"], key: "tacklesWon", required: true },
+  { aliases: ["interceptions"], key: "interceptions", required: true },
+  { aliases: ["saves", "save"], key: "saves", required: true },
+  { aliases: ["fouls committed", "fouls"], key: "foulsCommitted", required: true },
+  { aliases: ["offsides", "offside"], key: "offsides", required: true },
+  { aliases: ["corners", "corner"], key: "corners", required: true },
+  { aliases: ["free kicks", "free kick"], key: "freeKicks", required: true },
+  { aliases: ["penalty kicks", "penalty kick", "penalties"], key: "penaltyKicks", required: true },
+  { aliases: ["yellow cards", "yellow card"], key: "yellowCards", required: true },
+  { aliases: ["red cards", "red card"], key: "redCards", required: false },
 ];
 
-const SUMMARY: StatGroup = {
-  id: "SUMMARY",
-  signatures: ["summary"],
-  labels: SUMMARY_ROWS,
-  scrolls: true,
-};
+/**
+ * The Shooting rows, in the order the manager transcribed them.
+ *
+ * The four shot-accuracy rows sit under the first heading the manager read on this screen, "Shot Type", because
+ * that is the only section heading evidenced on it before the type rows begin. If a capture shows them under a
+ * heading of their own the row list does not change: matching falls back to the whole screen, so a heading is
+ * only ever used to tell two same-named rows apart.
+ */
+const SHOOTING_ROWS: FactRow[] = [
+  { aliases: ["total shots", "shots"], key: "totalShots", required: true },
+  { aliases: ["on target"], key: "onTarget", required: true },
+  { aliases: ["off target"], key: "offTarget", required: true },
+  { aliases: ["blocked"], key: "blocked", required: true },
+  { aliases: ["normal"], key: "normal", required: true },
+  { aliases: ["finesse"], key: "finesse", required: true },
+  { aliases: ["header", "headed"], key: "header", required: true },
+  { aliases: ["power"], key: "power", required: true },
+  { aliases: ["volley"], key: "volley", required: true },
+  { aliases: ["chip"], key: "chip", required: true },
+  { aliases: ["set pieces", "set piece"], key: "setPieces", required: true },
+  { aliases: ["inside the box", "inside box"], key: "insideBox", required: true },
+  { aliases: ["outside the box", "outside box"], key: "outsideBox", required: true },
+  { aliases: ["near side", "nearside"], key: "nearSide", required: true },
+  { aliases: ["far side", "farside"], key: "farSide", required: true },
+];
+
+/**
+ * The Passing rows.
+ *
+ * "Set Pieces" appears here and on Shooting: the screens are told apart by content, so the same label resolves
+ * to two different keys and neither read can land on the other's row.
+ */
+const PASSING_ROWS: FactRow[] = [
+  { aliases: ["total passes", "passes"], key: "totalPasses", required: true },
+  { aliases: ["completed", "completed passes"], key: "completed", required: true },
+  { aliases: ["intercepted"], key: "intercepted", required: true },
+  { aliases: ["offside", "offsides"], key: "offside", required: true },
+  { aliases: ["other"], key: "other", required: true },
+  { aliases: ["ground", "ground passes"], key: "ground", required: true },
+  { aliases: ["lob", "lobbed"], key: "lob", required: true },
+  { aliases: ["through", "through balls"], key: "through", required: true },
+  { aliases: ["lobbed through", "lobbed through balls"], key: "lobbedThrough", required: true },
+  { aliases: ["cross", "crosses"], key: "cross", required: true },
+  { aliases: ["set pieces", "set piece"], key: "setPieces", required: true },
+  { aliases: ["key pass", "key passes"], key: "keyPass", required: true },
+  { aliases: ["first time", "first time passes"], key: "firstTime", required: true },
+  { aliases: ["pass and go", "pass and move"], key: "passAndGo", required: true },
+  { aliases: ["down wing", "down the wing"], key: "downWing", required: true },
+  { aliases: ["breakaway", "breakaways"], key: "breakaway", required: true },
+];
+
+/** The Defending rows, with the disciplinary ones under the one heading the manager read: Infractions. */
+const DEFENDING_ROWS: FactRow[] = [
+  { aliases: ["standing tackles"], key: "standingTackles", required: true },
+  { aliases: ["standing tackles won"], key: "standingTacklesWon", required: true },
+  { aliases: ["sliding tackles"], key: "slidingTackles", required: true },
+  { aliases: ["sliding tackles won"], key: "slidingTacklesWon", required: true },
+  { aliases: ["interceptions"], key: "interceptions", required: true },
+  { aliases: ["blocks", "blocked"], key: "blocks", required: true },
+  { aliases: ["saves", "save"], key: "saves", required: true },
+  { aliases: ["clearances", "clearance"], key: "clearances", required: true },
+  { aliases: ["offensive duels won"], key: "offensiveDuelsWon", required: true },
+  { aliases: ["defensive duels won"], key: "defensiveDuelsWon", required: true },
+  { aliases: ["aerial duels won"], key: "aerialDuelsWon", required: true },
+  { aliases: ["beaten by opponent", "beaten by opponents"], key: "beatenByOpponent", required: true },
+];
+
+const DEFENDING_INFRACTIONS: FactRow[] = [
+  { aliases: ["fouls committed", "fouls"], key: "foulsCommitted", required: true },
+  { aliases: ["penalties committed", "penalties conceded"], key: "penaltiesCommitted", required: true },
+  { aliases: ["yellow cards", "yellow card"], key: "yellowCards", required: true },
+  { aliases: ["red cards", "red card"], key: "redCards", required: true },
+];
+
+/**
+ * The screens, in tab order.
+ *
+ * SUMMARY is enabled because two captures of it have been measured and pass. The other three are DISABLED with
+ * the reason on the data, because the captures they would be proved against have not been supplied. Nothing
+ * reads them until they are, which is the difference between a feature that is waiting for evidence and one that
+ * fills a box from a screen nobody has looked at.
+ */
+export const SCREENS: readonly FactScreen[] = [
+  {
+    id: "SUMMARY",
+    label: "Summary",
+    // No heading of its own: the screen opens on the Possession % row, which is what identifies it.
+    signatures: [],
+    sections: [{ heading: "", rows: SUMMARY_ROWS }],
+    scrolls: true,
+    enabled: true,
+    disabledBecause: null,
+  },
+  {
+    id: "SHOOTING",
+    label: "Shooting",
+    signatures: ["overall shooting", "shooting"],
+    sections: [
+      { heading: "shot type", rows: SHOOTING_ROWS.slice(0, 11) },
+      { heading: "distance", rows: SHOOTING_ROWS.slice(11, 13) },
+      { heading: "aim", rows: SHOOTING_ROWS.slice(13) },
+    ],
+    scrolls: false,
+    enabled: false,
+    disabledBecause:
+      "no capture of the Shooting screen has been supplied, so none of these rows has been measured",
+  },
+  {
+    id: "PASSING",
+    label: "Passing",
+    signatures: ["overall passing", "passing"],
+    sections: [
+      { heading: "pass type", rows: PASSING_ROWS.slice(0, 12) },
+      { heading: "style", rows: PASSING_ROWS.slice(12) },
+    ],
+    scrolls: false,
+    enabled: false,
+    disabledBecause:
+      "no capture of the Passing screen has been supplied, so none of these rows has been measured",
+  },
+  {
+    id: "DEFENDING",
+    label: "Defending",
+    signatures: ["overall defending", "defending"],
+    sections: [
+      { heading: "", rows: DEFENDING_ROWS },
+      { heading: "infractions", rows: DEFENDING_INFRACTIONS },
+    ],
+    scrolls: false,
+    enabled: false,
+    disabledBecause:
+      "no capture of the Defending screen has been supplied, so none of these rows has been measured",
+  },
+];
 
 /**
  * FC25 and later, as one profile.
@@ -144,7 +362,7 @@ export const FC25_PLUS: LayoutProfile = {
   id: "fc25-plus",
   versions: ["fc25", "fc26"],
   groupTabs: ["Summary", "Possession", "Shooting", "Passing", "Defending", "Events"],
-  groups: [SUMMARY],
+  screens: [...SCREENS],
   columns: { left: [0, 0.13], label: [0.18, 0.86], right: [0.87, 1] },
   headerBand: { top: 0.04, bottom: 0.12 },
   rowSeparators: "RULES",
@@ -163,9 +381,29 @@ export function profileById(id: string | null | undefined): LayoutProfile | null
   return PROFILES.find((profile) => profile.id === id) ?? null;
 }
 
-export function groupById(profile: LayoutProfile, id: string | null | undefined): StatGroup | null {
+export function screenById(profile: LayoutProfile, id: string | null | undefined): FactScreen | null {
   if (!id) return null;
-  return profile.groups.find((group) => group.id === id) ?? null;
+  return profile.screens.find((screen) => screen.id === id) ?? null;
+}
+
+/** The screens the scanner will actually read, in tab order. */
+export function readableScreens(profile: LayoutProfile): FactScreen[] {
+  return profile.screens.filter((screen) => screen.enabled);
+}
+
+/** Every row of a screen, in screen order, flattened across its sections. */
+export function screenRows(screen: FactScreen): FactRow[] {
+  return screen.sections.flatMap((section) => section.rows);
+}
+
+/** The rows a group cannot be stored without, which are the ones a capture shows without scrolling. */
+export function requiredRows(screen: FactScreen): FactRow[] {
+  return screenRows(screen).filter((row) => row.required && row.key !== null);
+}
+
+/** The rows that carry a stored key at all. */
+export function storedRows(screen: FactScreen): FactRow[] {
+  return screenRows(screen).filter((row) => row.key !== null);
 }
 
 /**
@@ -182,16 +420,21 @@ export function normaliseLabel(value: string): string {
     .replace(/\s+/g, " ");
 }
 
-/** Every alias in a group, normalised, paired with the row it belongs to. */
-export function aliasIndex(group: StatGroup): Array<{ key: string; row: RowLabel }> {
-  const index: Array<{ key: string; row: RowLabel }> = [];
-  for (const row of group.labels) {
+/** Every alias of a set of rows, normalised, paired with the row it belongs to. */
+export function aliasIndexFor(rows: readonly FactRow[]): Array<{ key: string; row: FactRow }> {
+  const index: Array<{ key: string; row: FactRow }> = [];
+  for (const row of rows) {
     for (const alias of row.aliases) index.push({ key: normaliseLabel(alias), row });
   }
   return index;
 }
 
-/** The bound rows of a group: the ones that can produce a value. Null bounded rows are excluded. */
-export function boundRows(group: StatGroup): RowLabel[] {
-  return group.labels.filter((row) => row.field !== null);
+/** Every alias in a screen, across its sections. */
+export function aliasIndex(screen: FactScreen): Array<{ key: string; row: FactRow }> {
+  return aliasIndexFor(screenRows(screen));
+}
+
+/** The normalised headings of a screen, for tracking which section a band sits in. */
+export function sectionHeadings(screen: FactScreen): string[] {
+  return screen.sections.map((section) => normaliseLabel(section.heading)).filter((heading) => heading !== "");
 }

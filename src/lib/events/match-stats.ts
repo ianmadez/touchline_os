@@ -5,15 +5,15 @@
  * all, so there is nothing to reconcile against and nothing here may be presented as save data. The
  * inputs are USER; the outputs are DERIVED, and the screen says so.
  *
- * The expected goals model is deliberately simple and is TouchlineOS's own benchmark, on the same
- * footing as the wage-to-turnover line in the finance tab. It is not an xG feed and it does not claim to
- * be one: two terms, each with a weight, and both weights live here rather than being scattered.
- *
- * One honest limitation, stated where the numbers are shown: a big chance is usually also a shot from
- * inside the box, so the two terms overlap and the total reads slightly high. Counting only the big
- * chances would understate a team that creates a lot of ordinary box shots, which is the more common
- * manager, so the overlap is the smaller error of the two.
+ * EXPECTED GOALS IS THE GAME'S OWN FIGURE. It is read off the Match Facts Summary screen and typed or scanned
+ * in, and it is preferred wherever a figure is needed. The app's two-weight model is kept for the debriefs
+ * logged before that box existed: it is the only way those rows can produce a figure at all, and it is
+ * labelled as an estimate wherever it is used. Nothing new can reach it, because big chances can no longer be
+ * entered: the box they lived in is gone.
  */
+
+import { EXPECTED_GOALS_PLACES } from "../ui/format";
+import { normaliseFacts, type MatchFacts } from "../ocr/facts";
 
 /**
  * The observable inputs. Every field is optional: a manager who tracks shots but not passes is normal.
@@ -21,6 +21,14 @@
 export interface MatchStats {
   shots?: number | null;
   shotsInsideBox?: number | null;
+  /**
+   * LEGACY, READ ONLY.
+   *
+   * Debriefs logged before the game's own expected goals had a box of its own carry a count of big chances,
+   * because the app's model needed one. Nothing can enter one now, and no payload this app writes sets it: the
+   * field survives so those rows can still be read, and so an edit of one of them does not silently erase the
+   * only figure its expected goals was ever worked out from.
+   */
   bigChances?: number | null;
   /** Percentage, 0 to 100. */
   possession?: number | null;
@@ -32,6 +40,14 @@ export interface MatchStats {
    * function in this module and a stored key of the same name would make every read of it ambiguous at a glance.
    */
   expectedGoalsReported?: number | null;
+  /**
+   * What the screens said, whole per screen, exactly as the game printed it.
+   *
+   * Separate from the figures above on purpose. The five figures are the manager's own and he can edit them; the
+   * facts are a record of a screen and are never edited afterwards. A screen that was never scanned has no group
+   * at all, which is a different claim from a group of zeroes.
+   */
+  facts?: MatchFacts | null;
   /**
    * How the scanned figures got here. Small and flat on purpose: which layout read them, and whether the manager
    * changed each one afterwards. No images, no per word confidences, nothing that grows with the screen.
@@ -51,20 +67,21 @@ export interface MatchStats {
 
 /** One figure's journey: read from a screenshot, or read and then changed by hand. */
 export type CaptureMethod = "SCAN" | "EDITED";
-
 /**
  * The figures a row of the table can feed, and the name to show for each.
  *
  * One list, so the capture marker, the scan review pane and the manual boxes cannot disagree about what a field
  * is called or which keys exist. A capture entry naming anything outside this list is discarded on the way in.
+ *
+ * Big chances is deliberately absent. It was a manual box until the game's own expected goals replaced it, and
+ * a list that still named it would be the way a count got written back into a new debrief after all.
  */
 export const STAT_FIELD_LABELS = {
   shots: "Shots",
   shotsInsideBox: "Inside box",
-  bigChances: "Big chances",
+  expectedGoalsReported: "Expected goals",
   possession: "Possession %",
   passesCompleted: "Passes",
-  expectedGoalsReported: "Expected goals",
 } as const;
 
 /** Every figure key, in the order the panel shows them. */
@@ -73,10 +90,13 @@ export const MATCH_STAT_FIELDS = Object.keys(STAT_FIELD_LABELS) as Array<keyof t
 export type StatFieldKey = keyof typeof STAT_FIELD_LABELS;
 
 /**
- * The model.
+ * The legacy model, and why it is still here.
  *
- * A shot from inside the box is worth this much, and a big chance this much, on top. Both are rounded
- * benchmarks rather than fitted values, which is exactly why they are named constants in one place.
+ * A shot from inside the box was worth this much, and a big chance this much on top. It ran on two counts the
+ * manager kept by hand, and big chances is a figure he could only ever estimate, which is exactly why the box
+ * for the game's own expected goals replaced the box for big chances. These weights stay because the debriefs
+ * logged while the model was the only source still have to produce a figure, and a stored row cannot be
+ * re-derived from a source it never had.
  */
 export const GOALS_PER_SHOT_INSIDE_BOX = 0.15;
 export const GOALS_PER_BIG_CHANCE = 0.38;
@@ -90,7 +110,6 @@ export const GOALS_PER_BIG_CHANCE = 0.38;
 export const MATCH_STAT_LIMITS = {
   shots: 60,
   shotsInsideBox: 60,
-  bigChances: 30,
   possession: 100,
   passesCompleted: 1500,
   /**
@@ -103,8 +122,8 @@ export const MATCH_STAT_LIMITS = {
 /**
  * Below this the finishing reads as about par; this far above it, clinical; this far below, wasteful.
  *
- * Denominated in GOALS, which is why it survives the switch to the game's own figure untouched. Half a goal of
- * difference between what was scored and what the chances were worth means the same thing whatever produced the
+ * Denominated in GOALS, which is why it survives the change of source untouched. Half a goal of difference
+ * between what was scored and what the chances were worth means the same thing whichever figure produced the
  * second number, so this band is not a tuned parameter and does not need re-tuning.
  */
 export const FINISHING_PAR_BAND = 0.5;
@@ -169,24 +188,31 @@ function cleanCapture(raw: unknown): MatchStats["capture"] {
  *
  * Returns null when nothing usable was entered at all, so an untouched block stores nothing rather than
  * a row of nulls that would look like recorded data.
+ *
+ * `carryOver` is the payload already on file, and it exists for ONE field. A debrief logged before expected
+ * goals had a box of its own carries a big chance count, and its expected goals figure is worked out from that
+ * count. An edit of that row must not erase the only thing its figure was made of, so the count is carried
+ * across the rewrite. Nothing else here can ever put a big chance count on a row: a new debrief has no such
+ * field to read, and the edit path is the only caller that passes a `carryOver` at all.
  */
-export function normaliseMatchStats(raw: unknown): MatchStats | null {
+export function normaliseMatchStats(raw: unknown, carryOver?: MatchStats | null): MatchStats | null {
   if (raw === null || typeof raw !== "object") return null;
   const input = raw as Record<string, unknown>;
   const capture = cleanCapture(input.capture);
   const stats: MatchStats = {
     shots: clean(input.shots, MATCH_STAT_LIMITS.shots),
     shotsInsideBox: clean(input.shotsInsideBox, MATCH_STAT_LIMITS.shotsInsideBox),
-    bigChances: clean(input.bigChances, MATCH_STAT_LIMITS.bigChances),
     possession: clean(input.possession, MATCH_STAT_LIMITS.possession),
     passesCompleted: clean(input.passesCompleted, MATCH_STAT_LIMITS.passesCompleted),
     expectedGoalsReported: cleanDecimal(
       input.expectedGoalsReported,
       MATCH_STAT_LIMITS.expectedGoalsReported,
-      2
+      EXPECTED_GOALS_PLACES
     ),
     capture,
+    facts: normaliseFacts(input.facts),
   };
+  if (typeof carryOver?.bigChances === "number") stats.bigChances = carryOver.bigChances;
   const anyFigure = MATCH_STAT_FIELDS.some(
     (key) => stats[key] !== null && stats[key] !== undefined
   );
@@ -205,7 +231,13 @@ export function isMatchStatsEmpty(stats: MatchStats | null | undefined): boolean
 }
 
 /**
- * Expected goals, or null.
+ * Expected goals from the legacy model, or null.
+ *
+ * THE LEGACY PATH, and the only reader of a big chance count. It exists because a debrief logged before the
+ * game's own figure had a box of its own can produce an expected goals figure in no other way: the manager
+ * counted box shots and big chances, the model turned them into a number, and that number is what the panels
+ * and the news desk showed him. Rewriting those rows with a figure drawn from today's rules would be putting
+ * words in his mouth, so the model stays and every use of it is labelled an estimate.
  *
  * Both terms are required. The model has a weight for each, so a missing term would be silently read as
  * zero and quietly understate the figure, which is worse than saying nothing.
@@ -232,11 +264,10 @@ export function expectedGoalsSource(
 }
 
 /**
- * The figure to use, preferring the game's own.
+ * The figure to use everywhere a single expected goals number is needed.
  *
- * Everywhere the estimate was used, this is what should be asked instead. A real figure beats a two weight model,
- * and it is available on a capture whether or not the manager ever counted a shot from inside the box, which is
- * most managers: two of the app's five manual boxes are not on the screen the scanner reads.
+ * Preferring the game's own is the whole point: a figure the manager read off his own screen beats one this app
+ * worked out, and the model only ever answers for the debriefs logged before that figure had a box of its own.
  */
 export function effectiveExpectedGoals(stats: MatchStats | null | undefined): number | null {
   const reported = reportedExpectedGoals(stats);
@@ -324,7 +355,9 @@ export interface OverperformanceAlert {
  *
  * Two bars, one per source, because the two figures are not on the same scale. The model counts a big
  * chance and the box shot it usually also was, so it reads high by design; the game's own figure does not
- * double count. `expectedGoalsPerMatch` was tuned against the model and stays as it was.
+ * double count. The model's bar still serves the debriefs logged while the model was the only source, which
+ * is also why it keeps its value. `reportedXgPerMatch` was tuned against the game's own figure and stays as
+ * it was.
  */
 export const OVERPERFORMANCE = {
   /** Consecutive league matches that must each clear the bar below. */

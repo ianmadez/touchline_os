@@ -11,30 +11,31 @@
  * in `events/match-stats`.
  */
 
+import { MATCH_STAT_LIMITS } from "../events/match-stats";
+import { EXPECTED_GOALS_PLACES } from "./format";
+
 /**
  * Every figure the form can carry, in the order the panel shows them.
  *
- * The game's own expected goals is here and is deliberately NOT one of the manual boxes: a manager cannot
- * count it, so it only ever arrives from a screenshot. It rides in the same draft so it persists with the
- * other figures and survives an edit, rather than living in a second piece of state that the draft writer
- * and `startEditDebrief` would both have to remember.
+ * These five are the game's own Match Facts Summary figures, which is what makes them enterable: the manager
+ * reads them off one screen rather than counting anything. Expected goals is among them for that reason. It
+ * used to be scan-only, on the argument that nobody can count expected goals, and that argument was right about
+ * counting and wrong about reading: the game prints the figure, so the manager can type it.
  */
 export type MatchStatKey =
   | "shots"
   | "shotsInsideBox"
-  | "bigChances"
+  | "expectedGoalsReported"
   | "possession"
-  | "passesCompleted"
-  | "expectedGoalsReported";
+  | "passesCompleted";
 
 /** Every key, in panel order. */
 export const MATCH_STAT_KEYS: readonly MatchStatKey[] = [
   "shots",
   "shotsInsideBox",
-  "bigChances",
+  "expectedGoalsReported",
   "possession",
   "passesCompleted",
-  "expectedGoalsReported",
 ];
 
 /** The draft shape: text per figure, empty meaning nothing was entered. */
@@ -43,17 +44,19 @@ export type MatchStatDraft = Record<MatchStatKey, string>;
 export const EMPTY_MATCH_STATS: MatchStatDraft = {
   shots: "",
   shotsInsideBox: "",
-  bigChances: "",
+  expectedGoalsReported: "",
   possession: "",
   passesCompleted: "",
-  expectedGoalsReported: "",
 };
 
 /** Which of the draft's figures the manager can type into, and what to count for each. */
 export const MANUAL_STAT_FIELDS: ReadonlyArray<{ key: MatchStatKey; hint: string }> = [
   { key: "shots", hint: "Every shot, including the ones blocked or off target." },
   { key: "shotsInsideBox", hint: "Shots taken from inside the penalty area." },
-  { key: "bigChances", hint: "Chances you would have expected to be scored." },
+  {
+    key: "expectedGoalsReported",
+    hint: "The game's own figure, and optional. Pause menu, Match Facts, Summary, the Expected Goals row, then your side's number.",
+  },
   { key: "possession", hint: "Your share of the ball, 0 to 100." },
   { key: "passesCompleted", hint: "Passes you completed." },
 ];
@@ -76,10 +79,9 @@ export function emptySources(): Record<MatchStatKey, StatSource> {
   return {
     shots: "NONE",
     shotsInsideBox: "NONE",
-    bigChances: "NONE",
+    expectedGoalsReported: "NONE",
     possession: "NONE",
     passesCompleted: "NONE",
-    expectedGoalsReported: "NONE",
   };
 }
 
@@ -125,7 +127,10 @@ export function sanitiseCount(value: string, maxLength = 4): string {
  * saying so.
  */
 export function sanitiseDecimal(value: string, places = 2, maxLength = 5): string {
-  const digitsOnly = value.replace(/[^\d.]/g, "");
+  // A comma is a decimal point on most of the keyboards this app is used from, and the game's own figure is
+  // printed with a dot. Both are read as the same separator rather than dropping the keypress.
+  const normalised = value.replace(",", ".");
+  const digitsOnly = normalised.replace(/[^\d.]/g, "");
   const firstDot = digitsOnly.indexOf(".");
   if (firstDot === -1) return digitsOnly.slice(0, maxLength);
   const whole = digitsOnly.slice(0, firstDot);
@@ -133,4 +138,21 @@ export function sanitiseDecimal(value: string, places = 2, maxLength = 5): strin
   // A trailing dot is left in place while it is being typed: "0." is a half typed "0.8", and stripping it
   // would swallow the keystroke.
   return `${whole}.${fraction}`;
+}
+
+/**
+ * The game's own expected goals, as box text.
+ *
+ * One decimal place, because that is the precision the game prints and a second one would be a figure the
+ * manager never saw. The ceiling is applied here as well as on the server so a typed "12" is refused at the
+ * keystroke rather than accepted and then silently dropped on save; `previous` is what the box held a moment
+ * ago, which is what a refused keystroke falls back to.
+ */
+export function sanitiseExpectedGoals(value: string, previous: string): string {
+  const cleaned = sanitiseDecimal(value, EXPECTED_GOALS_PLACES, 4);
+  const parsed = Number(cleaned);
+  if (cleaned !== "" && Number.isFinite(parsed) && parsed > MATCH_STAT_LIMITS.expectedGoalsReported) {
+    return previous;
+  }
+  return cleaned;
 }

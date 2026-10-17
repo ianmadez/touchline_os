@@ -9,8 +9,17 @@ import {
   type StatSource,
 } from "@/lib/ui/match-figures";import { matchStatLabel } from "@/lib/ui/labels";
 import { admitImage, IMAGE_LIMITS, type TableRegion } from "@/lib/ocr/preprocess";
-import { LOW_CONFIDENCE, emptyDraft, mergeIntoDraft, shouldApply, type ScanObservation } from "@/lib/ocr/extract";
+import { LOW_CONFIDENCE, shouldApply } from "@/lib/ocr/extract";
 import { disposeOcrEngine, progressLabel } from "@/lib/ocr/engine";
+import {
+  crossScreenNotes,
+  emptyFacts,
+  factsAreEmpty,
+  mergeScreenFacts,
+  type MatchFacts,
+} from "@/lib/ocr/facts";
+import { defaultProfile, readableScreens, SCREENS } from "@/lib/ocr/layouts";
+import type { BoxObservation } from "@/components/ui/debrief/scan-fields";
 import type { DecodedImage } from "@/lib/ocr/read";
 
 /**
@@ -43,10 +52,14 @@ export interface ScanPanelProps {
   opponent: string;
   /** Our goals from the scoreline, when there is one, for the cross-check. */
   goalsFor: number | null;
+  /** Their goals, so a header that disagrees can be reported rather than written. */
+  goalsAgainst: number | null;
   /** A figure the manager typed or corrected in this pane. */
   onChange: (key: MatchStatKey, value: string) => void;
   /** Figures a read produced, to be placed in their boxes and marked as read. */
   onApply: (values: Partial<Record<MatchStatKey, string>>, layoutId: string) => void;
+  /** The screens' own figures, kept whole per screen, for the debrief to store with the match. */
+  onFacts: (facts: MatchFacts) => void;
 }
 
 interface Chosen {
@@ -80,8 +93,10 @@ export function ScanPanel({
   ourClub,
   opponent,
   goalsFor,
+  goalsAgainst,
   onChange,
   onApply,
+  onFacts,
 }: ScanPanelProps) {
   const [chosen, setChosen] = useState<Chosen[]>([]);
   const [busy, setBusy] = useState(false);
@@ -89,8 +104,18 @@ export function ScanPanel({
   const [refusals, setRefusals] = useState<string[]>([]);
   const [notes, setNotes] = useState<ReadNote[]>([]);
   const [summary, setSummary] = useState<string | null>(null);
-  const [observations, setObservations] = useState<Map<MatchStatKey, ScanObservation>>(new Map());
-  const [unread, setUnread] = useState<string[]>([]);
+  const [observations, setObservations] = useState<Map<MatchStatKey, BoxObservation>>(new Map());
+  const [carried, setCarried] = useState<ReadonlySet<string>>(() => new Set<string>());
+  /** One line per screen that was read and refused, in the manager's own terms. */
+  const [refused, setRefused] = useState<string[]>([]);
+  /** The screens whose figures were kept, which is what makes the "kept with the match" line true. */
+  const [kept, setKept] = useState<string[]>([]);
+  /** Where two screens disagreed, which is reported and never a reason to drop either one. */
+  const [disagreements, setDisagreements] = useState<string[]>([]);
+  /** One line when the header's scoreline and the entered one disagree. Nothing is written while it is set. */
+  const [scoreProblem, setScoreProblem] = useState<string | null>(null);
+  /** The facts themselves, which travel with the match when the debrief is saved. */
+  const [facts, setFacts] = useState<MatchFacts>(() => emptyFacts());
   /** The pixel size of each admitted image, counted from one, for the preview's aspect ratio. */
   const [sizes, setSizes] = useState<Record<number, { width: number; height: number }>>({});
   const [sideChoice, setSideChoice] = useState<SideChoice>(null);
@@ -106,16 +131,12 @@ export function ScanPanel({
   const urls = useRef<Set<string>>(new Set());
 
   /**
-   * The figures the screen that was read is meant to carry.
+   * The screens the reader will read.
    *
-   * Not a hardcoded list of the group's rows: the read already reports every field the group carries that it
-   * could not fill, so the union of what it read and what it missed IS the group's field set. Deriving it avoids
-   * a second copy of the layout knowledge in the UI, which is the copy that would drift.
+   * A screen that is disabled in the layout tables is not offered as a way in: a manager who is invited to add a
+   * Passing capture and told afterwards that nothing was read has been given a worse answer than not being asked.
    */
-  const carried = useMemo(
-    () => new Set<string>([...observations.keys(), ...unread]),
-    [observations, unread]
-  );
+  const offered = useMemo(() => readableScreens(defaultProfile()), []);
 
   // Object URLs are revoked on unmount. They are also revoked when an image is removed or replaced, but a tab
   // closed mid scan never gets that far, and a live blob URL pins the whole file.
@@ -187,7 +208,12 @@ export function ScanPanel({
       return current.filter((entry) => entry.id !== id);
     });
     setObservations(new Map());
-    setUnread([]);
+    setCarried(new Set<string>());
+    setRefused([]);
+    setKept([]);
+    setDisagreements([]);
+    setScoreProblem(null);
+    setFacts(emptyFacts());
     setNotes([]);
     setSummary(null);
     setSideProblem(null);
@@ -209,6 +235,23 @@ export function ScanPanel({
     setPrepared(false);
   }, []);
 
+  /**
+   * Which of the five boxes a stored key feeds, if any.
+   *
+   * The five boxes are the manager's own figures and stay the source for them; this is only which screen figure
+   * can offer a box a value, and shots and passes can come off either of two screens.
+   */
+  const boxForFact = (screenId: string, key: string): { box: MatchStatKey; text: string } | null => {
+    if (screenId === "SUMMARY" && key === "shots") return { box: "shots", text: "shots" };
+    if (screenId === "SHOOTING" && key === "totalShots") return { box: "shots", text: "total shots" };
+    if (screenId === "SHOOTING" && key === "insideBox") return { box: "shotsInsideBox", text: "inside box" };
+    if (screenId === "SUMMARY" && key === "expectedGoals") return { box: "expectedGoalsReported", text: "expected goals" };
+    if (screenId === "SUMMARY" && key === "possessionPct") return { box: "possession", text: "possession" };
+    if (screenId === "SUMMARY" && key === "passes") return { box: "passesCompleted", text: "passes" };
+    if (screenId === "PASSING" && key === "totalPasses") return { box: "passesCompleted", text: "total passes" };
+    return null;
+  };
+
   const analyse = useCallback(
     async (override?: SideChoice) => {
       if (chosen.length === 0 || busy) return;
@@ -221,7 +264,12 @@ export function ScanPanel({
       setSummary(null);
       setRefusals([]);
       setObservations(new Map());
-      setUnread([]);
+      setRefused([]);
+      setKept([]);
+      setDisagreements([]);
+      setScoreProblem(null);
+      setFacts(emptyFacts());
+      setCarried(new Set<string>());
       setSideProblem(null);
 
       try {
@@ -237,12 +285,16 @@ export function ScanPanel({
 
         const failures: ReadNote[] = [];
         const sizes: Record<number, { width: number; height: number }> = {};
-        // The merge is `extract`'s, not this pane's: it keys on the FIELD rather than the row, which is what makes
-        // a second capture at a different scroll offset fold in correctly. Newest read wins.
-        let folded = emptyDraft();
+        const boxObservations = new Map<MatchStatKey, BoxObservation>();
+        const carriedKeys = new Set<string>();
+        const refusedLines: string[] = [];
+        const keptScreens: string[] = [];
+        const missed: string[] = [];
+        let folded = emptyFacts();
         let lastLayout: string | null = null;
         let conflict: string | null = null;
         let lastGeometry: Geometry | null = null;
+        let scoreMismatch: string | null = null;
 
         for (let index = 0; index < chosen.length; index += 1) {
           const entry = chosen[index];
@@ -284,20 +336,61 @@ export function ScanPanel({
             continue;
           }
 
-          // Nothing is merged from an image whose side is unsettled: a conflicted capture contributes nothing at
-          // all, rather than figures that might belong to the opponent.
-          folded = mergeIntoDraft(
-            folded,
-            outcome.observations,
-            {
-              index: index + 1,
-              name: outcome.name,
-              profileId: outcome.profileId,
-              groupId: outcome.groupId,
-              side: outcome.side,
-            },
-            outcome.unread
-          );
+          const result = outcome.result;
+          const label = outcome.screenLabel ?? "That screen";
+
+          // The header's own scoreline, and the one the manager already entered. They have to agree before
+          // anything at all is written: a capture of another match looks exactly like a capture of this one.
+          const scoreline = outcome.scoreline;
+          if (
+            scoreline !== null &&
+            goalsFor !== null &&
+            goalsAgainst !== null &&
+            (scoreline.us !== goalsFor || scoreline.them !== goalsAgainst)
+          ) {
+            scoreMismatch = `${label} is a ${scoreline.us} : ${scoreline.them} match and the scoreline you entered says ${goalsFor} : ${goalsAgainst}. Nothing was written from this capture.`;
+            continue;
+          }
+
+          /**
+           * Which boxes the screen can offer, and the figure behind each.
+           *
+           * Taken from the READING rather than from the kept group, and that is the one place the two part
+           * company on purpose: a group is only STORED when every required row and every sum holds, while the
+           * boxes below are the manager's own figures and have always been filled from a read that he then
+           * checks against the picture. A screen that fails its own sums therefore still fills what it read.
+           */
+          for (const value of outcome.reading.values.values()) {
+            const mapping = boxForFact(result?.screen ?? "SUMMARY", value.key);
+            if (mapping === null) continue;
+            boxObservations.set(mapping.box, {
+              value: value.us,
+              confidence: value.confidence,
+              derived: result?.derived.includes(value.key) ?? false,
+              imageIndex: index + 1,
+              words: value.usWords,
+            });
+          }
+          for (const key of outcome.reading.unread) {
+            const mapping = boxForFact(result?.screen ?? "SUMMARY", key);
+            if (mapping !== null && !boxObservations.has(mapping.box)) {
+              // A figure the screen carries and the read could not use. It is worth a note only while the box is
+              // still empty at the end, which is the "Inside box is still empty" line below.
+              missed.push(mapping.text);
+            }
+          }
+
+          if (result === null || result.group === null) {
+            refusedLines.push(
+              `${label} did not read cleanly, so none of it was kept. ${result?.refusal ?? "No figure on it could be held."}`
+            );
+          } else {
+            folded = mergeScreenFacts(folded, result);
+            keptScreens.push(label);
+            for (const key of result.derived) carriedKeys.add(key);
+            for (const key of Object.keys(result.group)) carriedKeys.add(key);
+          }
+
           lastLayout = outcome.profileId;
           lastGeometry = {
             index: index + 1,
@@ -310,24 +403,27 @@ export function ScanPanel({
 
         if (controller.signal.aborted) return;
 
-        const read = new Map<MatchStatKey, ScanObservation>(
-          folded.observations.map((observation) => [observation.field, observation])
-        );
-        setObservations(read);
-        setUnread(folded.unread);
+        setFacts(folded);
+        onFacts(folded);
+        setObservations(boxObservations);
+        setCarried(carriedKeys);
         setSizes(sizes);
         setGeometry(lastGeometry);
         setNotes(failures);
         setSideProblem(conflict);
+        setScoreProblem(scoreMismatch);
+        setRefused(refusedLines);
+        setKept(keptScreens);
+        setDisagreements(crossScreenNotes(folded));
         setShown((current) => (lastGeometry ? lastGeometry.index : current));
 
         // The overwrite rule, applied in the one place that knows both what was read and what is already in the
         // boxes. A low confidence read is never placed automatically; it is offered beside its reason instead.
         const values: Partial<Record<MatchStatKey, string>> = {};
-        for (const [key, observation] of read) {
+        for (const [box, observation] of boxObservations) {
           if (observation.confidence < LOW_CONFIDENCE) continue;
-          if (!shouldApply({ currentText: draft[key], currentSource: sources[key], force: false })) continue;
-          values[key] = String(observation.value);
+          if (!shouldApply({ currentText: draft[box], currentSource: sources[box], force: false })) continue;
+          values[box] = String(observation.value);
         }
         if (lastLayout !== null && Object.keys(values).length > 0) {
           onApply(values, lastLayout);
@@ -336,30 +432,32 @@ export function ScanPanel({
         const landed = Object.keys(values).length;
         const from = chosen.length === 1 ? "one screenshot" : `${chosen.length} screenshots`;
         setSummary(
-          conflict !== null
+          conflict !== null || scoreMismatch !== null
             ? null
             : landed === 0
               ? `Nothing was filled from ${from}. Check the figures below against the picture.`
               : `Filled ${landed} ${landed === 1 ? "box" : "boxes"} from ${from}.`
         );
         setPrepared(true);
-    } catch (error) {
-      if (controller.signal.aborted) return;
-      setNotes([
-        {
-          name: "The screen reader",
-          text:
-            error instanceof Error
-              ? error.message
-              : "The screen reader could not start. Type the figures in by hand instead.",
-        },
-      ]);
-    } finally {
-      if (abortRef.current === controller) abortRef.current = null;
-      setBusy(false);
-      setStage(null);
-    }
-  }, [busy, chosen, draft, goalsFor, opponent, ourClub, onApply, sideChoice, sources, venue]);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setNotes([
+          {
+            name: "The screen reader",
+            text:
+              error instanceof Error
+                ? error.message
+                : "The screen reader could not start. Type the figures in by hand instead.",
+          },
+        ]);
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null;
+        setBusy(false);
+        setStage(null);
+      }
+    },
+    [busy, chosen, draft, goalsAgainst, goalsFor, onApply, onFacts, opponent, ourClub, sideChoice, sources, venue]
+  );
 
   const swapSides = useCallback(() => {
     // Swap is a correction, not a hint for next time, so the read runs again straight away with the other column.
@@ -384,7 +482,6 @@ export function ScanPanel({
           height: sizes[currentIndex].height,
         }
       : null;
-  const notRead = unread.filter((field) => !observations.has(field as MatchStatKey));
 
   return (
     <div className="space-y-3">
@@ -444,7 +541,7 @@ export function ScanPanel({
         <p className="mt-2 font-sans text-[11px] text-slate-500 dark:text-slate-400">
           Your screenshots stay on your machine. Nothing is uploaded, and nothing is saved until you save the
           debrief. Up to {IMAGE_LIMITS.maxImages} images, {Math.round(IMAGE_LIMITS.maxBytes / (1024 * 1024))} MB
-          each.
+          each. {offered.map((screen) => screen.label).join(", ")} can be read today.
         </p>
       </div>
 
@@ -537,10 +634,40 @@ export function ScanPanel({
         </ul>
       ) : null}
 
-      {notRead.length > 0 && prepared ? (
+      {refused.length > 0 ? (
+        <ul className="space-y-1">
+          {refused.map((line) => (
+            <li key={line} className="font-sans text-[11px] leading-snug text-slate-600 dark:text-slate-300">
+              {line}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {scoreProblem !== null ? (
+        <p className="font-sans text-[11px] leading-snug text-amber-800 dark:text-amber-300">{scoreProblem}</p>
+      ) : null}
+
+      {disagreements.length > 0 ? (
+        <ul className="space-y-1">
+          {disagreements.map((line) => (
+            <li key={line} className="font-sans text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+              {line}.
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {kept.length > 0 ? (
         <p className="font-sans text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-          {notRead.map((field) => matchStatLabel(field)).join(" and ")} did not come off this screen. If the
-          group scrolls, take a second screenshot of the rest and add it here.
+          The rest of the {kept.join(" and the ")} {kept.length === 1 ? "screen" : "screens"} is kept with the
+          match when you save, and it never overwrites a figure you typed.
+        </p>
+      ) : null}
+
+      {prepared && factsAreEmpty(facts) === false && draft.shotsInsideBox.trim() === "" ? (
+        <p className="font-sans text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+          Inside box is still empty, and a Shooting capture is what fills it.
         </p>
       ) : null}
 
@@ -577,10 +704,30 @@ export function ScanPanel({
           </div>
         </div>
       ) : (
-        <p className="font-sans text-[11px] leading-snug text-slate-500 dark:text-slate-400">
-          Add a screenshot of the Match Facts screen and read it. The figures go into the same boxes the manual
-          pane uses, and nothing is saved until you save the debrief.
-        </p>
+        <div className="space-y-2">
+          <p className="font-sans text-[11px] leading-snug text-slate-500 dark:text-slate-400">
+            Drop any Match Facts screens here. Summary on its own is fine.
+          </p>
+          <ul className="space-y-1">
+            {SCREENS.map((screen) => (
+              <li
+                key={screen.id}
+                className="font-sans text-[11px] leading-snug text-slate-500 dark:text-slate-400"
+              >
+                <span className="font-bold text-slate-700 dark:text-slate-200">{screen.label}</span>
+                {" · "}
+                {screen.id === "SUMMARY"
+                  ? "shots, expected goals, possession, passes and more"
+                  : screen.id === "SHOOTING"
+                    ? "shots inside the box and the shot breakdown"
+                    : screen.id === "PASSING"
+                      ? "completion and pass types"
+                      : "tackles, duels and discipline"}
+                {screen.enabled ? "" : " · not read yet"}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );

@@ -42,7 +42,8 @@ const ocrDir = path.join(root, "public", "ocr");
 const VERBOSE = process.argv.includes("--verbose");
 /** Per field accuracy a clean capture has to reach. The one number in this file that gates anything. */
 const GATE = 0.95;
-const assertFields = ["possession", "shots", "expectedGoalsReported", "passesCompleted"];
+/** The figures a Summary capture must yield for the gate to mean anything: the ones the five boxes take. */
+const assertFields = ["possessionPct", "shots", "expectedGoals", "passes"];
 
 /**
  * The page side of the harness.
@@ -56,6 +57,7 @@ import { readMatchFacts, READ_MODES } from "./src/lib/ocr/read";
 import { PREPROCESS_VARIANTS, detectTable, toLuma, scanRowEdges } from "./src/lib/ocr/preprocess";
 import { disposeOcrEngine, getOcrEngine } from "./src/lib/ocr/engine";
 import { defaultProfile } from "./src/lib/ocr/layouts";
+import { SCREENS } from "./src/lib/ocr/layouts";
 import { readRows } from "./src/lib/ocr/extract";
 
 /** A union box around the words behind a value, for the focus highlight. Words themselves are dropped. */
@@ -71,12 +73,16 @@ function boxOf(words) {
 
 function serialise(outcome) {
   if (!outcome.ok) return outcome;
+  const values = {};
+  for (const [key, value] of outcome.reading.values) {
+    values[key] = { us: value.us, them: value.them, confidence: value.confidence, derived: value.derived, box: boxOf(value.usWords) };
+  }
+  const { reading, result, ...rest } = outcome;
   return {
-    ...outcome,
-    observations: outcome.observations.map((o) => ({
-      field: o.field, value: o.value, confidence: o.confidence,
-      reason: o.reason, derived: o.derived, side: o.side, box: boxOf(o.words),
-    })),
+    ...rest,
+    values,
+    refused: result === null ? null : result.group === null ? result.refusal : null,
+    derived: result === null ? [] : result.derived,
   };
 }
 
@@ -128,6 +134,14 @@ window.__ocr = {
   },
   variants: () => PREPROCESS_VARIANTS.map((v) => v.id),
   modes: () => READ_MODES,
+  /** Which screens the scanner reads, and why the others are off. Read from the real layout tables. */
+  screens: () =>
+    SCREENS.map((screen) => ({
+      id: screen.id,
+      label: screen.label,
+      enabled: screen.enabled,
+      disabledBecause: screen.disabledBecause,
+    })),
   /** What the engine actually saw, in table coordinates, so a bad read can be told from a bad grid. */
   async words(base64, variantId, psm) {
     const image = await decode(base64);
@@ -138,9 +152,10 @@ window.__ocr = {
     const engine = await getOcrEngine();
     const frame = await engine.recognise({ image: prepared.image, psm });
     const profile = defaultProfile();
+    const screen = profile.screens[0];
     const centres = bands.centres.map((c) => (c - bands.region.top) * prepared.scale);
     const height = bands.rowHeight * prepared.scale;
-    const rows = readRows(frame.words, centres, height, prepared.image.width, profile.columns, profile.groups[0]);
+    const rows = readRows(frame.words, centres, height, prepared.image.width, profile.columns, screen);
     return {
       preparedWidth: prepared.image.width,
       preparedHeight: prepared.image.height,
@@ -150,7 +165,7 @@ window.__ocr = {
       rows: rows.map((r) => ({
         y: Math.round(r.y),
         label: r.labelText,
-        matched: r.row ? r.row.aliases[0] : null,
+        matched: r.row && r.row.key !== null ? r.row.key : null,
         left: r.left ? r.left.raw : null,
         right: r.right ? r.right.raw : null,
       })),
@@ -256,24 +271,23 @@ function pad(value, width) {
 
 function score(outcome, expected) {
   if (!outcome.ok) return { hits: 0, total: Object.keys(expected).length, misses: [`not read: ${outcome.reason}`] };
-  const byField = new Map(outcome.observations.map((observation) => [observation.field, observation]));
   const misses = [];
   let hits = 0;
   for (const [field, want] of Object.entries(expected)) {
-    const got = byField.get(field);
+    const got = outcome.values[field];
     if (got === undefined) {
       misses.push(`${field}: missing`);
       continue;
     }
-    // A decimal field is compared to two places, because floating point equality on 0.8 is not a fair test.
-    const matched =
-      typeof want === "number" && !Number.isInteger(want)
-        ? Math.abs(got.value - want) < 0.005
-        : got.value === want;
+    // Our side is the one the manager's own figures are about, so that is the column a golden value is checked
+    // against. A decimal is compared to one place, which is the precision the game prints.
+    const value = got.us;
+    const matched = typeof want === "number" && !Number.isInteger(want) ? Math.abs(value - want) < 0.05 : value === want;
     if (matched) hits += 1;
-    else misses.push(`${field}: want ${want} got ${got.value}`);
+    else misses.push(`${field}: want ${want} got ${value}`);
   }
-  return { hits, total: Object.keys(expected).length, misses };
+  const refused = outcome.refused === null ? [] : [`screen refused: ${outcome.refused}`];
+  return { hits, total: Object.keys(expected).length, misses: [...misses, ...refused] };
 }
 
 function summarise(rows) {
@@ -311,6 +325,7 @@ await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "load" });
 
 const variants = await page.evaluate(() => window.__ocr.variants());
 const modes = await page.evaluate(() => window.__ocr.modes());
+const screens = await page.evaluate(() => window.__ocr.screens());
 const userAgent = await page.evaluate(() => navigator.userAgent);
 
 /** Dumps what the engine actually saw, for one capture at one setting. */
@@ -526,17 +541,19 @@ for (const entry of golden) {
   }
   console.log(
     `    side ${outcome.side.kind}${outcome.side.kind === "AGREED" ? ` (${outcome.side.ours}, from ${outcome.side.basis})` : ""}, ` +
-      `${outcome.matchedLabels}/${outcome.totalLabels} labels matched, scale ${outcome.scale.toFixed(2)}`
+      `screen ${outcome.screenId ?? "none"}, scale ${outcome.scale.toFixed(2)}`
   );
-  for (const observation of outcome.observations) {
-    const want = entry.spec.expected[observation.field];
-    const mark = want === undefined ? " " : Math.abs(observation.value - want) < 0.005 || observation.value === want ? "+" : "x";
+  for (const [key, value] of Object.entries(outcome.values)) {
+    const want = entry.spec.expected[key];
+    const mark = want === undefined ? " " : Math.abs(value.us - want) < 0.05 ? "+" : "x";
     console.log(
-      `      ${mark} ${pad(observation.field, 22)} ${pad(observation.value, 8)} conf ${observation.confidence.toFixed(2)}` +
-        `${observation.reason ? `  (${observation.reason})` : ""}`
+      `      ${mark} ${pad(key, 22)} us ${pad(value.us, 6)} them ${pad(value.them, 6)} conf ${value.confidence.toFixed(2)}` +
+        `${value.derived ? "  (worked out from the sums)" : ""}`
     );
   }
-  if (outcome.unread.length > 0) console.log(`      not read: ${outcome.unread.join(", ")}`);
+  console.log(
+    `      group: ${outcome.refused === null ? "kept" : `refused, ${outcome.refused}`}`
+  );
 }
 console.log("");
 
@@ -572,6 +589,38 @@ if (cleanRows.length === 0) {
  */
 if (verdict === "pass" && cleanRows.length < 3) {
   console.log(`  caveat:         ${cleanRows.length} clean capture(s), so this is a smoke result and not a spread`);
+}
+
+/**
+ * The gate above measures the FIGURES, and the group is a separate question.
+ *
+ * A screen is only STORED whole: every required row read and every sum holding. This prints both, per screen, so
+ * a screen that reads its four box figures and then refuses to be stored cannot be mistaken for a pass.
+ */
+console.log("");
+console.log("Groups");
+for (const screen of screens) {
+  const label = pad(screen.label, 10);
+  if (!screen.enabled) {
+    console.log(`  ${label} disabled  ${screen.disabledBecause}`);
+    continue;
+  }
+  const reads = golden
+    .map((entry) => results.get(`${cleanBest.config.id}::${entry.spec.image}`))
+    .filter((row) => row !== undefined && row.outcome.ok && row.outcome.screenId === screen.id);
+  if (reads.length === 0) {
+    console.log(`  ${label} enabled   no capture of it in the golden set`);
+    continue;
+  }
+  for (const row of reads) {
+    console.log(
+      `  ${label} enabled   ${row.outcome.refused === null ? "stored" : `REFUSED: ${row.outcome.refused}`}  (${row.outcome.name})`
+    );
+  }
+  const stored = reads.filter((row) => row.outcome.refused === null).length;
+  console.log(
+    `  ${pad("", 10)}           ${stored} of ${reads.length} capture(s) of this screen pass every required row and every sum`
+  );
 }
 
 await page.evaluate(() => window.__ocr.dispose());

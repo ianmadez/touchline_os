@@ -49,14 +49,13 @@ export interface MatchDebriefPayload {
   goalMinutes?: number[] | null;
   concededMinutes?: number[] | null;
   /**
-   * What the manager observed after the match: shots, shots inside the box, big chances, possession and
-   * passes completed, plus the game's own expected goals when he read it off the Match Facts screen.
+   * What the manager observed after the match: shots, shots inside the box, expected goals, possession and
+   * passes completed, all of them read off the game's own Match Facts Summary screen.
    *
-   * Stored as entered and nothing else. Expected goals and the finishing figure are worked out on read,
-   * from the shared model in `events/match-stats`, so a tweak to a weight cannot leave a stored figure
-   * contradicting the one the screen now shows. The reported figure is the exception and is stored,
-   * because it is an observation rather than a derivation: the game's number cannot be recomputed from
-   * anything the app holds.
+   * Stored as entered and nothing else. The finishing figure and the shot quality are worked out on read, from
+   * the shared rules in `events/match-stats`, so a change there cannot leave a stored figure contradicting the
+   * one the screen now shows. Expected goals is the exception and is stored, because it is an observation the
+   * game printed rather than a derivation: nothing the app holds could recompute it.
    *
    * Provenance stays USER either way. A scanned figure is the manager photographing what the game told
    * him and accepting it, which is his record of what he saw, not the app's read of a save file. The
@@ -136,7 +135,7 @@ function minutesOf(value: unknown): number[] {
  * hostile numbers are clamped, and an unanswered prompt is dropped rather than stored blank, which is
  * how the season digest reads them.
  */
-function normaliseDebrief(body: MatchDebriefPayload): NormalisedDebrief {
+function normaliseDebrief(body: MatchDebriefPayload, carryOver?: MatchStats | null): NormalisedDebrief {
   const standoutPlayerIds = (Array.isArray(body.standoutPlayerIds) ? body.standoutPlayerIds : [])
     .filter((id): id is string => typeof id === "string" && id.length > 0);
   const standoutPlayerNames = (Array.isArray(body.standoutPlayerNames) ? body.standoutPlayerNames : [])
@@ -167,7 +166,7 @@ function normaliseDebrief(body: MatchDebriefPayload): NormalisedDebrief {
     .filter((prompt) => prompt.question.length > 0 && prompt.answer.length > 0);
   const goalMinutes = minutesOf(body.goalMinutes);
   const concededMinutes = minutesOf(body.concededMinutes);
-  const matchStats = normaliseMatchStats(body.matchStats);
+  const matchStats = normaliseMatchStats(body.matchStats, carryOver);
   return { standoutPlayerIds, standoutPlayerNames, contributions, dynamicPrompts, goalMinutes, concededMinutes, matchStats };
 }
 
@@ -390,9 +389,26 @@ export async function updateDebrief(
       return at(400, { success: false, error: "Missing required debrief fields (careerId, opponent, scores)." });
     }
 
+    const previous = await new EventService().getDebriefPayload(id);
+    /**
+     * The figures already on file, used for one field only.
+     *
+     * A debrief logged before the game's own expected goals had a box of its own carries a big chance count, and
+     * its expected goals figure is worked out from that count. An edit writes a whole new payload, so without
+     * this the manager would erase the only thing his own figure was made of by correcting a typo.
+     */
+    let carryOver: MatchStats | null = null;
+    if (previous !== null) {
+      try {
+        carryOver = (JSON.parse(previous) as { matchStats?: MatchStats | null }).matchStats ?? null;
+      } catch {
+        carryOver = null;
+      }
+    }
+
     const updated = await new EventService().updateUserDebrief(
       id,
-      composeDebriefPayload(body, normaliseDebrief(body))
+      composeDebriefPayload(body, normaliseDebrief(body, carryOver))
     );
 
     if (updated.length === 0) {

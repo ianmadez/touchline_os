@@ -1,3 +1,4 @@
+import type { DealKind } from "../db/schema";
 import { TransferLedgerService, type LedgerDirection } from "../services/transfer-ledger-service";
 import { at, failed, ok, type OperationResult } from "./types";
 
@@ -55,16 +56,51 @@ export async function readTransferLedger(careerId: string | null): Promise<Opera
   }
 }
 
+/**
+ * Players a handwritten deal can be named against.
+ *
+ * A name typed from memory is how a player ends up on the ledger under a spelling that appears nowhere else in
+ * the app, and the app has known every player in the save all along. So the form searches instead: the manager
+ * types a few letters and picks him. An empty search is answered with an empty list rather than the first
+ * eight players in the save, which would look like a suggestion and is not one.
+ */
+export async function searchLedgerPlayers(
+  careerId: string | null,
+  query: string | null
+): Promise<OperationResult<unknown>> {
+  if (!careerId) return failed(400, "careerId is required.");
+
+  try {
+    const players = await new TransferLedgerService().searchPlayers(careerId, query ?? "");
+    return ok({ success: true, players });
+  } catch (error) {
+    console.error("[api/transfer-ledger] player search failed:", error);
+    return failed(500, (error as Error).message ?? "Could not search the players in this save.");
+  }
+}
+
 interface AddBody {
   careerId?: string;
   direction?: string;
   playerName?: string;
   counterparty?: string | null;
   fee?: number | string;
+  kind?: string;
+  salary?: number | string | null;
+  wageSharePct?: number | string | null;
   agreedOn?: string | null;
   completedOn?: string | null;
   season?: number | string | null;
   note?: string | null;
+}
+
+/** A number from a form field, where an empty string is an absence rather than a zero. */
+function optionalAmount(value: number | string | null | undefined): number | null | "invalid" {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const parsed = typeof value === "string" ? Number(value) : value;
+  if (typeof parsed !== "number" || !Number.isFinite(parsed)) return "invalid";
+  return parsed;
 }
 
 /** Adds one handwritten deal. The whole ledger comes back, so the screen never predicts the totals. */
@@ -79,9 +115,43 @@ export async function addTransferEntry(rawBody: unknown): Promise<OperationResul
   const playerName = typeof body.playerName === "string" ? body.playerName.trim() : "";
   if (!playerName) return failed(400, "A player name is needed, because it is what the ledger groups on.");
 
-  const fee = typeof body.fee === "string" ? Number(body.fee) : body.fee;
-  if (typeof fee !== "number" || !Number.isFinite(fee) || fee < 0) {
-    return failed(400, "Enter the fee in whole units of your currency. Zero is allowed for a free transfer.");
+  // Any value that is not exactly LOAN is a transfer, which is also what every row already on file is.
+  const kind: DealKind = body.kind === "LOAN" ? "LOAN" : "TRANSFER";
+
+  const feeValue = optionalAmount(body.fee);
+  // A loan fee is normally nothing at all, so a blank box is read as a free loan rather than refused.
+  const fee = feeValue === null && kind === "LOAN" ? 0 : feeValue;
+  if (fee === "invalid" || fee === null || fee < 0) {
+    return failed(
+      400,
+      kind === "LOAN"
+        ? "Enter the loan fee in whole units of your currency, or leave it blank for a free loan."
+        : "Enter the fee in whole units of your currency. Zero is allowed for a free transfer."
+    );
+  }
+
+  let salary: number | null = null;
+  let wageSharePct: number | null = null;
+  if (kind === "LOAN") {
+    const wage = optionalAmount(body.salary);
+    if (wage === "invalid" || wage === null || wage < 0) {
+      return failed(400, "A loan needs his wage, in whole units per week. It is most of what the deal costs.");
+    }
+    salary = Math.round(wage);
+
+    const share = optionalAmount(body.wageSharePct);
+    if (share === "invalid") {
+      return failed(400, "The wage split has to be a percentage of his wage, or left blank.");
+    }
+    if (share !== null) {
+      if (share < 0 || share > 100) {
+        return failed(
+          400,
+          "The split is the share of his wage this club pays, so it runs from 0 to 100. Leave it blank if you did not agree one."
+        );
+      }
+      wageSharePct = Math.round(share);
+    }
   }
 
   const season =
@@ -104,6 +174,9 @@ export async function addTransferEntry(rawBody: unknown): Promise<OperationResul
       playerName,
       counterparty: typeof body.counterparty === "string" ? body.counterparty : null,
       fee,
+      kind,
+      salary,
+      wageSharePct,
       agreedOn: agreed.day,
       completedOn: completed.day,
       season,

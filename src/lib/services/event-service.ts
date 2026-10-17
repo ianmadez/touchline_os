@@ -110,6 +110,29 @@ export class EventService {
   }
 
   /**
+   * One logged debrief's stored payload, or null when there is no such row.
+   *
+   * Added for the edit path, which has to carry ONE figure forward rather than erase it: a debrief logged before
+   * the game's own expected goals had a box of its own carries a big chance count, and that count is the only
+   * thing its expected goals figure was ever worked out from. Narrow on purpose, like every other method here:
+   * only a `MATCH_DEBRIEF` the manager logged can be read.
+   */
+  async getDebriefPayload(id: string): Promise<string | null> {
+    const row = await db
+      .select({ payloadJson: careerEvents.payloadJson })
+      .from(careerEvents)
+      .where(
+        and(
+          eq(careerEvents.id, id),
+          eq(careerEvents.eventType, "MATCH_DEBRIEF"),
+          eq(careerEvents.source, "USER")
+        )
+      )
+      .get();
+    return row?.payloadJson ?? null;
+  }
+
+  /**
    * Rewrites one manager-logged debrief in place.
    *
    * Same narrow guard as the delete: only a `MATCH_DEBRIEF` that is USER-sourced can be rewritten, so

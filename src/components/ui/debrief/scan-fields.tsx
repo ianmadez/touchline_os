@@ -9,7 +9,23 @@ import {
   type MatchStatKey,
   type StatSource,
 } from "@/lib/ui/match-figures";
-import { LOW_CONFIDENCE, type ScanObservation } from "@/lib/ocr/extract";
+import { LOW_CONFIDENCE } from "@/lib/ocr/extract";
+
+/**
+ * What one of the five boxes has to show for itself.
+ *
+ * A box is filled from a screen's facts, so this is the REVIEW view of one figure: what was read, how sure the
+ * read was, whether it was worked out from a sum rather than seen, and which image it came off.
+ */
+export interface BoxObservation {
+  value: number;
+  confidence: number;
+  derived: boolean;
+  imageIndex: number;
+  words: import("@/lib/ocr/engine").OcrWord[];
+  /** Set when the screen carried this figure but the read could not safely use it. */
+  reason?: string | null;
+}
 
 /**
  * The figures, as the screenshot pane shows them.
@@ -25,9 +41,9 @@ import { LOW_CONFIDENCE, type ScanObservation } from "@/lib/ocr/extract";
 export interface ScanFieldsProps {
   draft: MatchStatDraft;
   sources: Record<MatchStatKey, StatSource>;
-  /** What the reads produced, keyed by figure. Absent means no read covered this figure. */
-  observations: Map<MatchStatKey, ScanObservation>;
-  /** Which figures the screen that was read is meant to carry. */
+  /** What the reads produced, keyed by box. Absent means no read covered this figure. */
+  observations: Map<MatchStatKey, BoxObservation>;
+  /** Which boxes the screens that were read are meant to carry. */
   carried: ReadonlySet<string>;
   /** The figure whose words are being highlighted, if any. */
   activeKey: MatchStatKey | null;
@@ -38,7 +54,7 @@ export interface ScanFieldsProps {
 }
 
 /** True when the box currently holds exactly what the read produced. */
-function holdsReadValue(draft: MatchStatDraft, key: MatchStatKey, observation: ScanObservation | undefined): boolean {
+function holdsReadValue(draft: MatchStatDraft, key: MatchStatKey, observation: BoxObservation | undefined): boolean {
   if (!observation) return false;
   return draft[key].trim() === String(observation.value);
 }
@@ -48,14 +64,14 @@ function chipFor(input: {
   key: MatchStatKey;
   draft: MatchStatDraft;
   source: StatSource;
-  observation: ScanObservation | undefined;
+  observation: BoxObservation | undefined;
   carried: boolean;
 }): { text: string; tone: "slate" | "amber" } | null {
   const { key, draft, source, observation, carried } = input;
   if (observation) {
     if (holdsReadValue(draft, key, observation)) {
       return {
-        text: observation.derived ? "Worked out from possession" : `Image ${observation.imageIndex}`,
+        text: observation.derived ? "Worked out from the sums" : `Image ${observation.imageIndex}`,
         tone: observation.confidence < LOW_CONFIDENCE ? "amber" : "slate",
       };
     }

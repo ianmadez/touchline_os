@@ -81,7 +81,7 @@ const MIN_READ_MS = 900;
  * `reconcileTourRevision`, which takes this value rather than deriving one, because "worth reshowing"
  * is an editorial call and cannot be computed.
  */
-const TOUR_REVISION = "2026-10-12-tier3-figures";
+const TOUR_REVISION = "2026-10-17-expected-goals-and-loans";
 
 /**
  * The fewest steps worth showing. A tour that survived filtering down to its tab button alone would
@@ -205,7 +205,7 @@ const TOURS: Record<string, TourStep[]> = {
     {
       anchor: "debrief-match-stats",
       title: "Match figures",
-      body: "Shots, inside box, big chances, possession and passes, as you saw them. Type them in, or switch to Screenshot and let the reader fill the boxes from a capture of the game's own Match Facts screen. Nothing is saved until you save the debrief.",
+      body: "Shots, inside box, expected goals, possession and passes, as you saw them. Type them in, or switch to Screenshot and let the reader fill the boxes from a capture of the game's own Match Facts screen. Nothing is saved until you save the debrief.",
     },
     {
       anchor: "debrief-history",
@@ -309,7 +309,7 @@ const TOURS: Record<string, TourStep[]> = {
     {
       anchor: "finance-ledger",
       title: "Who came and who went",
-      body: "Every move this club is on one side of, with the fee and the club at the other end. The save only carries a fee where a contract was pre-signed, so anything older is yours to add, and every line says which it is.",
+      body: "Every move this club is on one side of, with the fee and the club at the other end. The save only carries a fee where a contract was pre-signed, so anything older is yours to add, and every line says which it is. A loan is recorded with his wage and the share of it you pay.",
     },
     {
       anchor: "finance-rules",

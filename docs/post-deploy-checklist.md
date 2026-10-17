@@ -57,10 +57,23 @@ That is the whole reason item 3 below is not optional.
 8. [ ] **Unpaired state is honest.** With no bridge running and nothing paired, the panel offers the
    download and the file picker still works.
 9. [ ] **The screenshot reader works on the deployed origin.** Open a debrief, switch Match figures to
-   Screenshot, and add a capture of the game's Match Facts screen. Expect the figures to land in the boxes
-   and the picture to sit beside them. This is the only check that proves the worker, the wasm core and the
-   language model are all served from the deployment rather than from a CDN, because a scan makes no other
-   request at all. A refusal names its reason instead of failing silently, and the Manual pane still works.
+   Screenshot, and add a capture of the game's Match Facts Summary screen. Expect the four figures it carries
+   (shots, expected goals, possession, passes) to land in the boxes, the picture to sit beside them, and a
+   line saying the rest of the screen is kept with the match. This is the only check that proves the worker,
+   the wasm core and the language model are all served from the deployment rather than from a CDN, because a
+   scan makes no other request at all. A refusal names its reason instead of failing silently, and the Manual
+   pane still works.
+10. [ ] **The Match facts section is on the record.** Open the debrief that scan produced and expand Match
+   facts on the detail card. Expect the Summary screen's own figures, us against them, and nothing editable.
+   Shooting, Passing and Defending are listed in the pane's legend as not read yet: the three captures that
+   would turn them on have not been supplied, so those screens ship disabled.
+11. [ ] **A loan is recorded properly.** In Finance, add a deal, choose Loan, pick the player from the search,
+   enter his wage and your share, and save. Expect a Loan badge, the wage line with your share, and the
+   share inside the spend rather than beside it. Add one with no split and expect the row to say the wage is
+   not in the totals.
+12. [ ] **Expected goals is the game's own figure.** Add a debrief by hand, type 1.9 into Expected goals, and
+   expect Shot quality to appear beside Finishing, which reads to one decimal. Nothing on that panel should
+   mention big chances.
 
 ## Once the production domain is known
 

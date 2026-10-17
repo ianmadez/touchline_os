@@ -271,7 +271,7 @@ export function FinanceView({ careerId }: { careerId: string | null }) {
         )}
       </section>
 
-      <TransferLedgerPanel careerId={careerId} symbol={symbol} />
+      <TransferLedgerPanel careerId={careerId} symbol={symbol} wageFormat={report.wageFormat} />
 
       <FinanceRulesPanel careerId={careerId} symbol={symbol} />
 

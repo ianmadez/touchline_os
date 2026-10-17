@@ -5,45 +5,69 @@
  * code the page runs. The stages, in order:
  *
  *   rows        OCR words bucketed into the row bands the preprocessor found
- *   labels      each band's label text matched against the profile's alias table
- *   values      the number either side of the matched label
+ *   screen      which Match Facts screen this capture is, decided by its content
+ *   labels      each band's label text matched against the screen's rows, its section first
+ *   values      the OUTER number either side of the matched label, the inner one being a goals count
  *   sides       which of the two columns is ours
- *   validate    the cross field rules, and a confidence that comes from the rules as well as the OCR
- *   merge       folded into a draft, newest read first, hand edited fields never overwritten
+ *   facts       the sums, the derived value and the all-or-nothing rule, in `facts`
  *
- * WHY THE LABEL IS THE ANCHOR rather than a fixed position. The Summary group scrolls, so the same field is at
- * a different vertical position in two captures of the same screen, and a field could be missing entirely. A
- * position only means something next to the label that is sitting at it.
+ * WHY THE LABEL IS THE ANCHOR rather than a fixed position. Screens scroll, so the same row is at a different
+ * vertical position in two captures of the same screen, and a row can be missing entirely. A position only
+ * means something next to the label that is sitting at it.
  */
 
 import {
-  aliasIndex,
-  boundRows,
+  aliasIndexFor,
   normaliseLabel,
+  screenRows,
+  sectionHeadings,
+  storedRows,
   type Columns,
-  type RowLabel,
-  type StatFieldKey,
-  type StatGroup,
+  type FactKey,
+  type FactRow,
+  type FactScreen,
+  type LayoutProfile,
 } from "./layouts";
 import type { OcrWord } from "./engine";
-/** One row of the table, as the OCR saw it: its label text and the words either side. */
+/** One row of a screen, as the OCR saw it: its label text and the words either side. */
 export interface RowReading {
   /** Vertical centre of the band, in prepared-table pixels. */
   y: number;
   labelText: string;
   labelScore: number;
-  row: RowLabel | null;
+  /** The normalised section heading in force above this band, or null when none has been read. */
+  section: string | null;
+  row: FactRow | null;
   left: ValueReading | null;
   right: ValueReading | null;
+  /** True when the band's text is a section heading rather than a stat row. */
+  isHeading: boolean;
+}
+
+/** One number found in a value column, with the span it occupied. */
+export interface NumberToken {
+  value: number;
+  x0: number;
+  x1: number;
+  words: OcrWord[];
 }
 
 export interface ValueReading {
+  /**
+   * The stat itself, which is the OUTER number of the column.
+   *
+   * On Shooting a row can carry a goals count beside a small ball icon between the label and the number, as in
+   * "1 [ball] 10", where the outer number is the stat and the inner one counts goals. Reading the column as one
+   * concatenated string would turn that into 110, so the numbers are found separately and the outermost is the
+   * one believed. It is also why a stray glyph is harmless: the ball is not a digit, and if the OCR reads it as
+   * a 0 it is still the inner number rather than the outer one.
+   */
   value: number;
   raw: string;
-  /** The mean of the OCR word confidences that produced this value, 0 to 1. */
   wordConfidence: number;
-  /** The words that produced it, in prepared-table coordinates, for the focus highlight. */
   words: OcrWord[];
+  /** Every number in the column, left to right. More than one means a goals count came with the stat. */
+  tokens: NumberToken[];
 }
 
 /**
@@ -155,24 +179,24 @@ export function labelSimilarity(a: string, b: string): number {
 export const LABEL_MATCH_MIN = 0.62;
 
 export interface LabelMatch {
-  row: RowLabel;
+  row: FactRow;
   score: number;
   exact: boolean;
 }
 
 /**
- * The alias table for a group, built once per group object.
+ * The alias tables, built once per row list.
  *
  * A WeakMap rather than a module level variable, so this stays a pure lookup with no hidden mutable state: two
- * groups can be matched in the same process and neither can poison the other.
+ * screens can be matched in the same process and neither can poison the other.
  */
-const aliasTables = new WeakMap<StatGroup, Array<{ key: string; row: RowLabel }>>();
+const aliasTables = new WeakMap<readonly FactRow[], Array<{ key: string; row: FactRow }>>();
 
-function aliasTable(group: StatGroup): Array<{ key: string; row: RowLabel }> {
-  let table = aliasTables.get(group);
+function aliasTable(rows: readonly FactRow[]): Array<{ key: string; row: FactRow }> {
+  let table = aliasTables.get(rows);
   if (table === undefined) {
-    table = aliasIndex(group);
-    aliasTables.set(group, table);
+    table = aliasIndexFor(rows);
+    aliasTables.set(rows, table);
   }
   return table;
 }
@@ -184,12 +208,12 @@ function aliasTable(group: StatGroup): Array<{ key: string; row: RowLabel }> {
  * similarity score. Between two fuzzy candidates the longer alias wins, because the longer label is the more
  * specific one: `tackles won` over `tackles`.
  */
-export function matchLabel(text: string, group: StatGroup): LabelMatch | null {
+export function matchLabel(text: string, screen: FactScreen, rows?: readonly FactRow[]): LabelMatch | null {
   const key = normaliseLabel(text);
   if (key === "") return null;
 
   let best: LabelMatch | null = null;
-  for (const candidate of aliasTable(group)) {
+  for (const candidate of aliasTable(rows ?? screenRows(screen))) {
     if (candidate.key === key) return { row: candidate.row, score: 1, exact: true };
     const score = labelSimilarity(key, candidate.key);
     if (score < LABEL_MATCH_MIN) continue;
@@ -266,60 +290,223 @@ function meanConfidence(words: OcrWord[]): number {
 }
 
 /**
- * The number in one column of a band.
+ * The numbers in one column of a band.
  *
- * Every word in the column is concatenated rather than taking the first, because a decimal point is often its
- * own token: `0.8` comes back as `0`, `.`, `8` about as often as it comes back whole.
+ * Read as separate tokens rather than as one concatenated string: a row on Shooting can carry a goals count
+ * beside a ball icon next to the stat, and joining the column would turn "1 (ball) 10" into 110. Words that
+ * cannot start a number close the token being built, which is what keeps the ball icon out of it whether the OCR
+ * reads it as a glyph, as an `o` or as nothing at all.
  */
-function readValue(words: OcrWord[], width: number, range: readonly [number, number]): ValueReading | null {
+function readTokens(words: OcrWord[]): NumberToken[] {
+  const tokens: NumberToken[] = [];
+  let pending: OcrWord[] = [];
+
+  const flush = () => {
+    if (pending.length === 0) return;
+    const value = normaliseNumber(pending.map((word) => word.text.trim()).join(""));
+    if (value !== null) {
+      tokens.push({
+        value,
+        x0: Math.min(...pending.map((word) => word.x0)),
+        x1: Math.max(...pending.map((word) => word.x1)),
+        words: pending,
+      });
+    }
+    pending = [];
+  };
+
+  for (const word of words) {
+    const trimmed = word.text.trim();
+    const separator = /^[.,]$/.test(trimmed);
+    // A separator belongs to the number being built whatever the gap: "0", "8" one space too far apart is still
+    // a decimal on the screen, and at the outer edge it would otherwise read as two figures.
+    if (separator && pending.length > 0) {
+      pending.push(word);
+      continue;
+    }
+    // A word with a digit in it belongs to the number being built.
+    const numeric = /[0-9]/.test(word.text) || separator;
+    // A wide gap ends the number as surely as a glyph does. Without this, a goals count read beside the stat
+    // with the ball icon missed entirely would join it: "1" and "10" one space apart is 110.
+    const gap = pending.length === 0 ? 0 : word.x0 - Math.max(...pending.map((entry) => entry.x1));
+    const limit = Math.max(6, (word.y1 - word.y0) * 0.6);
+    // A number cannot end on a bare separator, so the digit after one belongs to it however it was spaced.
+    const afterSeparator = pending.length > 0 && /^[.,]$/.test(pending[pending.length - 1].text.trim());
+    if (numeric && (pending.length === 0 || gap <= limit || afterSeparator)) pending.push(word);
+    else {
+      flush();
+      if (numeric) pending.push(word);
+    }
+  }
+  flush();
+  return tokens;
+}
+
+/**
+ * The stat in one column of a band, which is the OUTER number of that column.
+ *
+ * Outermost means the side away from the label: leftmost in the left column, rightmost in the right column. On
+ * Shooting the inner number is a goals count, and on any screen a stray glyph read as a digit lands inside the
+ * stat rather than outside it.
+ */
+export function readColumnValue(
+  words: OcrWord[],
+  width: number,
+  range: readonly [number, number],
+  side: "LEFT" | "RIGHT"
+): ValueReading | null {
   const inColumn = wordsInColumn(words, width, range);
   if (inColumn.length === 0) return null;
 
-  const raw = inColumn.map((word) => word.text.trim()).join("");
-  const value = normaliseNumber(raw);
-  if (value === null) return null;
+  const tokens = readTokens(inColumn);
+  if (tokens.length === 0) return null;
 
-  return { value, raw, wordConfidence: meanConfidence(inColumn), words: inColumn };
+  const chosen =
+    side === "RIGHT"
+      ? tokens.reduce((best, token) => (token.x1 > best.x1 ? token : best))
+      : tokens.reduce((best, token) => (token.x0 < best.x0 ? token : best));
+
+  return {
+    value: chosen.value,
+    raw: inColumn.map((word) => word.text.trim()).join(""),
+    wordConfidence: meanConfidence(chosen.words),
+    words: chosen.words,
+    tokens,
+  };
 }
 
 /**
  * One band into a reading.
  *
- * A band whose label does not match any known row still comes back, with a null row, so the caller can count it
- * toward "is this the Summary screen" without inventing a field for it.
+ * The section in force is tried first and the whole screen is the fallback, so a misread section heading cannot
+ * cost a row its figure while two same-named rows on other screens still stay apart. A band whose label does not
+ * match any row still comes back, with a null row, which is what the screen classifier counts.
  */
 export function readRow(
   words: OcrWord[],
   y: number,
   width: number,
   columns: Columns,
-  group: StatGroup
+  screen: FactScreen,
+  section: readonly FactRow[] | null
 ): RowReading {
   const labelWords = wordsInColumn(words, width, columns.label);
   const labelText = labelWords.map(wordText).join(" ").trim();
-  const match = labelText === "" ? null : matchLabel(labelText, group);
+  const inSection = section === null || section.length === 0 ? null : matchLabel(labelText, screen, section);
+  const match = inSection ?? (labelText === "" ? null : matchLabel(labelText, screen));
 
   return {
     y,
     labelText,
     labelScore: match?.score ?? 0,
+    // Filled in by `readRows`, which is the only caller that knows which heading was last seen.
+    section: null,
     row: match?.row ?? null,
-    left: readValue(words, width, columns.left),
-    right: readValue(words, width, columns.right),
+    left: readColumnValue(words, width, columns.left, "LEFT"),
+    right: readColumnValue(words, width, columns.right, "RIGHT"),
+    isHeading: false,
   };
 }
 
-/** Every band read, top to bottom. */
+/**
+ * Every band of a screen read, top to bottom, tracking the section each band sits in.
+ *
+ * A band whose text matches a section heading sets the section for the bands below it, and carries no figure of
+ * its own. That is the whole of the section logic: it exists so a label can be resolved inside its section
+ * first, not so a heading has to be read for a screen to work.
+ */
 export function readRows(
   words: OcrWord[],
   bandCentres: number[],
   bandHeight: number,
   width: number,
   columns: Columns,
-  group: StatGroup
+  screen: FactScreen
 ): RowReading[] {
   const buckets = bucketIntoBands(words, bandCentres, bandHeight);
-  return buckets.map((bucket, index) => readRow(bucket, bandCentres[index], width, columns, group));
+  const headings = sectionHeadings(screen);
+  const rows: RowReading[] = [];
+  let current: FactRow[] | null = null;
+  let heading: string | null = null;
+
+  for (let index = 0; index < buckets.length; index += 1) {
+    const bucket = buckets[index];
+    const labelText = wordsInColumn(bucket, width, columns.label).map(wordText).join(" ").trim();
+    const normalised = normaliseLabel(labelText);
+
+    const headingHit =
+      normalised === ""
+        ? null
+        : headings.find((candidate) => labelSimilarity(normalised, candidate) >= 0.8) ?? null;
+    if (headingHit !== null) {
+      const section = screen.sections.find((entry) => normaliseLabel(entry.heading) === headingHit);
+      heading = headingHit;
+      current = section?.rows ?? null;
+      rows.push({
+        y: bandCentres[index],
+        labelText,
+        labelScore: 1,
+        section: headingHit,
+        row: null,
+        left: null,
+        right: null,
+        isHeading: true,
+      });
+      continue;
+    }
+
+    const reading = readRow(bucket, bandCentres[index], width, columns, screen, current);
+    rows.push({ ...reading, section: heading });
+  }
+
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
+// Screens
+// ---------------------------------------------------------------------------
+
+export interface ScreenChoice {
+  screen: FactScreen | null;
+  /** Why this screen, in a sentence the report can print. */
+  reason: string;
+}
+
+/**
+ * Which screen a capture is, decided by what is on it.
+ *
+ * The tab bar is deliberately not used: it is a strip of six words in small type, and one misread letter would
+ * move a read onto another screen's rows, where the labels are plausible and the figures are wrong. The content
+ * is the stronger signal, because the headings and the row labels are large type in the middle of the table.
+ *
+ * A screen's own heading decides it. Failing that, the screen whose rows matched most of the bands wins, and a
+ * capture that matched nothing is not a Match Facts table at all.
+ */
+export function classifyScreen(rows: RowReading[], profile: LayoutProfile): ScreenChoice {
+  const screens = profile.screens;
+
+  for (const entry of screens) {
+    for (const row of rows) {
+      const text = normaliseLabel(row.labelText);
+      if (text === "") continue;
+      const hit = entry.signatures.some((signature) => labelSimilarity(text, signature) >= 0.8);
+      if (hit) return { screen: entry, reason: `the ${entry.label} heading is on the capture` };
+    }
+  }
+
+  let best: { screen: FactScreen; matched: number } | null = null;
+  for (const entry of screens) {
+    const matched = rows.filter((row) => row.row !== null).length;
+    if (best === null || matched > best.matched) best = { screen: entry, matched };
+  }
+
+  if (best === null || best.matched === 0) {
+    return { screen: null, reason: "no row on this capture belongs to a screen the scanner knows" };
+  }
+  return {
+    screen: best.screen,
+    reason: `${best.matched} of its rows were read and no other screen's heading was found`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -418,246 +605,84 @@ export function settledSide(resolution: SideResolution): "LEFT" | "RIGHT" | null
   return resolution.kind === "AGREED" ? resolution.ours : null;
 }
 
-// ---------------------------------------------------------------------------
-// Validation
-// ---------------------------------------------------------------------------
-
 /** Below this a value is shown with a text cue as well as a colour, so the cue is never colour alone. */
 export const LOW_CONFIDENCE = 0.75;
 
 /**
- * Sane bounds, per field.
+ * The ceiling a figure can plausibly reach, per key.
  *
- * These are guards against a bad read, not football claims. A value outside its bound is DISCARDED rather than
- * clamped, for the reason the existing `match-stats` module already gives: clamping a misread number into range
- * would invent an observation the manager never made.
+ * A guard against a bad read rather than a football claim, and a value past it is DISCARDED rather than
+ * clamped: clamping a misread 700 passes down, or a misread 70 up, would invent an observation the manager
+ * never made. Everything not named here shares the ceiling below, which is the largest figure these screens
+ * print.
  */
-export const FIELD_BOUNDS: Partial<Record<StatFieldKey, { min: number; max: number }>> = {
-  possession: { min: 0, max: 100 },
-  shots: { min: 0, max: 60 },
-  shotsInsideBox: { min: 0, max: 60 },
-  bigChances: { min: 0, max: 30 },
-  passesCompleted: { min: 0, max: 1500 },
-  expectedGoalsReported: { min: 0, max: 10 },
+const DEFAULT_CEILING = 1500;
+export const FIELD_CEILINGS: Partial<Record<FactKey, number>> = {
+  possessionPct: 100,
+  expectedGoals: 10,
+  ballRecoverySeconds: 60,
 };
 
-/** The fields that are percentages, so possession alone today. */
-const PERCENT_FIELDS: StatFieldKey[] = ["possession"];
-
-export interface ValidatedObservation {
-  field: StatFieldKey;
-  value: number;
+/** One screen's figure for both clubs, under the key the row is stored as. */
+export interface ScreenValue {
+  key: FactKey;
+  us: number;
+  them: number;
+  /** The LOWER of the two confidences, so a pair is only as trustworthy as its weaker half. */
   confidence: number;
-  reason: string | null;
+  /** True when a value had to be worked out from a sum rather than read. */
   derived: boolean;
-  side: "LEFT" | "RIGHT";
-  /** The words behind the value, for the focus highlight. In prepared-table coordinates. */
-  words: OcrWord[];
+  usWords: OcrWord[];
+  themWords: OcrWord[];
 }
 
-export interface ValidationContext {
-  /** Fractions, in prepared-table coordinates. */
-  columns: Columns;
-  width: number;
-  rows: RowReading[];
-  /** Which column is ours, or null when the side is not settled. */
-  ours: "LEFT" | "RIGHT" | null;
-  /** Our goals from the debrief's scoreline, when the manager has entered one. */
-  goalsFor: number | null;
-  /** The group being read, which is what says which rows carry a field. */
-  group: StatGroup;
+export interface ScreenReading {
+  values: Map<FactKey, ScreenValue>;
+  /** Keys whose row was on the screen but whose two figures could not both be read. */
+  unread: FactKey[];
 }
 
 /**
- * Turns readings into observations.
+ * One classified screen's bands, turned into a figure for each club.
  *
- * The order matters and is deliberate: the side is resolved first, because a value read off the wrong column is
- * worse than no value at all, and the cross field rules run afterwards so a value they reject never reaches the
- * review pane.
+ * Nothing beyond the outer-number rule and the ceilings is decided here. The sums, the derived value and the
+ * all-or-nothing rule live in `facts`, where they can be reasoned about without a screenshot in front of them.
  */
-export function validateReadings(context: ValidationContext): {
-  observations: ValidatedObservation[];
-  unread: StatFieldKey[];
-} {
-  const ours = context.ours;
-  const expected = boundRows(context.group);
+export function readScreen(
+  rows: RowReading[],
+  screen: FactScreen,
+  ours: "LEFT" | "RIGHT" | null
+): ScreenReading {
+  const values = new Map<FactKey, ScreenValue>();
   if (ours === null) {
-    // Nothing is applied while the side is unsettled, so every bound field is unread by definition.
-    return { observations: [], unread: expected.map((row) => row.field as StatFieldKey) };
+    // Nothing is believed while the side is unsettled, because a value off the wrong column is worse than no
+    // value at all: the opponent's figures look completely plausible in our boxes.
+    return { values, unread: storedRows(screen).map((row) => row.key as FactKey) };
   }
 
-  const picked = new Map<StatFieldKey, ValidatedObservation>();
-
-  for (const reading of context.rows) {
-    if (reading.row === null || reading.row.field === null) continue;
-    const field = reading.row.field;
-    const side = ours === "LEFT" ? reading.left : reading.right;
-    if (side === null) continue;
-
-    const bound = FIELD_BOUNDS[field];
-    if (bound && (side.value < bound.min || side.value > bound.max)) {
-      // Out of range is a refused read, not a clamped one. It is reported as unread instead.
+  const unread: FactKey[] = [];
+  for (const reading of rows) {
+    if (reading.row === null || reading.row.key === null) continue;
+    const key = reading.row.key;
+    const us = ours === "LEFT" ? reading.left : reading.right;
+    const them = ours === "LEFT" ? reading.right : reading.left;
+    const ceiling = FIELD_CEILINGS[key] ?? DEFAULT_CEILING;
+    if (us === null || them === null || us.value < 0 || them.value < 0 || us.value > ceiling || them.value > ceiling) {
+      if (!unread.includes(key)) unread.push(key);
       continue;
     }
-
-    picked.set(field, {
-      field,
-      value: side.value,
-      confidence: side.wordConfidence,
-      reason: null,
+    values.set(key, {
+      key,
+      us: us.value,
+      them: them.value,
+      confidence: Math.min(us.wordConfidence, them.wordConfidence),
       derived: false,
-      side: ours,
-      words: side.words,
+      usWords: us.words,
+      themWords: them.words,
     });
   }
 
-  const notes = crossChecks(picked, context);
-
-  for (const [field, observation] of picked) {
-    const note = notes.get(field);
-    if (note === undefined) continue;
-    observation.reason = note.reason;
-    observation.confidence = Math.max(0, observation.confidence * note.factor);
-  }
-
-  const observations = [...picked.values()];
-  const read = new Set(observations.map((observation) => observation.field));
-  const unread = expected
-    .map((row) => row.field as StatFieldKey)
-    .filter((field) => !read.has(field));
-
-  return { observations, unread };
-}
-
-/**
- * The rules that need two values to check, and the same side read twice.
- *
- * A SOFT failure halves the confidence and states why rather than removing the value, because the manager is
- * looking at the picture and can settle it in a second. A possession pair that does not sum to 100 is the
- * clearest case: one of the two is a misread, and which one is not knowable from the numbers alone.
- */
-function crossChecks(
-  picked: Map<StatFieldKey, ValidatedObservation>,
-  context: ValidationContext
-): Map<StatFieldKey, { reason: string; factor: number }> {
-  const notes = new Map<StatFieldKey, { reason: string; factor: number }>();
-  const soft = (field: StatFieldKey, reason: string) => {
-    if (!picked.has(field)) return;
-    notes.set(field, { reason, factor: 0.5 });
-  };
-
-  // Cross-checks need the other side of the row, which is the same band read off the other column.
-  const otherSideOf = (field: StatFieldKey): number | null => {
-    for (const reading of context.rows) {
-      if (reading.row === null || reading.row.field !== field) continue;
-      const other = context.ours === "LEFT" ? reading.right : reading.left;
-      return other?.value ?? null;
-    }
-    return null;
-  };
-
-  for (const field of PERCENT_FIELDS) {
-    if (!picked.has(field)) continue;
-    const other = otherSideOf(field);
-    if (other === null) continue;
-    const total = picked.get(field)!.value + other;
-    if (Math.abs(total - 100) > 1) {
-      soft(field, `these two add up to ${total}, not 100`);
-    }
-  }
-
-  const shots = picked.get("shots")?.value;
-  const inside = picked.get("shotsInsideBox")?.value;
-  if (shots !== undefined && inside !== undefined && inside > shots) {
-    soft("shotsInsideBox", "more shots inside the box than shots");
-  }
-
-  if (context.goalsFor !== null) {
-    const goals = context.rows.find((reading) => normaliseLabel(reading.labelText) === "goals");
-    const value = context.ours === "LEFT" ? goals?.left?.value : goals?.right?.value;
-    if (value !== undefined && value !== null && value !== context.goalsFor) {
-      // There is no Goals field to mark, so the note lands on the figure most likely to be wrong with it.
-      soft("shots", `the scoreline says ${context.goalsFor} goals were scored`);
-    }
-  }
-
-  return notes;
-}
-
-// ---------------------------------------------------------------------------
-// Merge
-// ---------------------------------------------------------------------------
-
-export interface ScanObservation {
-  field: StatFieldKey;
-  value: number;
-  /** From the OCR word confidence AND the rules. Never the OCR confidence alone. */
-  confidence: number;
-  reason: string | null;
-  imageIndex: number;
-  derived: boolean;
-  words: OcrWord[];
-}
-
-export interface ScanImage {
-  index: number;
-  name: string;
-  profileId: string | null;
-  groupId: string | null;
-  side: SideResolution;
-}
-
-export interface ScanDraft {
-  observations: ScanObservation[];
-  images: ScanImage[];
-  /** Bound fields of this group that no image produced. Drives the "one more capture" line. */
-  unread: StatFieldKey[];
-}
-
-export function emptyDraft(): ScanDraft {
-  return { observations: [], images: [], unread: [] };
-}
-
-/**
- * Folds one image's readings into the draft.
- *
- * Keyed on the FIELD, not on the row position. The Summary group scrolls, so a second capture at a different
- * offset is a different set of rows carrying the same labels, and the position a value happened to occupy in one
- * capture says nothing about the other.
- *
- * The newest read wins. That is safe and it is not silent: every field in the pane names the image its value
- * came from, so a value that changed is visible rather than quietly replaced.
- */
-export function mergeIntoDraft(
-  draft: ScanDraft,
-  observations: ValidatedObservation[],
-  image: ScanImage,
-  unread: StatFieldKey[]
-): ScanDraft {
-  const byField = new Map<StatFieldKey, ScanObservation>();
-  for (const existing of draft.observations) byField.set(existing.field, existing);
-
-  for (const observation of observations) {
-    byField.set(observation.field, {
-      field: observation.field,
-      value: observation.value,
-      confidence: observation.confidence,
-      reason: observation.reason,
-      imageIndex: image.index,
-      derived: observation.derived,
-      words: observation.words,
-    });
-  }
-
-  const read = new Set([...byField.keys()]);
-
-  return {
-    observations: [...byField.values()],
-    images: [...draft.images.filter((entry) => entry.index !== image.index), image].sort(
-      (a, b) => a.index - b.index
-    ),
-    unread: unread.filter((field) => !read.has(field)),
-  };
+  return { values, unread };
 }
 
 /**

@@ -14,7 +14,7 @@
  * price, and a written-off free has no sale price, so those rows carry no profit rather than a made-up one.
  */
 
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, like, or } from "drizzle-orm";
 
 import { db } from "../db/client";
 import {
@@ -25,6 +25,7 @@ import {
   transferDeals,
   transferInputs,
   worldPlayers,
+  type DealKind,
 } from "../db/schema";
 import { yyyymmddToDate } from "../parser/interface";
 
@@ -34,6 +35,8 @@ export type LedgerProvenance = "SAVE" | "USER";
 export interface LedgerEntry {
   id: string;
   direction: LedgerDirection;
+  /** A transfer or a loan. The two are never mixed up in a total: see `wagesPaid`. */
+  kind: DealKind;
   playerName: string;
   /** The club at the other end, or null when nothing on file can name it. */
   counterparty: string | null;
@@ -62,6 +65,17 @@ export interface LedgerEntry {
   season: number | null;
   provenance: LedgerProvenance;
   note: string | null;
+  /** The player's wage on a loan, in whole units per week. Null on a transfer, and when not recorded. */
+  salary: number | null;
+  /** The share of that wage THIS club pays, 0 to 100. Null when no split was recorded. */
+  wageSharePct: number | null;
+  /**
+   * What this club pays of the wage, in the wage's own units.
+   *
+   * Null on a transfer, and on a loan whose split was never recorded: an unrecorded split is not read as
+   * "all of it", because that would put a cost in the totals the manager never confirmed.
+   */
+  wagesPaid: number | null;
   /** True when this row was typed in, so the screen can offer to remove it. */
   editable: boolean;
 }
@@ -78,6 +92,8 @@ export interface SeasonBalance {
   season: number | null;
   spent: number;
   received: number;
+  /** How much of `spent` is loan wages. Zero on a season with no loan on it. */
+  wages: number;
   net: number;
   deals: number;
 }
@@ -87,10 +103,23 @@ export interface TransferLedger {
   clubName: string;
   clubId: number | null;
   entries: LedgerEntry[];
-  /** Money out, then money in, then the difference. Career-wide. */
+  /** Money out, then money in, then the difference. Career-wide, and `spent` includes loan wages. */
   totals: { spent: number; received: number; net: number };
+  /**
+   * The same three figures with wages taken out: fees alone.
+   *
+   * Two different questions get asked of this ledger. The screen asks what the club has paid out, which has to
+   * include a loan's wage or it would call a season of loans free. The transfer-budget check asks what it has
+   * spent on TRANSFERS, which is a figure a wage must never be folded into - a loan's wages would eat a budget
+   * they were never part of.
+   */
+  feeTotals: { spent: number; received: number; net: number };
+  /** How much of `totals.spent` is wages rather than a fee, so the figure is never a mystery. */
+  loanWages: number;
+  /** Loans on file whose wage is not in the totals because no split was recorded. */
+  loansWithoutSplit: number;
   seasons: SeasonBalance[];
-  /** Per player, where both a purchase and a sale are on file. */
+  /** Per player, where both a purchase and a sale are on file. Loans are never counted as a purchase. */
   profitLines: PlayerLedgerLine[];
   /** How many players left without a fee on file, so a missing profit can be explained. */
   unvaluedExits: number;
@@ -104,12 +133,29 @@ export interface TransferInputRequest {
   playerName: string;
   counterparty?: string | null;
   fee: number;
+  /** A transfer, unless a loan is being recorded. */
+  kind?: DealKind;
+  /** The player's wage on a loan, in whole units per week. */
+  salary?: number | null;
+  /** The share of that wage this club pays, 0 to 100. Null when the manager left it blank. */
+  wageSharePct?: number | null;
   /** The day the deal was agreed, as the manager records it. */
   agreedOn?: string | null;
   /** The day the player actually moves, when that is a different day. */
   completedOn?: string | null;
   season?: number | null;
   note?: string | null;
+}
+
+/** A player the ledger can name a deal against. */
+export interface LedgerPlayerMatch {
+  /** The save's own id for him, so a later change of name cannot break the link. */
+  eaPlayerId: number;
+  name: string;
+  clubName: string | null;
+  primaryPosition: string;
+  /** True when he is already on the manager's books, which is the usual case for a sale. */
+  ours: boolean;
 }
 
 export class TransferLedgerService {
@@ -174,6 +220,9 @@ export class TransferLedgerService {
       entries.push({
         id: deal.id,
         direction: buying ? "IN" : "OUT",
+        // The save records a permanent move: whether it followed a loan is said in the note, not in `kind`,
+        // because the fee on this row IS a fee and nothing about it is a wage.
+        kind: "TRANSFER",
         playerName: nameByEaId.get(deal.playerId) ?? `Player ${deal.playerId}`,
         counterparty: named ?? fromManager,
         counterpartyFromManager: named === null && fromManager !== null,
@@ -193,6 +242,9 @@ export class TransferLedgerService {
           : deal.isExchangePlayer
             ? "Part of a swap, so the fee is not a clean price."
             : null,
+        salary: null,
+        wageSharePct: null,
+        wagesPaid: null,
         editable: false,
       });
     }
@@ -200,9 +252,11 @@ export class TransferLedgerService {
     // The manager's own half.
     const typed = await db.select().from(transferInputs).where(eq(transferInputs.careerId, careerId));
     for (const row of typed) {
+      const kind: DealKind = row.kind === "LOAN" ? "LOAN" : "TRANSFER";
       entries.push({
         id: row.id,
         direction: row.direction === "OUT" ? "OUT" : "IN",
+        kind,
         playerName: row.playerName,
         counterparty: row.counterparty,
         counterpartyFromManager: true,
@@ -214,6 +268,9 @@ export class TransferLedgerService {
         season: row.season ?? seasonFromDay(row.movedOn),
         provenance: "USER",
         note: row.note,
+        salary: kind === "LOAN" ? row.salary ?? null : null,
+        wageSharePct: kind === "LOAN" ? row.wageSharePct ?? null : null,
+        wagesPaid: loanWagesPaid(kind, row.salary ?? null, row.wageSharePct ?? null),
         editable: true,
       });
     }
@@ -233,17 +290,35 @@ export class TransferLedgerService {
     const spent = entries.filter((entry) => entry.direction === "IN").reduce((total, entry) => total + entry.fee, 0);
     const received = entries.filter((entry) => entry.direction === "OUT").reduce((total, entry) => total + entry.fee, 0);
 
+    /**
+     * Loan wages, and why they count as spend in BOTH directions.
+     *
+     * A share of a wage is money leaving the club whichever way the player moves: on the way in we pay part of
+     * his wage to have him here, and on the way out we pay whatever part the borrowing club did not take on.
+     * `loanWages` is reported separately so the manager can always see how much of the spend is wages and how
+     * much is a fee.
+     */
+    const loanWages = entries.reduce((total, entry) => total + (entry.wagesPaid ?? 0), 0);
+    const loansWithoutSplit = entries.filter(
+      (entry) => entry.kind === "LOAN" && entry.wagesPaid === null
+    ).length;
+    const totalSpent = spent + loanWages;
+
     const bySeason = new Map<number | null, SeasonBalance>();
     for (const entry of entries) {
       const balance = bySeason.get(entry.season) ?? {
         season: entry.season,
         spent: 0,
         received: 0,
+        wages: 0,
         net: 0,
         deals: 0,
       };
       if (entry.direction === "IN") balance.spent += entry.fee;
       else balance.received += entry.fee;
+      // Wages sit inside `spent` so a season row adds up the same way the totals above it do.
+      balance.wages += entry.wagesPaid ?? 0;
+      balance.spent += entry.wagesPaid ?? 0;
       balance.net = balance.spent - balance.received;
       balance.deals += 1;
       bySeason.set(entry.season, balance);
@@ -252,6 +327,9 @@ export class TransferLedgerService {
 
     const byPlayer = new Map<string, { paid: number | null; received: number | null }>();
     for (const entry of entries) {
+      // A loan is not a purchase, so it never pairs with a sale to print a profit: a loan fee on the way in
+      // and a fee on the way out would read as a 30 million pound gain on a player who was only borrowed.
+      if (entry.kind === "LOAN") continue;
       const key = entry.playerName.toLowerCase();
       const line = byPlayer.get(key) ?? { paid: null, received: null };
       if (entry.direction === "IN") line.paid = (line.paid ?? 0) + entry.fee;
@@ -272,7 +350,10 @@ export class TransferLedgerService {
       clubName: career.clubName,
       clubId,
       entries,
-      totals: { spent, received, net: spent - received },
+      totals: { spent: totalSpent, received, net: totalSpent - received },
+      feeTotals: { spent, received, net: spent - received },
+      loanWages,
+      loansWithoutSplit,
       seasons,
       profitLines,
       unvaluedExits: entries.filter((entry) => entry.direction === "OUT").length,
@@ -283,13 +364,25 @@ export class TransferLedgerService {
   /** Adds one handwritten deal. Returns the rebuilt ledger so the screen never has to predict the totals. */
   async addEntry(request: TransferInputRequest): Promise<TransferLedger | null> {
     const id = `tx_${request.careerId}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const kind: DealKind = request.kind === "LOAN" ? "LOAN" : "TRANSFER";
+    const salary =
+      kind === "LOAN" && typeof request.salary === "number" && Number.isFinite(request.salary)
+        ? Math.max(0, Math.round(request.salary))
+        : null;
+    const wageSharePct =
+      kind === "LOAN" && typeof request.wageSharePct === "number" && Number.isFinite(request.wageSharePct)
+        ? Math.min(100, Math.max(0, Math.round(request.wageSharePct)))
+        : null;
     await db.insert(transferInputs).values({
       id,
       careerId: request.careerId,
       direction: request.direction,
+      kind,
       playerName: request.playerName.trim(),
       counterparty: request.counterparty?.trim() ?? null,
       fee: Math.max(0, Math.round(request.fee)),
+      salary,
+      wageSharePct,
       // A typed deal has one date unless the manager gives two: most moves he records are one event, and
       // asking a second time for a date the save itself would carry on a recorded deal would be noise.
       movedOn: request.completedOn ?? request.agreedOn ?? null,
@@ -297,6 +390,60 @@ export class TransferLedgerService {
       note: request.note?.trim() ?? null,
     });
     return this.getLedger(request.careerId);
+  }
+
+  /**
+   * Players a deal can be named against.
+   *
+   * The form used to ask for a name typed from memory, and a name typed from memory is how a player ends up on
+   * the ledger under a spelling that appears nowhere else in the app. The save knows every professional it
+   * contains, so the search offers exactly those: the manager's own squad first, because the player leaving is
+   * usually one of his, then the rest of the world pool. Matching is on the name, inside whatever the save
+   * resolved it to.
+   */
+  async searchPlayers(careerId: string, query: string, limit = 8): Promise<LedgerPlayerMatch[]> {
+    const trimmed = query.trim();
+    if (trimmed === "") return [];
+    const pattern = `%${trimmed}%`;
+
+    const [squad, pool] = await Promise.all([
+      db
+        .select()
+        .from(players)
+        .where(and(eq(players.careerId, careerId), like(players.name, pattern))),
+      db
+        .select()
+        .from(worldPlayers)
+        .where(and(eq(worldPlayers.careerId, careerId), like(worldPlayers.name, pattern))),
+    ]);
+
+    const matches = new Map<number, LedgerPlayerMatch>();
+    // The pool first and the squad second, so ours overwrite theirs rather than the other way round.
+    for (const player of pool) {
+      matches.set(player.eaPlayerId, {
+        eaPlayerId: player.eaPlayerId,
+        name: player.name,
+        clubName: player.clubName,
+        primaryPosition: player.primaryPosition,
+        ours: false,
+      });
+    }
+    for (const player of squad) {
+      matches.set(player.eaPlayerId, {
+        eaPlayerId: player.eaPlayerId,
+        name: player.name,
+        clubName: null,
+        primaryPosition: player.primaryPosition,
+        ours: true,
+      });
+    }
+
+    return [...matches.values()]
+      .sort((left, right) => {
+        if (left.ours !== right.ours) return left.ours ? -1 : 1;
+        return left.name.localeCompare(right.name);
+      })
+      .slice(0, limit);
   }
 
   /** Removes one handwritten deal. A save row is never deletable, which is why this keys on the typed table. */
@@ -349,6 +496,18 @@ export class TransferLedgerService {
 
     return this.getLedger(careerId);
   }
+}
+
+/**
+ * What this club pays of a loan's wage, or null when that cannot be known.
+ *
+ * A wage with no recorded split is deliberately NOT counted. Reading a blank split as "we pay all of it" would
+ * put a figure in the totals that the manager never gave, and a ledger that guesses is worse than one that
+ * reports the gap.
+ */
+function loanWagesPaid(kind: DealKind, salary: number | null, sharePct: number | null): number | null {
+  if (kind !== "LOAN" || salary === null || sharePct === null) return null;
+  return Math.round((salary * sharePct) / 100);
 }
 
 /**

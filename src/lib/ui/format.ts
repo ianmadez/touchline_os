@@ -61,10 +61,10 @@ export function ordinal(value: number): string {
 /**
  * The precision the game reports its own expected goals to.
  *
- * Two places, and it is the game's number rather than a rounded one, so trimming it to one would be inventing a
- * figure the manager never saw.
+ * One place, and it is the game's own figure rather than a rounded one: the Match Facts Summary screen prints a
+ * single decimal (1.9, 3.5), so a second one would be precision the manager never saw.
  */
-export const EXPECTED_GOALS_PLACES = 2;
+export const EXPECTED_GOALS_PLACES = 1;
 
 /**
  * The game's own expected goals, at its own precision.

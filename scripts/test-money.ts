@@ -331,6 +331,139 @@ async function main() {
     ledger?.entries.length === before && ledger.entries.some((entry) => entry.playerName === "Arrived Player")
   );
 
+  console.log("\nthe ledger: a loan, which is money as a wage rather than as a fee");
+  // The state every figure below is measured from, with no loan on the ledger yet.
+  const feesOnlySpent = ledger?.totals.spent ?? 0;
+  const feesOnlyReceived = ledger?.totals.received ?? 0;
+
+  ledger = await ledgerService.addEntry({
+    careerId,
+    direction: "IN",
+    playerName: "Loaned In",
+    counterparty: "Parent Club FC",
+    fee: 0,
+    kind: "LOAN",
+    salary: 20_000,
+    wageSharePct: 60,
+    agreedOn: "2026-08-20",
+    season: 2026,
+    note: null,
+  });
+  if (!ledger) throw new Error("loan add returned nothing");
+
+  const loanIn = ledger.entries.find((entry) => entry.playerName === "Loaned In");
+  check("a loan is recorded as a loan rather than as a transfer", loanIn?.kind === "LOAN");
+  check(
+    "and it carries his wage and the share of it this club pays",
+    loanIn?.salary === 20_000 && loanIn?.wageSharePct === 60,
+    `${loanIn?.salary} / ${loanIn?.wageSharePct}`
+  );
+  check("sixty percent of his wage is what leaves the club", loanIn?.wagesPaid === 12_000, String(loanIn?.wagesPaid));
+  check(
+    "the wage share lands inside the spend, beside the fees",
+    ledger.totals.spent === feesOnlySpent + 12_000 && ledger.loanWages === 12_000,
+    `${ledger.totals.spent} / ${ledger.loanWages}`
+  );
+  check(
+    "the fee view is left alone, so a transfer budget is never measured against a wage",
+    ledger.feeTotals.spent === feesOnlySpent && ledger.feeTotals.received === feesOnlyReceived
+  );
+
+  ledger = await ledgerService.addEntry({
+    careerId,
+    direction: "OUT",
+    playerName: "Loaned Out",
+    counterparty: "Borrowers FC",
+    fee: 0,
+    kind: "LOAN",
+    salary: 15_000,
+    wageSharePct: null,
+    season: 2026,
+    note: null,
+  });
+  const loanOut = ledger?.entries.find((entry) => entry.playerName === "Loaned Out");
+  check(
+    "a blank split stays blank rather than being read as all of it",
+    loanOut?.wageSharePct === null && loanOut?.wagesPaid === null
+  );
+  check(
+    "and that wage is reported as uncounted rather than counted as free",
+    ledger?.loansWithoutSplit === 1 && ledger?.loanWages === 12_000,
+    `${ledger?.loansWithoutSplit} / ${ledger?.loanWages}`
+  );
+
+  const loanSale = await ledgerService.addEntry({
+    careerId,
+    direction: "OUT",
+    playerName: "Loaned In",
+    counterparty: "Buyers FC",
+    fee: 3_000_000,
+    season: 2026,
+    note: null,
+  });
+  check(
+    "a player who arrived on loan and later left for a fee is given no profit",
+    loanSale?.profitLines.find((line) => line.playerName === "Loaned In")?.profit === null,
+    String(loanSale?.profitLines.find((line) => line.playerName === "Loaned In")?.profit)
+  );
+
+  console.log("\nthe ledger: what a loan has to be told, and who a deal is about");
+  const { addTransferEntry, searchLedgerPlayers } = await import("../src/lib/operations/transfer-ledger");
+  const loanBody = (extra: Record<string, unknown>): string =>
+    JSON.stringify({ careerId, direction: "IN", playerName: "Checked Loan", fee: 0, kind: "LOAN", ...extra });
+
+  let outcome = await addTransferEntry(loanBody({ wageSharePct: 50 }));
+  check("a loan with no wage on it is refused", outcome.status === 400, JSON.stringify(outcome.body));
+  outcome = await addTransferEntry(loanBody({ salary: 10_000, wageSharePct: 140 }));
+  check("a split above 100 is refused", outcome.status === 400, JSON.stringify(outcome.body));
+  outcome = await addTransferEntry(loanBody({ salary: 10_000, wageSharePct: "" }));
+  check(
+    "a blank split is accepted, because he may not have agreed one",
+    outcome.status === 200,
+    JSON.stringify(outcome.body)
+  );
+  const checkedLoanId = (
+    (outcome.body as { ledger?: { entries: Array<{ id: string; playerName: string }> } }).ledger?.entries ?? []
+  ).find((entry) => entry.playerName === "Checked Loan")?.id;
+
+  const search = await searchLedgerPlayers(careerId, "Squad Player 1");
+  const squadMatches = (search.body as { players?: Array<{ name: string; ours: boolean }> }).players ?? [];
+  check(
+    "the deal form searches the manager's own squad",
+    squadMatches.some((player) => player.ours && player.name === "Squad Player 1"),
+    JSON.stringify(squadMatches)
+  );
+  const poolSearch = await searchLedgerPlayers(careerId, "Arrived");
+  const poolMatches = (poolSearch.body as { players?: Array<{ name: string; ours: boolean }> }).players ?? [];
+  check(
+    "and the rest of the save's players, flagged as not ours",
+    poolMatches.some((player) => !player.ours && player.name === "Arrived Player"),
+    JSON.stringify(poolMatches)
+  );
+  const emptySearch = await searchLedgerPlayers(careerId, "   ");
+  check(
+    "an empty search answers with nothing rather than with a suggestion",
+    ((emptySearch.body as { players?: unknown[] }).players ?? []).length === 0
+  );
+
+  // Back to the state the rules checks below read their net spend from: a loan is on file in the tests above,
+  // and the ledger's own figures return to what they were once it is removed.
+  if (checkedLoanId) ledger = await ledgerService.removeEntry(careerId, checkedLoanId);
+  const loanSaleId = loanSale?.entries.find((entry) => entry.playerName === "Loaned In" && entry.direction === "OUT")?.id;
+  if (loanSaleId) ledger = await ledgerService.removeEntry(careerId, loanSaleId);
+  for (const name of ["Loaned In", "Loaned Out"]) {
+    const id = ledger?.entries.find((entry) => entry.playerName === name)?.id;
+    if (id) ledger = await ledgerService.removeEntry(careerId, id);
+  }
+  check(
+    "removing the loans puts the ledger back to its fees",
+    ledger?.totals.spent === feesOnlySpent &&
+      ledger?.totals.received === feesOnlyReceived &&
+      ledger?.loanWages === 0 &&
+      ledger?.loansWithoutSplit === 0,
+    `${ledger?.totals.spent} / ${ledger?.totals.received}`
+  );
+
   console.log("\nthe rules: which ones apply to a tier");
   const championship = rulesForLeague(14, 2);
   check("England tier 2 resolves to the England set", championship?.league === "England");

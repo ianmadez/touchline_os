@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { DatePicker } from "@/components/ui/date-picker";
 import { formatMoney, formatMoneyExact } from "@/lib/ui/format";
 import type { FinanceRulesReport, RuleStatus, RuleVerdict } from "@/lib/services/finance-rules-service";
-import type { LedgerEntry, TransferLedger } from "@/lib/services/transfer-ledger-service";
+import type { LedgerEntry, LedgerPlayerMatch, TransferLedger } from "@/lib/services/transfer-ledger-service";
 import { IconAlert, IconArrowIn, IconArrowOut, IconCheck, IconPlus, IconTrend, IconUserEntry, IconWallet } from "@/components/ui/icons";
 
 import { apiFetch } from "@/lib/platform/api-client";
@@ -24,7 +24,16 @@ import { apiFetch } from "@/lib/platform/api-client";
  * Neither panel is decorated for its own sake: one table, one list, one form, and the caveats where the
  * numbers are.
  */
-export function TransferLedgerPanel({ careerId, symbol }: { careerId: string | null; symbol: string }) {
+export function TransferLedgerPanel({
+  careerId,
+  symbol,
+  wageFormat,
+}: {
+  careerId: string | null;
+  symbol: string;
+  /** The save's own wage convention, so a loan's wage is never labelled the wrong way round. */
+  wageFormat: "WEEKLY" | "ANNUAL";
+}) {
   const [ledger, setLedger] = useState<TransferLedger | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -91,6 +100,9 @@ export function TransferLedgerPanel({ careerId, symbol }: { careerId: string | n
 
   const savedCount = ledger ? ledger.entries.filter((entry) => entry.provenance === "SAVE").length : 0;
   const typedCount = ledger ? ledger.entries.length - savedCount : 0;
+  // A wages column only earns its place on a ledger that has loan wages on it; otherwise it is a column of
+  // the word "none" beside figures that already include them.
+  const seasonWages = ledger ? ledger.seasons.some((season) => season.wages > 0) : false;
   const profitLines = useMemo(
     () => (ledger ? ledger.profitLines.filter((line) => line.profit !== null) : []),
     [ledger]
@@ -132,6 +144,7 @@ export function TransferLedgerPanel({ careerId, symbol }: { careerId: string | n
         <AddDealForm
           careerId={careerId}
           symbol={symbol}
+          wageFormat={wageFormat}
           busy={busy}
           onSubmit={async (values) => {
             const done = await write("/api/transfer-ledger", {
@@ -172,18 +185,30 @@ export function TransferLedgerPanel({ careerId, symbol }: { careerId: string | n
 
           <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
             {savedCount} {savedCount === 1 ? "fee" : "fees"} from the save
-            {typedCount > 0 ? `, ${typedCount} you entered` : ""}. Nothing above is an estimate: every
-            line is a fee from somewhere.
+            {typedCount > 0 ? `, ${typedCount} you entered` : ""}. Nothing above is an estimate
+            {ledger.loanWages > 0
+              ? `, and ${formatMoney(ledger.loanWages, symbol)} of the spend is loan wages rather than a fee`
+              : ""}
+            .
           </p>
+
+          {ledger.loansWithoutSplit > 0 ? (
+            <p className="font-sans text-[11px] text-amber-700 dark:text-amber-300">
+              {ledger.loansWithoutSplit === 1 ? "One loan has" : `${ledger.loansWithoutSplit} loans have`} a
+              wage on file but no split agreed, so{" "}
+              {ledger.loansWithoutSplit === 1 ? "that wage is" : "those wages are"} not in the totals.
+            </p>
+          ) : null}
 
           {ledger.seasons.length > 1 && (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[420px] border-collapse text-left">
+              <table className={`w-full border-collapse text-left ${seasonWages ? "min-w-[520px]" : "min-w-[420px]"}`}>
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-slate-800">
                     <Th>Season</Th>
                     <Th align="right">Spent</Th>
                     <Th align="right">Received</Th>
+                    {seasonWages ? <Th align="right">Wages</Th> : null}
                     <Th align="right">Net</Th>
                   </tr>
                 </thead>
@@ -196,6 +221,9 @@ export function TransferLedgerPanel({ careerId, symbol }: { careerId: string | n
                       <Td>{season.season ?? "Season not recorded"}</Td>
                       <Td align="right">{formatMoney(season.spent, symbol)}</Td>
                       <Td align="right">{formatMoney(season.received, symbol)}</Td>
+                      {seasonWages ? (
+                        <Td align="right">{season.wages > 0 ? formatMoney(season.wages, symbol) : "none"}</Td>
+                      ) : null}
                       <Td align="right" tone={season.net > 0 ? "over" : undefined}>
                         {formatMoney(season.net, symbol)}
                       </Td>
@@ -212,6 +240,7 @@ export function TransferLedgerPanel({ careerId, symbol }: { careerId: string | n
                 key={entry.id}
                 entry={entry}
                 symbol={symbol}
+                wageFormat={wageFormat}
                 busy={busy}
                 onRemove={
                   entry.editable && careerId
@@ -277,7 +306,9 @@ export function TransferLedgerPanel({ careerId, symbol }: { careerId: string | n
           <p className="border-t border-slate-200 pt-3 font-sans text-[10px] leading-relaxed text-slate-500 dark:border-slate-800 dark:text-slate-400">
             The arrow is the direction of the move. Club names come from the save&apos;s own player records,
             which name every club in the world, so a deal with a club outside your division still reads
-            properly. If one is ever missing, name it yourself and the row keeps your wording.
+            properly. If one is ever missing, name it yourself and the row keeps your wording. A loan carries
+            his wage and your share of it, and that share counts as spend, because it leaves the club whether
+            he is here or not.
           </p>
         </div>
       )}
@@ -288,35 +319,109 @@ export function TransferLedgerPanel({ careerId, symbol }: { careerId: string | n
 interface DealValues {
   careerId: string;
   direction: "IN" | "OUT";
+  kind: "TRANSFER" | "LOAN";
   playerName: string;
   counterparty: string;
   fee: number;
+  /** His wage on a loan, in whole units per week. Null on a transfer. */
+  salary: number | null;
+  /** The share of that wage this club pays, 0 to 100. Null when no split was agreed. */
+  wageSharePct: number | null;
   movedOn: string | null;
   season: number | null;
   note: string | null;
 }
 
-/** The one form. Small on purpose: a name, a direction, a fee, and whatever else is known. */
+/**
+ * The one form. A player, a direction, a fee, and on a loan his wage and the split.
+ *
+ * The player is SEARCHED rather than remembered. The save holds every professional in it, so the form offers
+ * them by name, with the club and position that tell two players of the same name apart, and the name recorded
+ * is then the name the rest of the app already uses. Typing a name the pool does not hold is still allowed: a
+ * career can contain a player whose name the save never resolved, and refusing the deal over that would be
+ * worse than recording the name he was given.
+ */
 function AddDealForm({
   careerId,
   symbol,
+  wageFormat,
   busy,
   onSubmit,
 }: {
   careerId: string;
   symbol: string;
+  wageFormat: "WEEKLY" | "ANNUAL";
   busy: boolean;
   onSubmit: (values: DealValues) => Promise<void>;
 }) {
+  const wagePeriod = wageFormat === "ANNUAL" ? "year" : "week";
   const [direction, setDirection] = useState<"IN" | "OUT">("IN");
+  const [kind, setKind] = useState<"TRANSFER" | "LOAN">("TRANSFER");
   const [playerName, setPlayerName] = useState("");
+  const [matches, setMatches] = useState<LedgerPlayerMatch[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [picked, setPicked] = useState<LedgerPlayerMatch | null>(null);
   const [counterparty, setCounterparty] = useState("");
   const [fee, setFee] = useState("");
+  const [salary, setSalary] = useState("");
+  const [share, setShare] = useState("");
   const [movedOn, setMovedOn] = useState("");
   const [note, setNote] = useState("");
 
-  const parsedFee = fee.trim() === "" ? null : Math.round(Number(fee));
-  const ready = playerName.trim() !== "" && parsedFee !== null && Number.isFinite(parsedFee) && parsedFee >= 0;
+  /**
+   * The name search, deferred by a quarter of a second.
+   *
+   * Every keystroke would otherwise be its own read of a pool running to tens of thousands of players, and
+   * setState must not run synchronously inside an effect body here, so the whole search lives in the timer.
+   * One letter is not a search: it is answered with nothing rather than with the first few players alphabetically.
+   */
+  useEffect(() => {
+    const query = playerName.trim();
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      if (query.length < 2) {
+        setMatches([]);
+        setSearching(false);
+        return;
+      }
+      setSearching(true);
+      try {
+        const response = await apiFetch(
+          `/api/transfer-ledger/players?careerId=${encodeURIComponent(careerId)}&query=${encodeURIComponent(query)}`,
+          { cache: "no-store" }
+        );
+        const payload = (await response.json()) as { success?: boolean; players?: LedgerPlayerMatch[] };
+        if (!cancelled) setMatches(payload.success ? payload.players ?? [] : []);
+      } catch {
+        if (!cancelled) setMatches([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [careerId, playerName]);
+
+  const parsedFee = fee.trim() === "" ? (kind === "LOAN" ? 0 : null) : Math.round(Number(fee));
+  const feeOk = parsedFee !== null && Number.isFinite(parsedFee) && parsedFee >= 0;
+  const parsedSalary = salary.trim() === "" ? null : Math.round(Number(salary));
+  const salaryOk = parsedSalary !== null && Number.isFinite(parsedSalary) && parsedSalary >= 0;
+  const parsedShare = share.trim() === "" ? null : Math.round(Number(share));
+  const shareOk = parsedShare === null || (Number.isFinite(parsedShare) && parsedShare >= 0 && parsedShare <= 100);
+  const ready = playerName.trim() !== "" && feeOk && shareOk && (kind === "TRANSFER" || salaryOk);
+
+  const pick = (match: LedgerPlayerMatch) => {
+    setPicked(match);
+    setPlayerName(match.name);
+    setMatches([]);
+    // A signing's other club is the one he is at, which the search already knows. A sale's is not: the pool
+    // carries OUR club on a player of ours, which is the wrong end of the deal, so the box stays empty.
+    if (direction === "IN" && !match.ours && match.clubName && counterparty.trim() === "") {
+      setCounterparty(match.clubName);
+    }
+  };
 
   return (
     <form
@@ -327,9 +432,12 @@ function AddDealForm({
         void onSubmit({
           careerId,
           direction,
+          kind,
           playerName: playerName.trim(),
           counterparty: counterparty.trim(),
           fee: parsedFee as number,
+          salary: kind === "LOAN" ? parsedSalary : null,
+          wageSharePct: kind === "LOAN" ? parsedShare : null,
           movedOn: movedOn.trim() === "" ? null : movedOn.trim(),
           season: movedOn.trim() === "" ? null : Number(movedOn.slice(0, 4)),
           note: note.trim() === "" ? null : note.trim(),
@@ -337,34 +445,87 @@ function AddDealForm({
       }}
     >
       <div className="flex flex-wrap items-center gap-2">
-        {(["IN", "OUT"] as const).map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => setDirection(option)}
-            aria-pressed={direction === option}
-            className={`cursor-pointer rounded-lg border px-3 py-1.5 font-heading text-[10px] font-bold uppercase tracking-wider transition-colors ${
-              direction === option
-                ? "border-[#E11D48] bg-[#E11D48] text-white dark:border-[#FF8C7A] dark:bg-[#FF8C7A] dark:text-slate-950"
-                : "border-slate-300 text-slate-600 hover:border-slate-400 dark:border-slate-700 dark:text-slate-300"
-            }`}
-          >
-            {option === "IN" ? "Signed" : "Sold"}
-          </button>
-        ))}
+        <div className="flex items-center gap-2">
+          {(["IN", "OUT"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setDirection(option)}
+              aria-pressed={direction === option}
+              className={`cursor-pointer rounded-lg border px-3 py-1.5 font-heading text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                direction === option
+                  ? "border-[#E11D48] bg-[#E11D48] text-white dark:border-[#FF8C7A] dark:bg-[#FF8C7A] dark:text-slate-950"
+                  : "border-slate-300 text-slate-600 hover:border-slate-400 dark:border-slate-700 dark:text-slate-300"
+              }`}
+            >
+              {option === "IN" ? "Signed" : "Sold"}
+            </button>
+          ))}
+        </div>
+        <span className="h-5 w-px bg-slate-200 dark:bg-slate-800" aria-hidden="true" />
+        <div className="flex items-center gap-2">
+          {(["TRANSFER", "LOAN"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setKind(option)}
+              aria-pressed={kind === option}
+              className={`cursor-pointer rounded-lg border px-3 py-1.5 font-heading text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                kind === option
+                  ? "border-slate-800 bg-slate-800 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-950"
+                  : "border-slate-300 text-slate-600 hover:border-slate-400 dark:border-slate-700 dark:text-slate-300"
+              }`}
+            >
+              {option === "TRANSFER" ? "Transfer" : "Loan"}
+            </button>
+          ))}
+        </div>
         <span className="font-sans text-[10px] text-slate-500 dark:text-slate-400">
-          A deal you recorded is badged as yours wherever it appears.
+          {kind === "LOAN"
+            ? "A loan asks for his wage and your share of it."
+            : "A deal you recorded is badged as yours wherever it appears."}
         </span>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Player">
-          <input
-            value={playerName}
-            onChange={(event) => setPlayerName(event.target.value)}
-            placeholder="Name as you know it"
-            className={inputClass}
-          />
+          <div className="relative">
+            <input
+              value={playerName}
+              onChange={(event) => {
+                setPlayerName(event.target.value);
+                setPicked(null);
+              }}
+              placeholder="Search the players in this save"
+              autoComplete="off"
+              aria-label="Search the players in this save"
+              className={inputClass}
+            />
+            {searching ? (
+              <span className="pointer-events-none absolute right-2.5 top-2.5 font-sans text-[10px] text-slate-400">
+                Searching
+              </span>
+            ) : null}
+            {matches.length > 0 ? (
+              <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                {matches.map((match) => (
+                  <li key={match.eaPlayerId}>
+                    <button
+                      type="button"
+                      onClick={() => pick(match)}
+                      className="flex w-full items-baseline justify-between gap-2 px-3 py-2 text-left font-sub text-[11px] text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      <span className="truncate">{match.name}</span>
+                      <span className="shrink-0 text-[10px] text-slate-400">
+                        {match.ours ? "your squad" : match.clubName ?? "club not named"} ·{" "}
+                        {match.primaryPosition}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
         </Field>
         <Field label={direction === "IN" ? "Signed from" : "Sold to"}>
           <input
@@ -374,13 +535,13 @@ function AddDealForm({
             className={inputClass}
           />
         </Field>
-        <Field label={`Fee (${symbol})`}>
+        <Field label={kind === "LOAN" ? `Loan fee (${symbol})` : `Fee (${symbol})`}>
           <input
             type="number"
             min={0}
             value={fee}
             onChange={(event) => setFee(event.target.value)}
-            placeholder="0 for a free"
+            placeholder={kind === "LOAN" ? "Blank for a free loan" : "0 for a free"}
             className={`${inputClass} tabular-nums`}
           />
         </Field>
@@ -388,6 +549,45 @@ function AddDealForm({
           <DatePicker value={movedOn || null} onChange={(next) => setMovedOn(next ?? "")} />
         </Field>
       </div>
+
+      {playerName.trim() !== "" && !searching && matches.length === 0 ? (
+        <p className="font-sans text-[10px] text-slate-500 dark:text-slate-400">
+          {picked
+            ? `${picked.name} · ${picked.ours ? "your squad" : picked.clubName ?? "club not named"} · ${picked.primaryPosition}`
+            : "Nothing in this save matches yet. A name that is not in it is recorded as you typed it."}
+        </p>
+      ) : null}
+
+      {kind === "LOAN" ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label={`Wage per ${wagePeriod} (${symbol})`}>
+            <input
+              type="number"
+              min={0}
+              value={salary}
+              onChange={(event) => setSalary(event.target.value)}
+              placeholder="His wage"
+              className={`${inputClass} tabular-nums`}
+            />
+          </Field>
+          <Field label="Share this club pays (%)">
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={5}
+              value={share}
+              onChange={(event) => setShare(event.target.value)}
+              placeholder="Blank if none agreed"
+              className={`${inputClass} tabular-nums`}
+            />
+          </Field>
+          <p className="font-sans text-[10px] leading-relaxed text-slate-500 sm:col-span-2 lg:col-span-2 lg:self-center dark:text-slate-400">
+            The share of his wage that leaves this club. A blank split is left out of the totals, because
+            nothing on file would say how much of it is yours.
+          </p>
+        </div>
+      ) : null}
 
       <Field label="Note (optional)">
         <input
@@ -412,12 +612,14 @@ function AddDealForm({
 function LedgerRow({
   entry,
   symbol,
+  wageFormat,
   busy,
   onRemove,
   onName,
 }: {
   entry: LedgerEntry;
   symbol: string;
+  wageFormat: "WEEKLY" | "ANNUAL";
   busy: boolean;
   onRemove?: () => void;
   /** Saves the manager's own name for a club the save cannot name. Absent on a row already named. */
@@ -425,6 +627,7 @@ function LedgerRow({
 }) {
   const [naming, setNaming] = useState(false);
   const [draft, setDraft] = useState(entry.counterparty ?? "");
+  const wagePeriod = wageFormat === "ANNUAL" ? "year" : "week";
 
   const counterpartyText = (() => {
     if (entry.counterparty) return entry.counterparty;
@@ -456,6 +659,12 @@ function LedgerRow({
           <span className="font-sub text-xs font-bold text-slate-900 dark:text-slate-100">
             {entry.playerName}
           </span>
+          {/* A loan is badged, because the fee on the right is not the deal: the wage under this row is. */}
+          {entry.kind === "LOAN" ? (
+            <span className="rounded bg-sky-100 px-1.5 py-0.5 font-sub text-[9px] font-bold uppercase tracking-wider text-sky-700 dark:bg-sky-500/15 dark:text-sky-300">
+              Loan
+            </span>
+          ) : null}
           <SourceTag source={entry.provenance} />
           {/* Only on a SAVED deal: a typed row is already badged as the manager's, and two identical
               badges beside each other read as a rendering fault. */}
@@ -477,6 +686,23 @@ function LedgerRow({
               : ""}
           {entry.note ? ` · ${entry.note}` : ""}
         </p>
+
+        {entry.kind === "LOAN" ? (
+          <p className="mt-0.5 font-sans text-[11px] text-slate-500 dark:text-slate-400">
+            {entry.salary === null ? (
+              "No wage was recorded for this loan."
+            ) : (
+              <>
+                {formatMoney(entry.salary, symbol)} a {wagePeriod}
+                {entry.wageSharePct === null
+                  ? " · split not recorded, so the wage is not in the totals"
+                  : ` · ${entry.wageSharePct}% ours${
+                      entry.wagesPaid === null ? "" : ` (${formatMoney(entry.wagesPaid, symbol)} a ${wagePeriod})`
+                    }`}
+              </>
+            )}
+          </p>
+        ) : null}
 
         {onName && (entry.counterparty === null || entry.counterpartyFromManager) ? (
           naming ? (

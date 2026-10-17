@@ -41,7 +41,7 @@ import {
 } from "../operations/news";
 import { readCompetitions } from "../operations/competitions";
 import { readHeadToHead } from "../operations/head-to-head";
-import { addTransferEntry, nameTransferCounterparty, readTransferLedger, removeTransferEntry } from "../operations/transfer-ledger";
+import { addTransferEntry, nameTransferCounterparty, readTransferLedger, removeTransferEntry, searchLedgerPlayers } from "../operations/transfer-ledger";
 import { readFinanceRules } from "../operations/finance-rules";
 import { readDebriefMarks, setDebriefStar } from "../operations/debrief";import { readYouthAcademy } from "../operations/youth";
 import type { OperationResult } from "../operations/types";
@@ -252,6 +252,8 @@ async function dispatch(call: Call): Promise<OperationResult<unknown>> {
 
     case "GET /api/transfer-ledger":
       return readTransferLedger(params.get("careerId"));
+    case "GET /api/transfer-ledger/players":
+      return searchLedgerPlayers(params.get("careerId"), params.get("query"));
     case "POST /api/transfer-ledger": {
       const parsed = body(call);
       return parsed.failure ?? addTransferEntry(call.raw ?? "");

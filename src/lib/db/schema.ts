@@ -992,6 +992,10 @@ export const careerFinanceInputs = sqliteTable(
 );
 
 export type CareerFinanceInputsRow = typeof careerFinanceInputs.$inferSelect;
+/** The two shapes a recorded deal takes. A loan is not a cheaper transfer: it carries a wage and a split. */
+export const dealKindEnum = ["TRANSFER", "LOAN"] as const;
+export type DealKind = (typeof dealKindEnum)[number];
+
 /**
  * Transfer deals the manager has to type in himself.
  *
@@ -1001,6 +1005,10 @@ export type CareerFinanceInputsRow = typeof careerFinanceInputs.$inferSelect;
  *
  * Every row here is USER provenance and the ledger says so. A typed fee and a saved fee are never averaged
  * into one confident number.
+ *
+ * A LOAN is the same table with three more columns rather than a second table, because a loan IS a move: it
+ * is the money that differs. A loan's money is mostly his wage rather than a fee, so the wage and the share
+ * of it this club pays are stored beside the fee it may also carry.
  */
 export const transferInputs = sqliteTable(
   "transfer_inputs",
@@ -1015,6 +1023,22 @@ export const transferInputs = sqliteTable(
     /** The club at the other end. Free text, because the save names no club outside our own division. */
     counterparty: text("counterparty"),
     fee: integer("fee").notNull(),
+    /** TRANSFER or LOAN. Everything already on file is a transfer, which is what the default backfills. */
+    kind: text("kind", { enum: dealKindEnum }).notNull().default("TRANSFER"),
+    /**
+     * The player's wage on a loan, in whole units per week, as the manager was told it.
+     *
+     * The squad carries a wage column, but a loaned player is often not in it and the figure that matters is
+     * the one the deal is about. Null on a transfer, and on a loan whose wage he did not record.
+     */
+    salary: integer("salary"),
+    /**
+     * The share of that wage THIS club pays, 0 to 100.
+     *
+     * Null means no split was recorded. It is deliberately NOT read as all of it: a figure he never gave
+     * would be the ledger inventing a cost, which is the one thing it is here not to do.
+     */
+    wageSharePct: integer("wage_share_pct"),
     /** The in-game date money changed hands, as the manager records it. */
     movedOn: text("moved_on"),
     season: integer("season"),

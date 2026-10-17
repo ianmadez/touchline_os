@@ -628,6 +628,8 @@ export const SCHEMA_DDL = `
     -- An entered deal is information, so the app asks for it rather than printing a note about its absence.
     -- Provenance is USER on every row here, and the ledger shows it: a typed fee and a saved fee are never
     -- blended into one number without saying which is which.
+    -- A loan lives here too: the kind column says which it is, and a loan carries his wage and the share of it
+    -- this club pays, because on a loan the money is mostly the wage rather than the fee.
     -- NOTE: no backticks anywhere in this SQL - it lives inside a template literal.
     CREATE TABLE IF NOT EXISTS transfer_inputs (
       id TEXT PRIMARY KEY,
@@ -636,6 +638,9 @@ export const SCHEMA_DDL = `
       player_name TEXT NOT NULL,
       counterparty TEXT,
       fee INTEGER NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'TRANSFER',
+      salary INTEGER,
+      wage_share_pct INTEGER,
       moved_on TEXT,
       season INTEGER,
       note TEXT,
@@ -876,4 +881,10 @@ export const SCHEMA_MIGRATIONS: string[] = [
     "CREATE INDEX IF NOT EXISTS idx_competition_teams_career_id ON competition_teams(career_id);",
     "CREATE INDEX IF NOT EXISTS idx_competition_teams_career_league ON competition_teams(career_id, league_id);",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_competition_teams_career_league_team ON competition_teams(career_id, league_id, team_id);",
+    // A deal the manager records can be a loan, and the ledger had nowhere to put one: it asked for a fee and
+    // nothing else, so a loan arrived as a transfer with its wage lost. Additive and defaulted, so every row
+    // already on file keeps exactly the meaning it had.
+    "ALTER TABLE transfer_inputs ADD COLUMN kind TEXT NOT NULL DEFAULT 'TRANSFER';",
+    "ALTER TABLE transfer_inputs ADD COLUMN salary INTEGER;",
+    "ALTER TABLE transfer_inputs ADD COLUMN wage_share_pct INTEGER;",
   ];

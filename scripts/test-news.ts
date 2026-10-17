@@ -371,8 +371,8 @@ check(
 
 const estimateOnly = rich.find((item) => item.id.startsWith("finishing-"));
 check(
-  "and with no reported figure the model is named instead",
-  estimateOnly?.evidence.some((line) => /app's model made that worth/.test(line)) === true,
+  "and with no reported figure the estimate is named as one, from the counts on that row",
+  estimateOnly?.evidence.some((line) => /Estimated from earlier counts: the app's model made that worth/.test(line)) === true,
   estimateOnly?.evidence.join(" | ")
 );
 
@@ -419,6 +419,18 @@ check(
 check(
   "and the game's figure turns the story off, which is the point of preferring it",
   !has(reportedCalm, "finishing-")
+);
+
+// The count is gone from the desk's vocabulary: it is legacy, nothing enters one, and the words belonged to a
+// box the manager no longer has. Asserted across every edition this file builds, so a reappearing phrase fails
+// wherever it comes from.
+check(
+  "no story mentions big chances anywhere in what it prints",
+  [rich, wasteful, noStats, narrow, reportedOnly, bothPresent, reportedCalm].every((edition) =>
+    edition.every(
+      (item) => !/big chance/i.test([item.headline, item.body, ...item.article, ...item.evidence].join(" "))
+    )
+  )
 );
 
 const noMinutes = buildNews(

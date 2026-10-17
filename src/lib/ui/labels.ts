@@ -128,6 +128,8 @@ export function captureLabel(method: string): string {
  *
  * Kept here rather than in the debrief view because the scan pane, the detail view and the news note all name
  * the same keys, and a second spelling of "Inside box" somewhere else is how two screens end up disagreeing.
+ * Big chances is in the map for one reader: the detail view of a debrief logged before the game's own expected
+ * goals had a box, where the stored count is shown as the record it is.
  */
 const MATCH_STAT_LABELS: Record<string, string> = {
   shots: "Shots",
@@ -140,6 +142,77 @@ const MATCH_STAT_LABELS: Record<string, string> = {
 
 export function matchStatLabel(field: string): string {
   return MATCH_STAT_LABELS[field] ?? humanise(field);
+}
+
+/**
+ * The Match Facts a screen printed, as names for the screen.
+ *
+ * Sentence case, and spelled the way the game spells them where the game's wording is the clearer one. The
+ * fallback runs the key through `humanise`, so a row added to the layout tables without a name here reads as
+ * words rather than as a camel case key, which is the failure that would otherwise ship unnoticed.
+ */
+const FACT_LABELS: Record<string, string> = {
+  possessionPct: "Possession %",
+  ballRecoverySeconds: "Ball recovery time",
+  shots: "Shots",
+  expectedGoals: "Expected goals",
+  passes: "Passes",
+  tackles: "Tackles",
+  tacklesWon: "Tackles won",
+  interceptions: "Interceptions",
+  saves: "Saves",
+  foulsCommitted: "Fouls committed",
+  offsides: "Offsides",
+  corners: "Corners",
+  freeKicks: "Free kicks",
+  penaltyKicks: "Penalty kicks",
+  yellowCards: "Yellow cards",
+  redCards: "Red cards",
+  totalShots: "Total shots",
+  onTarget: "On target",
+  offTarget: "Off target",
+  blocked: "Blocked",
+  normal: "Normal",
+  finesse: "Finesse",
+  header: "Header",
+  power: "Power",
+  volley: "Volley",
+  chip: "Chip",
+  setPieces: "Set pieces",
+  insideBox: "Inside the box",
+  outsideBox: "Outside the box",
+  nearSide: "Near side",
+  farSide: "Far side",
+  totalPasses: "Total passes",
+  completed: "Completed",
+  intercepted: "Intercepted",
+  offside: "Offside",
+  other: "Other",
+  ground: "Ground",
+  lob: "Lob",
+  through: "Through",
+  lobbedThrough: "Lobbed through",
+  cross: "Cross",
+  keyPass: "Key pass",
+  firstTime: "First time",
+  passAndGo: "Pass and go",
+  downWing: "Down the wing",
+  breakaway: "Breakaway",
+  standingTackles: "Standing tackles",
+  standingTacklesWon: "Standing tackles won",
+  slidingTackles: "Sliding tackles",
+  slidingTacklesWon: "Sliding tackles won",
+  blocks: "Blocks",
+  clearances: "Clearances",
+  offensiveDuelsWon: "Offensive duels won",
+  defensiveDuelsWon: "Defensive duels won",
+  aerialDuelsWon: "Aerial duels won",
+  beatenByOpponent: "Beaten by opponent",
+  penaltiesCommitted: "Penalties committed",
+};
+
+export function factLabel(key: string): string {
+  return FACT_LABELS[key] ?? humanise(key);
 }
 
 /**

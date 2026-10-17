@@ -107,7 +107,9 @@ export class FinanceRulesService {
 
     const transferBudget = positiveOrNull(inputs?.transferBudget);
     const wageBudget = positiveOrNull(inputs?.wageBudget);
-    const netSpend = ledger && !ledger.empty ? ledger.totals.net : null;
+    // Fees alone, deliberately: a transfer budget is measured against transfer spend, and a loan's wages are
+    // not transfer spend. The screen's own totals include them, which is a different question.
+    const netSpend = ledger && !ledger.empty ? ledger.feeTotals.net : null;
 
     // The tier estimate the percentage rules divide into is the app's own model, not a save figure. It is
     // deliberately coarse: a precise per-club revenue would be invented precision.
@@ -127,7 +129,7 @@ export class FinanceRulesService {
       budgetCheck({
         ruleId: "app-transfer-budget",
         label: "Against your transfer budget",
-        note: "Net spend on the ledger compared with the transfer budget you entered in Finance.",
+        note: "Net spend on fees in the ledger compared with the transfer budget you entered in Finance.",
         limit: transferBudget,
         observed: netSpend,
         observedSource: "USER",

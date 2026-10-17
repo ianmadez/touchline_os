@@ -48,11 +48,11 @@ function check(label: string, actual: unknown, expected: unknown): void {
 const stored = (figures: Partial<Record<string, unknown>>) => ({
   shots: null,
   shotsInsideBox: null,
-  bigChances: null,
   possession: null,
   passesCompleted: null,
   expectedGoalsReported: null,
   capture: null,
+  facts: null,
   ...figures,
 });
 
@@ -64,16 +64,28 @@ check("keeps what was entered", normaliseMatchStats({ shots: 14, possession: 61 
 check("blank strings count as not entered", normaliseMatchStats({ shots: "", possession: "" }), null);
 check(
   "an out-of-range typo is discarded, not clamped",
-  normaliseMatchStats({ shots: 900, bigChances: 4 }),
-  stored({ bigChances: 4 })
+  normaliseMatchStats({ shots: 900, possession: 61 }),
+  stored({ possession: 61 })
 );
 check("possession above 100 is not a percentage", normaliseMatchStats({ possession: 140 }), null);
 check("negatives are discarded", normaliseMatchStats({ shots: -3 }), null);
 check("a decimal is truncated to a whole count", normaliseMatchStats({ shots: 14.9 })?.shots, 14);
+// The box for big chances is gone, so a payload naming one is a payload from an older build or a crafted
+// request. Either way nothing enters it: the count is legacy and only ever read.
+check(
+  "a big chance count in the payload is ignored",
+  normaliseMatchStats({ shots: 9, bigChances: 4 }),
+  stored({ shots: 9 })
+);
+check(
+  "and an edit is the one way a legacy count survives",
+  normaliseMatchStats({ shotsInsideBox: 5 }, { bigChances: 2, shotsInsideBox: 5 }),
+  { ...stored({ shotsInsideBox: 5 }), bigChances: 2 }
+);
 
 console.log("the game's own expected goals");
-check("kept at two places", normaliseMatchStats({ expectedGoalsReported: 0.8 })?.expectedGoalsReported, 0.8);
-check("rounds a longer decimal", normaliseMatchStats({ expectedGoalsReported: 1.2345 })?.expectedGoalsReported, 1.23);
+check("kept at one place, which is the precision the game prints", normaliseMatchStats({ expectedGoalsReported: 0.8 })?.expectedGoalsReported, 0.8);
+check("a longer decimal is rounded to it", normaliseMatchStats({ expectedGoalsReported: 1.2345 })?.expectedGoalsReported, 1.2);
 check("not truncated to a whole number", normaliseMatchStats({ expectedGoalsReported: 0.4 })?.expectedGoalsReported, 0.4);
 check("above the sane ceiling is discarded", normaliseMatchStats({ expectedGoalsReported: 42 }), null);
 check("negative is discarded", normaliseMatchStats({ expectedGoalsReported: -1 }), null);
@@ -124,11 +136,10 @@ check(
 );
 check("the field list does not drift from the stored shape", MATCH_STAT_FIELDS.length, Object.keys(STAT_FIELD_LABELS).length);
 check(
-  "all six figures survive the round trip, which is what an edit and re-save does",
+  "all five figures survive the round trip, which is what an edit and re-save does",
   normaliseMatchStats({
     shots: 14,
     shotsInsideBox: 9,
-    bigChances: 2,
     possession: 61,
     passesCompleted: 508,
     expectedGoalsReported: 2.35,
@@ -137,30 +148,45 @@ check(
   stored({
     shots: 14,
     shotsInsideBox: 9,
-    bigChances: 2,
     possession: 61,
     passesCompleted: 508,
-    expectedGoalsReported: 2.35,
+    expectedGoalsReported: 2.4,
     capture: { layout: "fc25-plus", figures: { shots: "SCAN", possession: "EDITED" } },
   })
 );
 
+console.log("the facts a screen produced");
+// The screens' own figures travel with the debrief beside the boxes: this is the round trip an edit and re-save
+// makes, and the only place the two are checked to be separate claims.
+const withFacts = normaliseMatchStats({
+  shots: 14,
+  expectedGoalsReported: 1.9,
+  facts: { v: 1, summary: { shots: { us: 14, them: 9 }, expectedGoals: { us: 1.9, them: 0.7 } } },
+});
+check("the screen's figures are stored beside the boxes", withFacts?.facts?.summary?.shots, { us: 14, them: 9 });
+check("and they keep the game's own precision", withFacts?.facts?.summary?.expectedGoals, { us: 1.9, them: 0.7 });
+check("the boxes are untouched by them", withFacts?.expectedGoalsReported, 1.9);
+check("a debrief with no screen scanned carries no facts at all", normaliseMatchStats({ shots: 9 })?.facts, null);
+check("and a crafted group is dropped rather than stored", normaliseMatchStats({ shots: 9, facts: { summary: { nonsense: { us: 1, them: 1 } } } })?.facts, null);
+
 console.log("which expected goals figure to use");
+// The four shapes a row can be in, in the order they matter: the game's figure alone, the legacy estimate
+// alone, both, and neither.
 check("the model, from the two terms", expectedGoals({ shotsInsideBox: 5, bigChances: 2 }), 1.51);
 check("a missing term refuses rather than reading as zero", expectedGoals({ bigChances: 2 }), null);
 check("a missing term refuses the other way too", expectedGoals({ shotsInsideBox: 5 }), null);
 check("no stats at all", expectedGoals(null), null);
 check("zero on both is a real figure, not a refusal", expectedGoals({ shotsInsideBox: 0, bigChances: 0 }), 0);
-check("the model alone is the estimate", expectedGoalsSource({ shotsInsideBox: 5, bigChances: 2 }), "ESTIMATE");
+check("the legacy estimate alone is the estimate", expectedGoalsSource({ shotsInsideBox: 5, bigChances: 2 }), "ESTIMATE");
 check("the game's figure alone is reported", expectedGoalsSource({ expectedGoalsReported: 1.2 }), "REPORTED");
 check("neither is neither", expectedGoalsSource({ shots: 9 }), null);
 check("nothing at all is neither", expectedGoalsSource(null), null);
 check("the game's figure wins when both exist", effectiveExpectedGoals({ shotsInsideBox: 5, bigChances: 2, expectedGoalsReported: 0.7 }), 0.7);
-check("without it the model stands in", effectiveExpectedGoals({ shotsInsideBox: 5, bigChances: 2 }), 1.51);
+check("without it the legacy estimate stands in", effectiveExpectedGoals({ shotsInsideBox: 5, bigChances: 2 }), 1.51);
 check("reportedXgUsed follows the game's figure", reportedXgUsed({ expectedGoalsReported: 1.2 }), true);
 check("reportedXgUsed is false without it", reportedXgUsed({ shotsInsideBox: 5, bigChances: 2 }), false);
 check(
-  "the real figure needs no box shots, which is the whole point of scanning it",
+  "the game's own figure needs no box shots, because it is a reading rather than a model",
   effectiveExpectedGoals({ expectedGoalsReported: 1.9 }),
   1.9
 );

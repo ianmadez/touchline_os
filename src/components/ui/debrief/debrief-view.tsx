@@ -8,8 +8,10 @@ import { GroupDebriefPanel } from "@/components/ui/debrief/group-debrief-panel";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import type { ParsedCareerEvent } from "@/lib/services/event-service";
 import type { LeagueTeamSummary } from "@/lib/services/career-service";
-import { resultLabel, venueLabel, matchStatLabel, captureLabel } from "@/lib/ui/labels";
+import { resultLabel, venueLabel, matchStatLabel, captureLabel, factLabel } from "@/lib/ui/labels";
 import { ordinal, formatExpectedGoals } from "@/lib/ui/format";
+import { SCREENS } from "@/lib/ocr/layouts";
+import { emptyFacts, factsAreEmpty, screenFactsOf, type MatchFacts } from "@/lib/ocr/facts";
 import {
   EMPTY_MATCH_STATS,
   MANUAL_STAT_FIELDS,
@@ -18,7 +20,7 @@ import {
   emptySources,
   hasAnyMatchStat,
   sanitiseCount,
-  sanitiseDecimal,
+  sanitiseExpectedGoals,
   statNumberOf,
   type MatchStatDraft,
   type MatchStatKey,
@@ -34,6 +36,7 @@ import {
 } from "@/lib/events/debrief-anomalies";
 import {
   effectiveExpectedGoals,
+  expectedGoals,
   finishingEdge,
   finishingVerdict,
   keptCleanSheet,
@@ -395,6 +398,8 @@ export function DebriefView({
   const [statSources, setStatSources] = useState<Record<MatchStatKey, StatSource>>(emptySources);
   /** The layout profile that last read a figure, for the capture marker on save. */
   const [scanLayout, setScanLayout] = useState<string | null>(null);
+  /** The screens' own figures, whole per screen, as they stand in this form. */
+  const [scanFacts, setScanFacts] = useState<MatchFacts>(() => emptyFacts());
   //
   // Neither side's placing is prefilled, on purpose. The save's `currenttableposition` is not a
   // league table: in this division the 24 clubs carry values with ties (two 4ths, two 8ths, two
@@ -602,13 +607,13 @@ export function DebriefView({
   /*
     The derived figures. Every one of these is worked out from the manager's own entries, so they are
     DERIVED and the screen labels them that way; nothing here is read from the save, which carries no
-    match events at all. The one exception is the game's own expected goals, which is an observation
-    rather than a derivation and is preferred wherever the model's estimate would have been used.
+    match events at all. The expected goals figure itself is the exception: it is the game's own, read off
+    the Match Facts Summary screen, and the app's model only answers for a debrief logged before it had a
+    box to be typed into.
   */
   const enteredStats: MatchStats = {
     shots: statNumberOf(matchStats.shots),
     shotsInsideBox: statNumberOf(matchStats.shotsInsideBox),
-    bigChances: statNumberOf(matchStats.bigChances),
     possession: statNumberOf(matchStats.possession),
     passesCompleted: statNumberOf(matchStats.passesCompleted),
     expectedGoalsReported: statNumberOf(matchStats.expectedGoalsReported),
@@ -619,6 +624,11 @@ export function DebriefView({
   const finishingWord = finishingVerdict(finishing);
   const outsideBox = shotsOutsideBox(enteredStats);
   const cleanSheet = keptCleanSheet(theirScore);
+  /** The chances per shot, which is the question the two figures answer together. */
+  const shotQuality =
+    expected !== null && enteredStats.shots !== null && enteredStats.shots !== undefined && enteredStats.shots > 0
+      ? Math.round((expected / enteredStats.shots) * 100) / 100
+      : null;
 
   /**
    * The method of every figure a read produced, for the record.
@@ -633,11 +643,15 @@ export function DebriefView({
       statSources[key] as CaptureMethod,
     ])
   ) as Record<string, CaptureMethod>;
-  const savedStats: Record<string, unknown> =
-    scanLayout !== null && Object.keys(captureFigures).length > 0
-      ? { ...matchStats, capture: { layout: scanLayout, figures: captureFigures } }
-      : matchStats;
-
+  const savedStats: Record<string, unknown> = {
+    ...matchStats,
+    // The screens' own figures, whole per screen, kept beside the boxes rather than in place of them: the boxes
+    // are the manager's and can be edited, the facts are what the game printed and never change.
+    ...(factsAreEmpty(scanFacts) ? {} : { facts: scanFacts }),
+    ...(scanLayout !== null && Object.keys(captureFigures).length > 0
+      ? { capture: { layout: scanLayout, figures: captureFigures } }
+      : {}),
+  };
   // Only our own club is filtered out. The rest are offered in the order the manager has chosen, and
   // the order is a global preference, read from the shared store rather than held here as component
   // state. No placing is shown beside a club: see the note in `@/lib/ui/opponent-list`.
@@ -914,6 +928,7 @@ export function DebriefView({
     setMatchStats(EMPTY_MATCH_STATS);
     setStatSources(emptySources());
     setScanLayout(null);
+    setScanFacts(emptyFacts());
     setStatsPane("MANUAL");
     setWeaknessIdentified("");
     setManagerReflection("");
@@ -933,12 +948,15 @@ export function DebriefView({
    * edited, and a figure he typed himself carries no marker at all, because "typed" is what an absent marker
    * means everywhere else in this payload.
    *
-   * The text is cleaned here for the same reason. Both panes accept integers, and the game's expected goals is
-   * the one figure that is genuinely a decimal, so the rule about which characters a box takes lives in one
-   * place rather than in each caller's `onChange`.
+   * The text is cleaned here for the same reason. Four of the boxes take whole numbers and the game's expected
+   * goals is the one figure that is genuinely a decimal, so the rule about which characters a box takes lives
+   * in one place rather than in each caller's `onChange`.
    */
   const changeStat = (key: MatchStatKey, raw: string) => {
-    const value = key === "expectedGoalsReported" ? sanitiseDecimal(raw) : sanitiseCount(raw);
+    const value =
+      key === "expectedGoalsReported"
+        ? sanitiseExpectedGoals(raw, matchStats[key])
+        : sanitiseCount(raw);
     setMatchStats((current) => {
       if (current[key] === value) return current;
       return { ...current, [key]: value };
@@ -1020,6 +1038,10 @@ export function DebriefView({
     // still shows its method when the debrief is opened again.
     const storedCapture = stored.matchStats?.capture ?? null;
     setScanLayout(storedCapture?.layout ?? null);
+    // The facts come back with the row, so editing a debrief does not quietly drop the screens that were read.
+    setScanFacts(
+      (stored.matchStats as { facts?: MatchFacts } | undefined)?.facts ?? emptyFacts()
+    );
     setStatSources(() => {
       const next = emptySources();
       for (const key of MATCH_STAT_KEYS) {
@@ -1626,7 +1648,7 @@ export function DebriefView({
                     </span>
                     <input
                       type="text"
-                      inputMode="numeric"
+                      inputMode={field.key === "expectedGoalsReported" ? "decimal" : "numeric"}
                       placeholder="–"
                       value={matchStats[field.key]}
                       onChange={(event) => changeStat(field.key, event.target.value)}
@@ -1643,6 +1665,8 @@ export function DebriefView({
                 ourClub={clubName ?? ""}
                 opponent={opponentLabel}
                 goalsFor={ourScoreInput === "" ? null : ourScore}
+                goalsAgainst={theirScoreInput === "" ? null : theirScore}
+                onFacts={setScanFacts}
                 onChange={changeStat}
                 onApply={applyScan}
               />
@@ -1650,19 +1674,17 @@ export function DebriefView({
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <StatReadout
-                label="Expected goals"
-                value={expected === null ? "—" : formatExpectedGoals(expected)}
+                label="Shot quality"
+                value={shotQuality === null ? "—" : shotQuality.toFixed(2)}
                 note={
-                  expected === null
-                    ? "Needs inside box and big chances"
-                    : fromTheGame
-                      ? "From the game, read off your screenshot"
-                      : "TouchlineOS model, not a save figure"
+                  shotQuality === null
+                    ? "Needs expected goals and shots"
+                    : "Expected goals per shot, so higher means the chances were better"
                 }
               />
               <StatReadout
                 label="Finishing"
-                value={finishing === null ? "—" : `${finishing > 0 ? "+" : ""}${finishing.toFixed(2)}`}
+                value={finishing === null ? "—" : `${finishing > 0 ? "+" : ""}${finishing.toFixed(1)}`}
                 note={
                   finishingWord === null
                     ? "Goals minus expected goals"
@@ -1692,14 +1714,15 @@ export function DebriefView({
             </div>
 
             {/*
-              The overlap note is about the model's two terms, so it only appears when the model is what is
-              being shown. With the game's own figure in the card above there is nothing to explain, and leaving
-              the paragraph in would describe a calculation that did not happen.
+              One line, and it says where the figure comes from, because the manager is the one who fetches it.
+              The estimate's own variant only ever appears on a debrief logged before the box existed.
             */}
             <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
-              {fromTheGame
-                ? "That expected goals figure is the game's own, read from your screenshot, so it is not one of our estimates."
-                : "A big chance is usually also a shot from inside the box, so the two terms overlap and expected goals reads a little high. Counting only big chances would understate a side that creates a lot of ordinary box shots, which is the more common manager."}
+              {expected === null
+                ? "Expected goals is optional, and it is the game's own figure: pause menu, Match Facts, Summary, the Expected Goals row, your side's number."
+                : fromTheGame
+                  ? "Expected goals is the game's own figure, not one of ours: pause menu, Match Facts, Summary, the Expected Goals row, your side's number."
+                  : "This expected goals is an estimate from the counts on an older debrief, which was logged before the game's own figure had a box here."}
             </p>
           </div>
 
@@ -2422,6 +2445,17 @@ function DebriefDetailModal({
     const method = capture?.figures?.[key];
     return `${matchStatLabel(key)}: ${captureLabel(method ?? "SCAN").toLowerCase()}`;
   });
+  /**
+   * The expected goals figure as the record shows it: the game's own when it was entered, and on a debrief
+   * logged before that box existed, the app's estimate, said as an estimate rather than as a reading.
+   */
+  const estimate = expectedGoals(stats);
+  const expectedRecord =
+    typeof stats?.expectedGoalsReported === "number"
+      ? formatExpectedGoals(stats.expectedGoalsReported)
+      : estimate === null
+        ? "not recorded"
+        : `${formatExpectedGoals(estimate)} estimated from earlier counts`;
   const rows: Array<{ label: string; value: string }> = [
     { label: "Match date", value: payload.matchDate ?? "not recorded" },
     { label: "Competition", value: payload.competition ?? "not recorded" },
@@ -2446,21 +2480,23 @@ function DebriefDetailModal({
     {
       label: "Shots",
       value: stats
-        ? `${stats.shots ?? 0} total, ${stats.shotsInsideBox ?? 0} in the box, ${stats.bigChances ?? 0} big`
+        ? `${stats.shots ?? 0} total, ${stats.shotsInsideBox ?? 0} in the box`
         : "not recorded",
     },
+    // Only ever on a debrief logged before the game's own expected goals had a box of its own, because that is
+    // the only place a big chance count exists. What the manager recorded then is not rewritten here.
+    ...(typeof stats?.bigChances === "number"
+      ? [{ label: matchStatLabel("bigChances"), value: String(stats.bigChances) }]
+      : []),
     {
       label: "Possession",
       value: typeof stats?.possession === "number" ? `${stats.possession}%` : "not recorded",
     },
     {
-      // The game's own figure, and only when a screenshot was read: the manager cannot count this one, so a
-      // blank here means nobody scanned it rather than "not recorded".
+      // The game's own figure, which the manager reads off the Match Facts Summary screen and types in or scans.
+      // An older debrief has no such figure, and its own estimate is what stands instead.
       label: "Expected goals",
-      value:
-        typeof stats?.expectedGoalsReported === "number"
-          ? formatExpectedGoals(stats.expectedGoalsReported)
-          : "not scanned",
+      value: expectedRecord,
     },
     {
       label: "Read from a screenshot",
@@ -2530,6 +2566,54 @@ function DebriefDetailModal({
             </div>
           ))}
         </dl>
+
+        {(() => {
+          /**
+           * The screens' own figures, read only.
+           *
+           * Collapsed by default because it is the deepest layer of the record and the manager asked for it
+           * rather than arrived at it, and labelled through `src/lib/ui` so the names match the boxes above.
+           */
+          const facts = (stats as { facts?: MatchFacts } | null)?.facts ?? null;
+          if (facts === null || factsAreEmpty(facts)) return null;
+          const kept = SCREENS.filter((screen) => screenFactsOf(facts, screen.id) !== undefined);
+          if (kept.length === 0) return null;
+          return (
+            <details className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+              <summary className="cursor-pointer font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Match facts · {kept.map((screen) => screen.label).join(", ")}
+              </summary>
+              <p className="mt-2 font-sans text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
+                What the game printed on those screens, as it printed them. {payload.opponent || "They"} on the
+                right. Nothing here is editable: the boxes above are the figures you own.
+              </p>
+              <div className="mt-3 space-y-4">
+                {kept.map((screen) => {
+                  const group = screenFactsOf(facts, screen.id) ?? {};
+                  return (
+                    <div key={screen.id}>
+                      <h3 className="font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        {screen.label}
+                      </h3>
+                      <dl className="mt-1 grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
+                        {Object.entries(group).map(([key, pair]) => (
+                          <div key={key} className="flex items-baseline justify-between gap-3">
+                            <dt className="font-sans text-[11px] text-slate-600 dark:text-slate-300">
+                              {factLabel(key)}
+                            </dt>
+                            <dd className="font-sans text-[11px] tabular-nums text-slate-700 dark:text-slate-200">
+                              {pair.us} vs {pair.them}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
+                  );
+                })}
+              </div>
+            </details>
+          );
+        })()}
 
         {contributions.length > 0 && (
           <section className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">

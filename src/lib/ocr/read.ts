@@ -9,18 +9,21 @@
  * real outcome that the manager resolves by looking at their own screenshot.
  */
 
-import { boundRows, defaultProfile, type Columns, type StatGroup } from "./layouts";
+import { defaultProfile, readableScreens, screenRows, type Columns } from "./layouts";
 import { cropColumns, detectTable, prepareTable, variantById, DEFAULT_VARIANT_ID, type PreprocessVariant, type RgbaImage, type TableRegion } from "./preprocess";
 import { getOcrEngine, LABEL_WHITELIST, VALUE_WHITELIST, type OcrWord } from "./engine";
 import {
+  classifyScreen,
+  normaliseNumber,
   readRows,
+  readScreen,
   resolveSide,
   settledSide,
-  validateReadings,
-  type ScanObservation,
+  type ScreenChoice,
+  type ScreenReading,
   type SideResolution,
-  type ValidatedObservation,
 } from "./extract";
+import { evaluateScreen, type FactGroupResult } from "./facts";
 
 /** How the columns are handed to the engine. */
 export type ReadMode = "SINGLE_PASS" | "PER_COLUMN";
@@ -60,20 +63,26 @@ export interface ReadSuccess {
   imageIndex: number;
   name: string;
   profileId: string;
-  groupId: string;
-  /** How many of the group's known row labels were matched, and how many there are. */
-  matchedLabels: number;
-  totalLabels: number;
+  /** Which screen this capture is, or null when it is not one the scanner reads. */
+  screenId: string | null;
+  /** How that screen is named, for the confirmation line. Null when nothing was classified. */
+  screenLabel: string | null;
+  /** Why that screen, or why none was found. The report and the pane both print it. */
+  screenReason: string;
   side: SideResolution;
-  observations: ValidatedObservation[];
-  unread: ValidatedObservation["field"][];
+  /** What the screen said, for both clubs. Empty when no screen was classified. */
+  reading: ScreenReading;
+  /** The judged group: null when the screen was refused, with the line saying why. */
+  result: FactGroupResult | null;
+  /** The scoreline read from the header, or null when it could not be read. */
+  scoreline: { us: number; them: number } | null;
   /** The row height the table was scaled to, for the harness report. */
   scale: number;
   /**
    * The rectangle the table was read from, in the ORIGINAL image's pixels.
    *
    * Returned so the review pane can map a word's box back onto the screenshot the manager is looking at: every
-   * box in `observations` is in the prepared table's coordinates, which are cropped to this rectangle and scaled
+   * box in the reading is in the prepared table's coordinates, which are cropped to this rectangle and scaled
    * by `scale`, and drawing them untranslated would put them in the wrong place on a large or a small screen.
    */
   region: TableRegion;
@@ -90,13 +99,6 @@ export interface ReadFailure {
 }
 
 export type ReadOutcome = ReadSuccess | ReadFailure;
-
-/** The group the scanner reads. One profile ships, so this is the profile's one group. */
-function activeGroup(): StatGroup {
-  const group = defaultProfile().groups[0];
-  if (group === undefined) throw new Error("The layout profile carries no stat group.");
-  return group;
-}
 
 /**
  * One column of the table, ready to hand to the engine on its own.
@@ -153,6 +155,25 @@ function shiftWord(word: OcrWord, offsetX: number): OcrWord {
   return { ...word, x0: word.x0 + offsetX, x1: word.x1 + offsetX };
 }
 
+/** The scoreline in the header, as the two numbers either side of the separator. */
+function readScoreline(
+  headerWords: OcrWord[],
+  imageWidth: number,
+  ours: "LEFT" | "RIGHT" | null
+): { us: number; them: number } | null {
+  const middle = headerWords
+    .filter((word) => {
+      const centre = (word.x0 + word.x1) / 2;
+      return centre > imageWidth * 0.3 && centre < imageWidth * 0.7 && /[0-9]/.test(word.text);
+    })
+    .sort((left, right) => left.x0 - right.x0);
+  if (ours === null || middle.length < 2) return null;
+  const left = normaliseNumber(middle[0].text);
+  const right = normaliseNumber(middle[middle.length - 1].text);
+  if (left === null || right === null) return null;
+  return ours === "LEFT" ? { us: left, them: right } : { us: right, them: left };
+}
+
 /**
  * Reads one screenshot.
  *
@@ -164,7 +185,6 @@ export async function readMatchFacts(image: RgbaImage, options: ReadOptions): Pr
   const mode: ReadMode = options.mode ?? "SINGLE_PASS";
   const psm = options.psm ?? "6";
   const profile = defaultProfile();
-  const group = activeGroup();
 
   const bands = detectTable(image);
   if (!bands) {
@@ -208,11 +228,6 @@ export async function readMatchFacts(image: RgbaImage, options: ReadOptions): Pr
     words = frame.words;
   }
 
-  const rows = readRows(words, bandCentres, bandHeight, prepared.image.width, profile.columns, group);
-  const matchedLabels = new Set(
-    rows.filter((row) => row.row !== null).map((row) => row.row!.aliases[0])
-  ).size;
-
   /**
    * The club names, read on their own so the side can be cross-checked.
    *
@@ -251,36 +266,78 @@ export async function readMatchFacts(image: RgbaImage, options: ReadOptions): Pr
     clubNames: profile.clubNames,
   });
 
+  const blank: ScreenReading = { values: new Map(), unread: [] };
+
+  /**
+   * Which screen, decided before anything is matched to a row.
+   *
+   * The bands are read twice on purpose. The first pass is a match against every screen's rows at once, which is
+   * only used to CLASSIFY the capture; the second reads it properly, against the rows of the screen that was
+   * chosen and of the section each band sits in.
+   */
+  const probe = classifyScreen(readRows(words, bandCentres, bandHeight, prepared.image.width, profile.columns, profile.screens[0]), profile);
+  const choice: ScreenChoice = probe.screen === null ? probe : probe;
+
+  if (choice.screen === null) {
+    return {
+      ok: false,
+      imageIndex: options.imageIndex,
+      name: options.name,
+      reason: `this capture is not a Match Facts screen the reader knows: ${choice.reason}`,
+      elapsedMs: Math.round(performance.now() - started),
+    };
+  }
+
+  const rows = readRows(
+    words,
+    bandCentres,
+    bandHeight,
+    prepared.image.width,
+    profile.columns,
+    choice.screen
+  );
+
+  if (!choice.screen.enabled) {
+    return {
+      ok: false,
+      imageIndex: options.imageIndex,
+      name: options.name,
+      reason: `the ${choice.screen.label} screen is not read yet: ${choice.screen.disabledBecause ?? "no capture of it has been checked"}`,
+      elapsedMs: Math.round(performance.now() - started),
+    };
+  }
+
+  const settled = classifyScreen(rows, profile);
+  const screen = settled.screen ?? choice.screen;
   const ours = settledSide(side);
-  const { observations, unread } = validateReadings({
-    columns: profile.columns,
-    width: prepared.image.width,
-    rows,
-    ours,
-    goalsFor: options.goalsFor,
-    group,
-  });
+  const reading = ours === null ? blank : readScreen(rows, screen, ours);
+  const result = ours === null ? null : evaluateScreen(screen, reading.values);
 
   return {
     ok: true,
     imageIndex: options.imageIndex,
     name: options.name,
     profileId: profile.id,
-    groupId: group.id,
-    matchedLabels,
-    totalLabels: group.labels.length,
+    screenId: screen.id,
+    screenLabel: screen.label,
+    screenReason: settled.reason,
     side,
-    observations,
-    unread,
+    reading,
+    result,
+    scoreline: readScoreline(headerWords, image.width, ours),
     scale: prepared.scale,
     region: prepared.region,
     elapsedMs: Math.round(performance.now() - started),
   };
 }
 
-/** The bound fields of the active group, so a caller can size its "not read" line without importing layouts. */
-export function boundFieldKeys(): string[] {
-  return boundRows(activeGroup()).map((row) => row.field as string);
+/** The stored keys of the screens the reader will read, so a caller can size its own lines without layouts. */
+export function readableFieldKeys(): string[] {
+  return readableScreens(defaultProfile()).flatMap((screen) =>
+    screenRows(screen)
+      .map((row) => row.key)
+      .filter((key): key is Exclude<typeof key, null> => key !== null)
+  ) as string[];
 }
 
 /** An image decoded to pixels, with its own size, which the review pane needs to place the highlight. */
@@ -323,4 +380,4 @@ export async function decodeImageFile(file: Blob): Promise<DecodedImage> {
     bitmap.close();
   }
 }
-export type { ScanObservation, ValidatedObservation, SideResolution };
+export type { SideResolution, ScreenReading };
