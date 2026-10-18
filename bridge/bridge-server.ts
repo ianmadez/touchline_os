@@ -153,7 +153,7 @@ export function originAllowed(origin: string, env: NodeJS.ProcessEnv = process.e
  * reading the response - a `403` alone would still leave the body readable wherever the origin was
  * tolerated, and `*` would let any site on the internet read a save file.
  */
-function applyCors(
+export function applyCors(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   env: NodeJS.ProcessEnv
@@ -172,7 +172,7 @@ function applyCors(
   return true;
 }
 
-function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+export function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
@@ -250,7 +250,7 @@ export function startPeriodicRescan(intervalMs: number = RESCAN_INTERVAL_MS): No
 }
 
 /** Everything behind the pairing code. */
-async function handleAuthorised(
+export async function handleSaveRoutes(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   url: URL,
@@ -333,7 +333,7 @@ export function createBridgeServer(
       return;
     }
 
-    void handleAuthorised(req, res, url, config);
+    void handleSaveRoutes(req, res, url, config);
   });
 }
 

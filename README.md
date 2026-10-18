@@ -106,6 +106,7 @@ Sync behavior, theme, and career/data management, all kept honest, there are no 
 - **Parsing runs on your device.** The save decoder runs in your browser, with SQLite compiled to WebAssembly, or in the local Node service on the desktop build. Your save is read there and nowhere else.
 - **Zero cloud database uploads.** There is no server holding your career. Nothing about your save file, your squad or your notes leaves the machine, and there are no accounts to create.
 - **Session persistence is local.** A reference to the save file you picked, and your career database itself, live in your browser's own private storage: IndexedDB for the file reference and OPFS for the database image. On the desktop build the same data is a plain local SQLite file.
+- **A second screen stays on your network.** The optional core can serve the app to a paired phone over your own Wi-Fi. Nothing is uploaded, there is no relay and no account: the phone talks to the PC directly, and the listener only exists while you have turned sharing on. See [docs/remote-access.md](docs/remote-access.md).
 
 ---
 
@@ -161,7 +162,7 @@ The result is always shown as a **band**, with its basis and evidence count stat
 
 - No AI/LLM layer. Every insight in the app today is deterministic code.
 - No deep youth academy tracking beyond what the save itself exposes.
-- No cloud sync, no accounts, no multi-device support — this is a single-machine personal tool by design.
+- No cloud sync, no accounts, no remote access from outside your own network. A phone can share the career over the LAN, deliberately and on your terms - see [docs/remote-access.md](docs/remote-access.md) - but there is no server in the middle and no way to reach it from the internet.
 
 ---
 
@@ -176,6 +177,17 @@ npm run dev
 ```
 
 Point the app at your FC Career save when prompted on first launch. Nothing is uploaded anywhere — all parsing and storage happens locally.
+
+### On a phone
+
+```bash
+npm run build:browser     # once, and after pulling changes
+npx tsx bridge/touchline-core.ts --share
+```
+
+The window prints a pairing code and the address to open on your phone. That is the whole setup; the
+details, the security model and the troubleshooting table are in
+[docs/remote-access.md](docs/remote-access.md).
 
 ---
 

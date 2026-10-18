@@ -540,7 +540,7 @@ function startPeriodicRescan(intervalMs = RESCAN_INTERVAL_MS) {
   timer.unref();
   return timer;
 }
-async function handleAuthorised(req, res, url, config) {
+async function handleSaveRoutes(req, res, url, config) {
   const pathname = url.pathname.replace(/\/+$/, "") || "/";
   if (pathname !== "/saves" && !pathname.startsWith("/saves/")) {
     sendJson(res, 404, { error: "Unknown route." });
@@ -594,7 +594,7 @@ function createBridgeServer(config, env = process.env) {
       sendJson(res, 200, { service: SERVICE, version: VERSION, lastScanAt: scanCache?.at ?? null });
       return;
     }
-    void handleAuthorised(req, res, url, config);
+    void handleSaveRoutes(req, res, url, config);
   });
 }
 async function scanSummary() {

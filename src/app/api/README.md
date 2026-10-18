@@ -17,7 +17,9 @@ several of these handlers reach for the filesystem.
 
 The screens still call the same URLs. Under the Node target `@/lib/platform/api-client` is `fetch` and
 the request reaches these files as it always has; under the browser target the same URL is answered in
-the page by calling the operation directly, through `@/lib/operations/*`.
+the page by calling the operation directly, through `@/lib/operations/*` - unless the page was served by
+the PC core, in which case it is an ordinary same-origin request to that PC and the core answers it
+through the same operation table.
 
 So:
 
@@ -32,5 +34,7 @@ So:
   that in one place is why the two runtimes agree.
 
 If a handler ever needs a new endpoint, add `route.node.ts` plus an operation, then add the URL to the
-dispatch table in `src/lib/platform/api-client.browser.ts`. That table is the only place that knows the
-URL-to-operation mapping.
+dispatch table in `src/lib/operations/dispatch.ts`. That table is the only place that knows the
+URL-to-operation mapping, and it has three callers that must agree: the Node app's route handlers, the
+static export answering the call in the page, and the core hosting it for a paired phone. A route added
+to one runtime and missing from another is exactly how a phone ends up looking at a blank screen.

@@ -2,6 +2,13 @@
 
 A small program you run on your own computer so the TouchlineOS website can read your EA SPORTS FC save file automatically.
 
+> **This is the download, not the core.** It reads your save and hands the bytes to the website in your
+> browser; the site does the parsing and keeps the career in the browser. If you want your **phone** to
+> open the same career, that is the core - `npm run core`, run from the repository. The core needs the
+> app's dependencies, so it is not a one-file download. See
+> [../docs/remote-access.md](../docs/remote-access.md). The two are separate on purpose, and this
+> program stays small.
+
 Normally a website has to ask you to pick your save file, and browsers make it re-ask. This removes that: you run this once, pair it once, and the site syncs on its own from then on. It works in every browser, including Firefox and Safari, which cannot do this any other way.
 
 **It is optional.** TouchlineOS works without it, you just have pick your save file each visit on some browsers.
@@ -28,7 +35,8 @@ It looks in the same folders EA SPORTS FC writes career saves to, and serves the
 
 - **It never changes your save.** It only ever reads.
 - **It never talks to the internet.** It listens on `127.0.0.1` — your own computer — and nothing else.
-  There is no setting to make it reachable from other devices on your network, deliberately.
+  There is no setting to make *this program* reachable from other devices on your network, deliberately.
+  (The core is the one that can serve a paired phone, and only when you start it with sharing on.)
 - **It does not upload anything anywhere.** Your save file goes to the page in your browser and stops there.
 - **It contains no parser.** It hands over bytes; the website does the decoding. That is why it is small, and why it cannot quietly disagree with the app about what your save says.
 

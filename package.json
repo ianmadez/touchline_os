@@ -47,13 +47,17 @@
     "bridge:client:test": "tsx scripts/test-bridge-client.ts",
     "import:faces": "tsx scripts/import-faces.ts",
     "db:tables": "tsx scripts/db-tables.ts",
-    "save:extract": "tsx scripts/extract-fc27-container.ts"
+    "save:extract": "tsx scripts/extract-fc27-container.ts",
+    "core": "tsx bridge/touchline-core.ts",
+    "remote:test": "tsx scripts/test-remote.ts",
+    "remote:e2e": "node scripts/remote-e2e.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
     "dotenv": "^18.0.4",
     "drizzle-orm": "^0.45.3",
     "next": "16.3.6",
+    "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "sql.js": "^1.14.2",
@@ -64,6 +68,7 @@
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20.19.43",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/sql.js": "^1.4.11",
