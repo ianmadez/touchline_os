@@ -30,6 +30,9 @@ import {
   saveScanningLabel,
 } from "@/lib/ui/save-source-copy";
 import { BridgePanel } from "@/components/ui/bridge/bridge-panel";
+import { RemotePairingScreen } from "@/components/ui/remote/pairing-screen";
+import { ViewingPill } from "@/components/ui/remote/viewing-pill";
+import { useRemote } from "@/components/ui/remote/remote-provider";
 import type { EnrichedPlayer } from "@/lib/services/squad-service";
 import type { PitchSlotAssignment, TacticalSystemState } from "@/lib/services/tactics-service";
 import type { CareerHydrationPayload, LeagueTeamSummary } from "@/lib/services/career-service";
@@ -92,6 +95,9 @@ const TAB_FADE_OUT_MS = 170;
 type BootPhase = "booting" | "landing" | "portal" | "app";
 
 export default function TouchlineApp() {
+  // The connection to a PC, when this page came from one. Reports "not remote" on the desktop build
+  // and on the hosted build, so nothing below has to ask which build it is in.
+  const remote = useRemote();
   const [activeTab, setActiveTab] = useState<AppTab>("LANDING");
   // The tab actually rendered. `activeTab` stays the immediate source of truth (navbar highlight,
   // session persistence), while the visible panel swaps one fade later so a tab change reads as
@@ -375,8 +381,36 @@ export default function TouchlineApp() {
     setCareerInfo,
   ]);
 
-  const loadSaveCandidates = useCallback(async () => {
-    setSaveScanComplete(false);
+  /**
+   * A change made on another device is not visible here until this page asks again.
+   *
+   * The PC tells every connected screen that the revision moved; this answers that by re-reading the
+   * hydrated career - the same call the boot sequence makes, and the shape `applyHydration` was built
+   * for. It runs for this device's own writes too, because working out locally which of forty screens a
+   * write touched is a guess, and re-reading is not.
+   */
+  useEffect(() => {
+    if (!remote.remote || remote.dataRevision === 0 || !careerId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await apiFetch(`/api/career?careerId=${encodeURIComponent(careerId)}`, {
+          cache: "no-store",
+        });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as HydrationResponse;
+        if (!cancelled && data.success) applyHydration(data);
+      } catch {
+        // A failed refresh leaves what is on screen alone. Blanking a screen because a refetch failed
+        // is worse than a stale number until the next navigation.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [remote.remote, remote.dataRevision, careerId, applyHydration]);
+
+  const loadSaveCandidates = useCallback(async () => {    setSaveScanComplete(false);
     try {
       const res = await apiFetch("/api/saves", { cache: "no-store" });
       const data = await res.json();
@@ -1327,6 +1361,24 @@ export default function TouchlineApp() {
   // Nothing renders until the phase is resolved. This is what removes the flash rather than merely
   // delaying it: the landing page is never a waypoint on the road to the dashboard, and the
   // dashboard can never paint behind the splash.
+  //
+  // A page served by a PC core with no pairing yet has nothing to boot: the career call it would make
+  // is refused before it starts. The pairing card comes first, and accepting a code reloads the page
+  // into the app it already was.
+  const needsPairing =
+    remote.remote &&
+    remote.resolved &&
+    (remote.reach === "unpaired" || (remote.reach === "offline" && remote.state === null));
+
+  if (needsPairing) {
+    return (
+      <RemotePairingScreen
+        offline={remote.reach === "offline"}
+        onPaired={() => window.location.reload()}
+      />
+    );
+  }
+
   if (bootPhase === "booting") {
     return (
       <main className="min-h-dvh flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-6">
@@ -1638,6 +1690,10 @@ export default function TouchlineApp() {
           onDismiss={() => setStatusMessage(null)}
         />
       )}
+      {/* Says who has the pen when it is not this device, and explains a refused write. Renders
+          nothing at all unless this page came from a PC core. Not on Settings: the Devices card there
+          says the same thing with more detail, and a floating copy would sit on top of the QR. */}
+      {displayedTab !== "SETTINGS" && <ViewingPill />}
       {appError && (
         <AppNotice
           tone="error"
@@ -1664,10 +1720,12 @@ export default function TouchlineApp() {
         onboarding surfaces rather than app pages.
       */}
       <div
-        key={displayedTab}
+        key={`${displayedTab}:${remote.externalRevision}`}
         className={`flex-1 w-full mx-auto z-10 ${
           isAppSurface
-            ? "max-w-7xl px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-mobile-bar"
+            ? // `pb-24` while another device has the pen: the Viewing pill is fixed above the tab bar,
+              // and without the room the last card's controls end up underneath it.
+              `max-w-7xl px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-mobile-bar ${remote.state && !remote.state.self?.writer ? "max-md:pb-28" : ""}`
             : "max-w-7xl p-4 sm:p-6"
         } ${tabPhase === "in" ? "animate-page-in" : "animate-page-out"}`}
       >

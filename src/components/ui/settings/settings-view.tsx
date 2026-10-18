@@ -26,6 +26,7 @@ import {
 import type { ParsedCareerEvent } from "@/lib/services/event-service";
 import { SubTabs, type SubTabOption } from "@/components/ui/sub-tabs";
 import { CareerTimeline } from "@/components/ui/settings/career-timeline";
+import { RemoteDevices } from "@/components/ui/remote/devices-panel";
 
 export interface ActionResult {
   ok: boolean;
@@ -495,6 +496,14 @@ export function SettingsView({
               Your save is read on this device. Nothing is uploaded to a server, and there is no cloud
               copy of your career anywhere.
             </p>
+          </Section>
+
+          <Section
+            tour="settings-devices"
+            title="Devices"
+            description="Who else can open this career, and which device is editing it right now."
+          >
+            <RemoteDevices />
           </Section>
 
           <Section

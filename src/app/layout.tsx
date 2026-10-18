@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Russo_One, Carme, Karla } from "next/font/google";
 import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/session";
+import { RemoteProvider } from "@/components/ui/remote/remote-provider";
 import "./globals.css";
 
 const russoOne = Russo_One({
@@ -64,7 +65,9 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
       </head>
       <body className="bg-[var(--background)] text-[var(--foreground)] font-sans antialiased min-h-dvh transition-colors selection:bg-[#FF8C7A] selection:text-white">
-        {children}
+        {/* One picture of the PC this page is talking to, for every surface that needs it. Renders
+            nothing of its own, so the static export's markup is unchanged where there is no core. */}
+        <RemoteProvider>{children}</RemoteProvider>
       </body>
     </html>
   );
