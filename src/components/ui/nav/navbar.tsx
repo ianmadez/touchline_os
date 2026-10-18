@@ -108,11 +108,14 @@ export function Navbar({
       <nav className="justify-self-center min-w-0">
         {isLanding ? (
           <div className="hidden md:flex items-center gap-6 lg:gap-8 font-sub text-xs uppercase tracking-widest text-slate-600 dark:text-slate-300 font-semibold">
-            <a href="#how-it-works" className="hover:text-slate-900 dark:hover:text-white transition-colors">
-              How It Works
+            <a href="#phone" className="hover:text-slate-900 dark:hover:text-white transition-colors">
+              Phone
             </a>
             <a href="#features" className="hover:text-slate-900 dark:hover:text-white transition-colors">
               Features
+            </a>
+            <a href="#how-it-works" className="hover:text-slate-900 dark:hover:text-white transition-colors">
+              How It Works
             </a>
             <a href="#block-loop" className="hover:text-slate-900 dark:hover:text-white transition-colors">
               Blocks

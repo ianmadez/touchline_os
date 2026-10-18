@@ -1691,9 +1691,12 @@ export default function TouchlineApp() {
         />
       )}
       {/* Says who has the pen when it is not this device, and explains a refused write. Renders
-          nothing at all unless this page came from a PC core. Not on Settings: the Devices card there
-          says the same thing with more detail, and a floating copy would sit on top of the QR. */}
-      {displayedTab !== "SETTINGS" && <ViewingPill />}
+          nothing at all unless this page came from a PC core. Not on Settings, where the Devices card
+          says it with more to act on, and on Landing it only appears once a write has actually been
+          refused - the phone card there is the steady state, and a floating copy on top of it would
+          cover the QR. */}
+      {displayedTab !== "SETTINGS" &&
+        (displayedTab !== "LANDING" || remote.leaseRefusal !== null) && <ViewingPill />}
       {appError && (
         <AppNotice
           tone="error"
@@ -1744,6 +1747,7 @@ export default function TouchlineApp() {
             bridgeBusy={pairingBridge}
             bridgeError={bridgeError}
             onOpenLegal={(doc) => setActiveLegalDoc(doc)}
+            onOpenSettings={() => enterApp("SETTINGS")}
             onEnterPortal={() => {
               if (isOnboardingComplete) {
                 setHasEntered(true);

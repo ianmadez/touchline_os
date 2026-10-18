@@ -12,6 +12,8 @@ import {
   saveScanningLabel,
 } from "@/lib/ui/save-source-copy";
 import { BridgePanel } from "../bridge/bridge-panel";
+import { PhoneAccessCard } from "../remote/phone-access-card";
+import { PhoneMockup } from "./phone-mockup";
 import { LegalDocType } from "./legal-modal";
 import { LocalStorageNotice } from "./local-storage-notice";
 
@@ -43,6 +45,8 @@ interface LandingPageProps {
   onDisconnectBridge?: () => void;
   bridgeBusy?: boolean;
   bridgeError?: string | null;
+  /** Opens Settings, so the phone section can hand over to the device list. */
+  onOpenSettings?: () => void;
 }
 
 export function LandingPage({
@@ -60,6 +64,7 @@ export function LandingPage({
   onDisconnectBridge,
   bridgeBusy = false,
   bridgeError = null,
+  onOpenSettings,
 }: LandingPageProps) {
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
 
@@ -89,6 +94,10 @@ export function LandingPage({
     {
       q: "Do I have to pick my save file every time I visit?",
       a: "Usually not. In Chrome and Edge the site remembers the file you chose and only re-asks for permission now and then. In any browser - including Firefox and Safari, which cannot remember a file at all - you can run the optional local bridge: a small free helper you download once that watches your save folder and serves the file to the page, so there is nothing to pick and a new save is noticed on its own. It runs only on your PC, only answers TouchlineOS, and never writes to your save. TouchlineOS works fully without it; you would simply pick your save file again, which takes a moment.",
+    },
+    {
+      q: "Can I use TouchlineOS on my phone?",
+      a: "Yes, over your own network. The career stays on the PC: the optional core can serve the app to a paired phone or tablet on the same Wi-Fi, so a new save shows up on both and whichever device holds the pen can edit. There is no account and no cloud copy, and the listener only exists while you have turned sharing on at the PC. The three steps are in the phone section above.",
     },
     {
       q: "Do I need any programming or technical knowledge to use this?",
@@ -221,65 +230,35 @@ export function LandingPage({
         </button>
       </section>
 
-      {/* HOW IT WORKS (VERTICAL GUIDE) */}
-      <section id="how-it-works" className="scroll-mt-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 sm:p-12 shadow-xl">
-        <div className="text-center max-w-2xl mx-auto mb-12">
-          <span className="font-sub text-xs text-[#E11D48] uppercase tracking-widest font-bold block mb-1">
-            Manager Workflow
-          </span>
-          <h2 className="font-heading text-2xl sm:text-4xl text-slate-900 dark:text-slate-100 uppercase">
-            How TouchlineOS Operates
-          </h2>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-          <div className="flex flex-col items-center text-center space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-[#E11D48] dark:text-rose-400 font-heading text-xl flex items-center justify-center shadow-xs">
-              01
-            </div>
-            <h3 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase">
-              Connect Save
-            </h3>
-            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              Point TouchlineOS at your EA SPORTS FC save. It reads the file directly and turns it into
-              squad rosters, contracts and finances, read-only, with nothing written back.
+      {/* PHONE PAIRING.
+          Second in the page on purpose: it is the feature a manager does not expect, so it earns the
+          space right under the hero. The mockup carries the "what it looks like" half and the copy
+          carries the "how you get it" half, side by side on a desktop and mockup-first on a phone. */}
+      <section
+        id="phone"
+        className="scroll-mt-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 sm:p-12 shadow-xl"
+      >
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_280px] lg:items-center lg:gap-14">
+          <div className="order-2 lg:order-1">
+            <span className="font-sub text-xs text-[#E11D48] dark:text-[#FF8C7A] uppercase tracking-widest font-bold block mb-1">
+              Second Screen
+            </span>
+            <h2 className="font-heading text-2xl sm:text-4xl text-slate-900 dark:text-slate-100 uppercase leading-tight">
+              Your Career,
+              <br className="hidden sm:block" /> On Your Phone
+            </h2>
+            <p className="font-sans text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-3 mb-6 leading-relaxed max-w-xl">
+              The career stays on the PC. Pair a phone, tablet or laptop on the same Wi-Fi and it opens
+              the same screens, with no account and nothing leaving the house. Play a match on the PC and
+              the phone already knows the result.
             </p>
+            <div className="max-w-xl">
+              <PhoneAccessCard variant="landing" onManageDevices={onOpenSettings} />
+            </div>
           </div>
 
-          <div className="flex flex-col items-center text-center space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-[#E11D48] dark:text-rose-400 font-heading text-xl flex items-center justify-center shadow-xs">
-              02
-            </div>
-            <h3 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase">
-              Sync Snapshots
-            </h3>
-            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              Every save sync writes an immutable snapshot (Snapshot N → N+1). Transfers, squad depth, and rating deltas are auto-detected.
-            </p>
-          </div>
-
-          <div className="flex flex-col items-center text-center space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-[#E11D48] dark:text-rose-400 font-heading text-xl flex items-center justify-center shadow-xs">
-              03
-            </div>
-            <h3 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase">
-              Annotate & Debrief
-            </h3>
-            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              Mark key players as Untouchable, assign tactical roles on a 2D pitch, and answer targeted post-match debrief questions.
-            </p>
-          </div>
-
-          <div className="flex flex-col items-center text-center space-y-3">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-[#E11D48] dark:text-rose-400 font-heading text-xl flex items-center justify-center shadow-xs">
-              04
-            </div>
-            <h3 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase">
-              Evolve Your Career
-            </h3>
-            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              Receive clear squad advice, follow player progression, and watch your managerial story build over multiple seasons.
-            </p>
+          <div className="order-1 flex justify-center lg:order-2">
+            <PhoneMockup />
           </div>
         </div>
       </section>
@@ -469,6 +448,69 @@ export function LandingPage({
             <p className="font-sans text-xs text-slate-300 leading-relaxed">
               Match facts scanning, loan deals with wage splits, board objective tracking, and a local
               database you can export.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* HOW IT WORKS (VERTICAL GUIDE) */}
+      <section id="how-it-works" className="scroll-mt-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 sm:p-12 shadow-xl">
+        <div className="text-center max-w-2xl mx-auto mb-12">
+          <span className="font-sub text-xs text-[#E11D48] uppercase tracking-widest font-bold block mb-1">
+            Manager Workflow
+          </span>
+          <h2 className="font-heading text-2xl sm:text-4xl text-slate-900 dark:text-slate-100 uppercase">
+            How TouchlineOS Operates
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+          <div className="flex flex-col items-center text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-[#E11D48] dark:text-rose-400 font-heading text-xl flex items-center justify-center shadow-xs">
+              01
+            </div>
+            <h3 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase">
+              Connect Save
+            </h3>
+            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Point TouchlineOS at your EA SPORTS FC save. It reads the file directly and turns it into
+              squad rosters, contracts and finances, read-only, with nothing written back.
+            </p>
+          </div>
+
+          <div className="flex flex-col items-center text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-[#E11D48] dark:text-rose-400 font-heading text-xl flex items-center justify-center shadow-xs">
+              02
+            </div>
+            <h3 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase">
+              Sync Snapshots
+            </h3>
+            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Every save sync writes an immutable snapshot (Snapshot N → N+1). Transfers, squad depth, and rating deltas are auto-detected.
+            </p>
+          </div>
+
+          <div className="flex flex-col items-center text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-[#E11D48] dark:text-rose-400 font-heading text-xl flex items-center justify-center shadow-xs">
+              03
+            </div>
+            <h3 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase">
+              Annotate & Debrief
+            </h3>
+            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Mark key players as Untouchable, assign tactical roles on a 2D pitch, and answer targeted post-match debrief questions.
+            </p>
+          </div>
+
+          <div className="flex flex-col items-center text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-[#E11D48] dark:text-rose-400 font-heading text-xl flex items-center justify-center shadow-xs">
+              04
+            </div>
+            <h3 className="font-heading text-base text-slate-900 dark:text-slate-100 uppercase">
+              Evolve Your Career
+            </h3>
+            <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Receive clear squad advice, follow player progression, and watch your managerial story build over multiple seasons.
             </p>
           </div>
         </div>

@@ -15,6 +15,7 @@
 import React, { useState } from "react";
 import { forgetRemoteSession, revokeDevice, setSharing } from "@/lib/platform/remote";
 import type { RemoteState } from "@/lib/remote/protocol";
+import { PairingInstructions } from "./pairing-instructions";
 import { useRemote, useWriteAccess } from "./remote-provider";
 
 function relative(iso: string): string {
@@ -43,17 +44,7 @@ export function RemoteDevices() {
   const [error, setError] = useState<string | null>(null);
 
   if (!remote) {
-    return (
-      <p className="font-sans text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-        This app is running on the PC itself, so there is nothing to connect. To use the same career on a
-        phone, start the core from the project folder with{" "}
-        <code className="rounded bg-slate-100 dark:bg-slate-950 px-1.5 py-0.5 font-sub text-[11px] text-slate-800 dark:text-slate-200">
-          npm run core -- --share
-        </code>{" "}
-        and open the address it prints. The career stays on this machine, and the phone only reaches it
-        while both are on the same network.
-      </p>
-    );
+    return <PairingInstructions compact />;
   }
 
   if (!state) {

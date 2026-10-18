@@ -33,6 +33,13 @@ $env:TOUCHLINE_REMOTE="1" # or: npx tsx bridge/touchline-core.ts --share
 npm run core
 ```
 
+**What this needs today.** The core is run from a checkout, with `npm install` behind it, because it
+hosts the whole app: a real SQLite database and the parser both need the project's dependencies. The
+downloaded one-file bridge cannot do this job - it deliberately has no dependencies, no parser and no
+database - so there is no way yet for someone who only uses the hosted website to pair a phone. Packaging
+the core as a single downloadable program is the obvious next step, and until it exists this page says
+so rather than pretending otherwise.
+
 The window prints four things: where the database is, the pairing code, the address a phone should
 open, and a QR code for it.
 
@@ -46,6 +53,11 @@ open, and a QR code for it.
 
 Open the phone address, or scan the QR, and the app asks for the six-character code once. After that the
 phone is paired, and the code is only needed for the *next* device.
+
+The same three steps appear inside the app, so nobody has to come back to this file: the landing page has
+a **Use The Same Career On Your Phone** section, and **Settings → Devices** repeats the commands with copy
+buttons and then becomes the device list once a phone is paired. If the page you are looking at was
+served by a core, that section shows the QR and code directly instead of the instructions.
 
 `npm run core` on its own starts the loopback listener and nothing else: a page on the PC itself can use
 the career, a phone cannot.

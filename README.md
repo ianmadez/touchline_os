@@ -60,6 +60,11 @@ Simple as pointing TouchlineOS at your save file, which it tries to automaticall
 
 <img width="500" height="261" alt="image" src="https://github.com/user-attachments/assets/db366d38-8f0d-4a88-89a2-bc3921d1cd58" />
 
+### Phone pairing
+The same career on a second screen. The optional core on your PC serves the whole app to a paired phone, tablet or laptop on the same Wi-Fi: no account, no cloud copy, nothing leaving the house. Pairing is one six-character code, or a QR scan that fills it in for you; every paired device is listed in Settings → Devices with a Revoke button. One device holds the pen at a time, so two people cannot write over each other, and the other keeps reading until it takes control. While sharing is on, the core also watches your save folders, so a match played on the PC is already on the phone.
+
+The steps are on the landing page, in Settings → Devices, and in [docs/remote-access.md](docs/remote-access.md).
+
 ### Squad
 Your full roster is read straight from the save: OVR, potential, age, position, contract, form, jersey number + a manager's-eye layer you control yourself: assigned role, trust level, and importance marker (untouchable / key player / rotation / surplus). Faces are fetched automatically for real squad players, not youth, with a clean initials-disc fallback for anyone without one.
 
@@ -180,14 +185,22 @@ Point the app at your FC Career save when prompted on first launch. Nothing is u
 
 ### On a phone
 
-```bash
-npm run build:browser     # once, and after pulling changes
-npx tsx bridge/touchline-core.ts --share
+```powershell
+npm run build:browser                        # once, and after pulling changes
+$env:TOUCHLINE_REMOTE="1"; npm run core      # prints a pairing code and an address
 ```
 
-The window prints a pairing code and the address to open on your phone. That is the whole setup; the
-details, the security model and the troubleshooting table are in
-[docs/remote-access.md](docs/remote-access.md).
+Open the printed address on the phone, on the same Wi-Fi, and enter the six-character code once - or
+scan the QR the window draws. After that the phone is paired and reopening the address goes straight to
+the career.
+
+The same three steps are on the landing page and in **Settings → Devices**, which is also where the
+device list, **Take control**, **Revoke** and **Stop sharing** live. The security model, the firewall
+prompt and the troubleshooting table are in [docs/remote-access.md](docs/remote-access.md).
+
+The core runs from the project folder, so pairing a phone needs the repo checked out with `npm install`
+behind it. That is a limitation of the current packaging, not of the feature: a downloadable core is
+future work, and the landing page says so rather than implying the hosted site can do it on its own.
 
 ---
 

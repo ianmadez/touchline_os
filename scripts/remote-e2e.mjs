@@ -361,12 +361,15 @@ async function main() {
     check("the device without the pen is refused", blocked.status === 409, `status ${blocked.status}`);
     check("with a code the client can explain", blocked.body?.code === "lease", String(blocked.body?.code));
 
+    // The landing page carries the phone card, which is where a manager who is not editing is told so.
     await scanned.reload({ waitUntil: "domcontentloaded" });
-    await scanned.waitForTimeout(3000);
-    const pill = scanned.getByText(/is editing here/i);
-    check("the phone says it is viewing, and who is editing", (await pill.count()) > 0);
+    const card = scanned.locator("#phone");
+    await card.waitFor({ timeout: 60_000 });
+    await card.scrollIntoViewIfNeeded();
+    check("the phone card says this device is viewing", (await card.getByText(/This device is viewing/i).count()) > 0);
 
-    const takeControl = scanned.getByRole("button", { name: /take control/i }).first();
+    const takeControl = card.getByRole("button", { name: /take control/i }).first();
+    check("and offers to take control from there", (await takeControl.count()) > 0);
     if ((await takeControl.count()) > 0) {
       await takeControl.click();
       await scanned.waitForTimeout(1500);
@@ -378,6 +381,10 @@ async function main() {
       "pressing Take control moves the pen to this device",
       afterTake.body?.writer?.deviceId === afterTake.body?.self?.id,
       String(afterTake.body?.writer?.name)
+    );
+    check(
+      "and the card switches to editing",
+      (await card.getByText(/This device is editing/i).count()) > 0
     );
 
     const desktopBlocked = await api(desktopPage, "/api/settings", {
