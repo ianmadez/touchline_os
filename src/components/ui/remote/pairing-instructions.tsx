@@ -80,13 +80,13 @@ export function PairingInstructions({ compact = false }: { compact?: boolean }) 
       <p className="font-sans text-xs leading-relaxed text-slate-600 dark:text-slate-400">
         {compact
           ? "Sharing is a listener on the PC, so it is switched on from the PC. Three steps, once."
-          : "The career lives on your PC. Turn sharing on there, pair the phone once, and it opens the same career. Read on the phone, edit on whichever device holds the pen."}
+          : "The career in this browser is the main copy, and the PC keeps a live copy of it so your phone can open the same career. Turn sharing on there, pair the phone once, and a change on either device appears on the other within a few seconds."}
       </p>
 
       <ol className="space-y-3.5">
         <Step number="01" title="Build the phone copy">
           <p className="mb-2">
-            Once, and again after pulling changes. The core serves this build to your phone.
+            Once, and again after any page change. The core serves this build to your phone.
           </p>
           <Command command="npm run build:browser" />
         </Step>
@@ -113,9 +113,14 @@ export function PairingInstructions({ compact = false }: { compact?: boolean }) 
 
       <div className="space-y-1.5 border-t border-slate-200 dark:border-slate-800 pt-3">
         <p className="font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-          Nothing is uploaded. The phone talks straight to your PC over your own network, and the listener
-          only exists while sharing is on. Windows may ask once whether Node.js may accept connections -
-          allow it on private networks only.
+          Pair only on a network you trust: it runs over plain HTTP on your own Wi-Fi. Nothing is
+          uploaded, and nothing leaves your network. The listener only exists while sharing is on.
+          Windows may ask once whether Node.js may accept connections, so allow it on private networks
+          only.
+        </p>
+        <p className="font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+          If both copies change while they are apart, TouchlineOS asks which one to keep. It never merges
+          them.
         </p>
         <p className="font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
           The core runs from the project folder, so these two commands need it checked out. Nothing is

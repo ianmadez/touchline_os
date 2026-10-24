@@ -44,9 +44,12 @@ import {
   handleSaveRoutes,
   originAllowed,
   sendJson,
+  CODE_HEADER,
   type BridgeConfig,
 } from "./bridge-server";
+import { handleSyncRoutes } from "./replication";
 import type { DeviceStore } from "./device-store";
+import { MIGRATION_LEVEL, SCHEMA_VERSION } from "../src/lib/sync/versions";
 
 /** Largest body the core will read. A career transfer package is the big one, and it is far smaller. */
 export const MAX_BODY_BYTES = 32 * 1024 * 1024;
@@ -274,6 +277,19 @@ export class EventHub {
     } catch {
       // Already gone.
     }
+  }
+
+  /**
+   * Drops every stream a device holds.
+   *
+   * Called when a device is revoked. A stream that stayed open would keep delivering frames to a device
+   * that is no longer allowed to read the career, which is the one thing revocation exists to stop.
+   * Returns how many were closed, so a test can assert it rather than infer it.
+   */
+  removeFor(deviceId: string): number {
+    const doomed = this.clients.filter((entry) => entry.deviceId === deviceId);
+    for (const client of doomed) this.remove(client.id);
+    return doomed.length;
   }
 
   get size(): number {
@@ -607,7 +623,8 @@ export function createCoreServer(options: CoreServerOptions): CoreServer {
           res.writeHead(204, {
             "access-control-allow-methods": lan
               ? "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-              : "GET, OPTIONS",
+              // POST on loopback exists for replication only: the page seeds and pushes the replica.
+              : "GET, POST, OPTIONS",
             "access-control-allow-headers": lan
               ? `content-type, ${REMOTE_TOKEN_HEADER}, ${"x-touchline-code"}`
               : "x-touchline-bridge-code, content-type",
@@ -628,6 +645,8 @@ export function createCoreServer(options: CoreServerOptions): CoreServer {
             version: String(REMOTE_API_VERSION),
             apiVersion: REMOTE_API_VERSION,
             minClientVersion: REMOTE_MIN_CLIENT_VERSION,
+            schemaVersion: SCHEMA_VERSION,
+            migrationLevel: MIGRATION_LEVEL,
             hostName: options.hostName,
             sharing: store.sharing(),
             paired: store.devices().length > 0,
@@ -641,6 +660,8 @@ export function createCoreServer(options: CoreServerOptions): CoreServer {
             service: REMOTE_SERVICE,
             apiVersion: REMOTE_API_VERSION,
             minClientVersion: REMOTE_MIN_CLIENT_VERSION,
+            schemaVersion: SCHEMA_VERSION,
+            migrationLevel: MIGRATION_LEVEL,
             hostName: options.hostName,
             url: pairingAddress(options.port),
             sharing: store.sharing(),
@@ -652,6 +673,27 @@ export function createCoreServer(options: CoreServerOptions): CoreServer {
         if (pathname === "/saves" || pathname.startsWith("/saves/")) {
           const config: BridgeConfig = { code: options.pairingCode, port: options.port };
           await handleSaveRoutes(req, res, url, config);
+          return;
+        }
+
+        // ---------------------------------------------------------------- replication (loopback only)
+        //
+        // The page sequences its changes through this listener and nowhere else. The LAN listener
+        // answers 404 to the whole prefix rather than authenticating it: a phone is a client of the
+        // replica and never needs a revision, so the door does not exist there at all.
+        if (pathname === "/sync" || pathname.startsWith("/sync/")) {
+          if (lan) {
+            sendJson(res, 404, { success: false, error: "Unknown route." });
+            return;
+          }
+          const supplied = req.headers[CODE_HEADER];
+          if (!codeMatches(typeof supplied === "string" ? supplied : undefined, options.pairingCode)) {
+            sendJson(res, 401, {
+              error: "Pairing code missing or incorrect. Check the code shown by the bridge.",
+            });
+            return;
+          }
+          await handleSyncRoutes(req, res, url);
           return;
         }
 
@@ -728,6 +770,8 @@ export function createCoreServer(options: CoreServerOptions): CoreServer {
               return;
             }
             store.revoke(id);
+            // A revoked device must lose the stream it is already holding, not only its next request.
+            hub.removeFor(id);
             hub.broadcastState();
             sendJson(res, 200, stateFor(device.id));
             return;
@@ -757,6 +801,7 @@ export function createCoreServer(options: CoreServerOptions): CoreServer {
 
           if (pathname === "/api/remote/unpair" && method === "POST") {
             store.revoke(device.id);
+            hub.removeFor(device.id);
             hub.broadcastState();
             sendJson(res, 200, { success: true });
             return;

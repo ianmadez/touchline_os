@@ -96,8 +96,10 @@ export function PhoneAccessCard({ onManageDevices, variant = "landing" }: PhoneA
         </div>
 
         <p className="font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-800 pt-3">
-          One device holds the pen at a time, so two people cannot write over each other. The other keeps
-          reading, and can take control from the banner or from Settings → Devices.
+          The PC keeps a live copy of this career, and a change on either device appears on the other
+          within a few seconds. One device edits at a time: the other shows Viewing only, and Take control
+          switches. Both devices must be on the same Wi-Fi, and it runs over plain HTTP on your own
+          network, so pair only on a network you trust.
         </p>
       </div>
     </div>

@@ -22,6 +22,7 @@ import {
   PartialBackupError,
   TRANSFER_SCHEMA_VERSION,
 } from "../src/lib/services/career-transfer-service";
+import { isSyncTable } from "../src/lib/sync/replication/schema";
 
 type Row = Record<string, unknown>;
 
@@ -39,7 +40,12 @@ function tables(): string[] {
     .all<{ name: string }>(
       sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
     )
-    .map((row) => row.name);
+    .map((row) => row.name)
+    // The replication ledger is not career data and must never reach a backup, so it is outside both
+    // the expected table list and the digest. Its log grows on its own as these writes fire triggers,
+    // which would otherwise make every comparison below fail for a reason that has nothing to do with
+    // the round trip.
+    .filter((name) => !isSyncTable(name));
 }
 
 function columnsOf(name: string): string[] {
@@ -79,8 +85,52 @@ async function main(): Promise<void> {
   console.log(`Database: ${config.databasePath}`);
   console.log(`Career:   ${CAREER_ID}\n`);
 
+  // --- 0. a fixture in every table that used to be missing --------------------------------------
+  //
+  // The six tables below were absent from the package until the phone sync work. Four of them are empty
+  // in a real career most of the time, so a round trip over this data would not have noticed them
+  // coming back empty. Seeding one row each means the digest comparison is actually testing them.
+  console.log("0. Fixture for the tables that were missing from the package");
+  const fixtures: Array<[string, string]> = [
+    [
+      "career_trophies",
+      `INSERT OR REPLACE INTO career_trophies (id, career_id, key, name, kind, season, provenance)
+       VALUES ('${CAREER_ID}_fixture_trophy', '${CAREER_ID}', 'fixture_league', 'Fixture League', 'LEAGUE', 1, 'USER')`,
+    ],
+    [
+      "debrief_marks",
+      `INSERT OR REPLACE INTO debrief_marks (id, career_id, event_id)
+       VALUES ('${CAREER_ID}_fixture_mark', '${CAREER_ID}', 'fixture_event')`,
+    ],
+    [
+      "news_items",
+      `INSERT OR REPLACE INTO news_items (id, career_id, category, tone, headline, body)
+       VALUES ('${CAREER_ID}_fixture_news', '${CAREER_ID}', 'CLUB', 'NEUTRAL', 'Fixture headline', 'Fixture body')`,
+    ],
+    [
+      "news_published",
+      `INSERT OR REPLACE INTO news_published (id, career_id)
+       VALUES ('${CAREER_ID}_fixture_news', '${CAREER_ID}')`,
+    ],
+    [
+      "transfer_inputs",
+      `INSERT OR REPLACE INTO transfer_inputs (id, career_id, direction, player_name, fee)
+       VALUES ('${CAREER_ID}_fixture_input', '${CAREER_ID}', 'IN', 'Fixture Player', 1000000)`,
+    ],
+    [
+      "transfer_counterparty_names",
+      `INSERT OR REPLACE INTO transfer_counterparty_names (id, career_id, deal_id, name)
+       VALUES ('${CAREER_ID}_fixture_counterparty', '${CAREER_ID}', 'fixture_deal', 'Fixture FC')`,
+    ],
+  ];
+  for (const [name, statement] of fixtures) {
+    db.run(sql.raw(statement));
+    const count = db.all<{ n: number }>(sql`SELECT COUNT(*) AS n FROM ${sql.identifier(name)} WHERE career_id = ${CAREER_ID}`);
+    check(`${name} has a row to carry`, (count[0]?.n ?? 0) > 0, `${count[0]?.n ?? 0} row(s)`);
+  }
+
   // --- 1. the export carries every career table ------------------------------------------------
-  console.log("1. Export completeness");
+  console.log("\n1. Export completeness");
   const pkg = await buildTransferPackage(CAREER_ID);
   if (!pkg) {
     console.error(`No career ${CAREER_ID} in this database. Nothing to test.`);
@@ -100,6 +150,12 @@ async function main(): Promise<void> {
     expected.filter((name) => !carried.includes(name)).join(", ") || "none missing");
   check("package declares the version this build writes",
     pkg.schemaVersion === TRANSFER_SCHEMA_VERSION, `schemaVersion ${pkg.schemaVersion}`);
+  // The ledger is excluded by name here rather than by the whitelist, so a table accidentally added to
+  // `CAREER_TABLES` is caught by this check instead of quietly shipping a device's outbox inside a
+  // backup and restoring it on another machine.
+  const leaked = [...pkg.tables].filter((name) => name.startsWith("_sync_"));
+  check("no package table is a replication ledger table", leaked.length === 0,
+    leaked.join(", ") || "none");
 
   const rowsInPackage = Object.values(pkg.counts).reduce((total, value) => total + value, 0);
   const rowsFromDb = expected.reduce((total, name) => {

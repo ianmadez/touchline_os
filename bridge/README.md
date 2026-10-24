@@ -50,6 +50,30 @@ Two things:
 
 The code is stored at `%LOCALAPPDATA%\TouchlineOS\bridge.json` so it stays the same between runs. To disconnect, use the Disconnect option in TouchlineOS, or delete that file for a new code.
 
+## Updating it
+
+The bridge and the website have to be built from the same schema, and the website is redeployed far more
+often than the bridge is. When they disagree the page says so plainly ("This bridge is older than the web
+page. Update the bridge.") and stops before it does anything with your career.
+
+Updating is the same act as installing: download it again from TouchlineOS, close the old window, and
+double-click the new `TouchlineBridge.cmd`. Your pairing code is remembered in
+`%LOCALAPPDATA%\TouchlineOS\bridge.json`, so nothing needs re-pairing.
+
+You can check what you have without opening the page: <http://127.0.0.1:4977/status> reports
+`schemaVersion` and `migrationLevel`.
+
+## Keeping a copy of the career
+
+This download does not hold your career, so there is nothing here to keep in step. The core does. The
+career in this browser is the main copy, and the core keeps a live copy of it so your phone can open the
+same career: it is sent once when you pair, the PC's old copy is saved to a backup folder first, and from
+then on a change on either device appears on the other within a few seconds. See
+[The site's copy and the PC's copy](../docs/remote-access.md#the-sites-copy-and-the-pcs-copy).
+
+The calls that do that work answer only on the core's loopback listener. This program has no `/sync`
+routes at all, and the core's shared listener answers 404 to every one of them.
+
 ## Removing it
 
 Close the window and delete this folder. Nothing else on your computer was touched, and nothing was installed.

@@ -97,7 +97,11 @@ export function LandingPage({
     },
     {
       q: "Can I use TouchlineOS on my phone?",
-      a: "Yes, over your own network. The career stays on the PC: the optional core can serve the app to a paired phone or tablet on the same Wi-Fi, so a new save shows up on both and whichever device holds the pen can edit. There is no account and no cloud copy, and the listener only exists while you have turned sharing on at the PC. The three steps are in the phone section above.",
+      a: "Yes, and it is the same career, not a copy you have to keep in step by hand. The career in this browser is the main copy, and the optional core on your PC keeps a live copy of it so your phone can show it. The first time you pair, this browser's copy is sent to the PC, and the old PC copy is saved to a backup folder first. After that, a change on either device appears on the other within a few seconds. The phone and the PC must be on the same Wi-Fi, and it runs over plain HTTP on your own network, so pair only on a network you trust. Nothing leaves your network. If both copies changed while they were apart, TouchlineOS asks which one to keep, and it never merges them.",
+    },
+    {
+      q: "What if two devices try to edit at once?",
+      a: "One device edits at a time. The other shows Viewing only, and Take control switches which one is editing, so nobody writes over anybody. A phone edit made while the page is closed waits, and is applied the next time the page opens.",
     },
     {
       q: "Do I need any programming or technical knowledge to use this?",
@@ -248,9 +252,9 @@ export function LandingPage({
               <br className="hidden sm:block" /> On Your Phone
             </h2>
             <p className="font-sans text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-3 mb-6 leading-relaxed max-w-xl">
-              The career stays on the PC. Pair a phone, tablet or laptop on the same Wi-Fi and it opens
-              the same screens, with no account and nothing leaving the house. Play a match on the PC and
-              the phone already knows the result.
+              The career in this browser is the main copy. The PC keeps a live copy of it so your phone
+              can open the same career, and a change on either device appears on the other within a few
+              seconds. One device edits at a time, and nothing leaves your network.
             </p>
             <div className="max-w-xl">
               <PhoneAccessCard variant="landing" onManageDevices={onOpenSettings} />

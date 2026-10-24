@@ -74,6 +74,16 @@ That is the whole reason item 3 below is not optional.
 12. [ ] **Expected goals is the game's own figure.** Add a debrief by hand, type 1.9 into Expected goals, and
    expect Shot quality to appear beside Finishing, which reads to one decimal. Nothing on that panel should
    mention big chances.
+13. [ ] **The deployed page pairs with a PC copy.** In Firefox on the deployed origin, run the core with
+   sharing on, enter its code in the bridge panel, and wait for **Synced with this PC**. The sync line is
+   the check: it must reach Synced within a few seconds, and the Devices card must then show the phone
+   once it is paired.
+14. [ ] **Two devices, one career.** With a phone paired, make one edit on each device and confirm each
+   arrives on the other within a few seconds, that the second device shows **Viewing only** until it
+   takes control, and that no **Two copies** prompt appears without a real divergence.
+
+The commands and the phone checklist for items 13 and 14 are in
+[testing-phone-pairing.md](testing-phone-pairing.md).
 
 ## Once the production domain is known
 

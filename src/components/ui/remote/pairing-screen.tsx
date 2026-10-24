@@ -109,6 +109,14 @@ export function RemotePairingScreen({ onPaired, offline = false }: RemotePairing
               : "Type the code shown in the TouchlineOS window on your PC. It is six characters, and it stays the same until you reset it."}
           </p>
 
+          {!offline && (
+            <p className="font-sans text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+              Pairing puts the same career on this phone as the one open on your PC. A change on either
+              device appears on the other within a few seconds, and one device edits at a time: this one
+              shows Viewing only until you take control.
+            </p>
+          )}
+
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -157,9 +165,9 @@ export function RemotePairingScreen({ onPaired, offline = false }: RemotePairing
           </form>
 
           <p className="font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-800 pt-4">
-            Nothing is uploaded. Your phone talks straight to your PC over your own network, and the
-            career never leaves the house. If the code has been forgotten, it is printed every time the
-            TouchlineOS window opens.
+            Nothing is uploaded, and nothing leaves your network. Your phone talks straight to your PC
+            over your own Wi-Fi. It runs over plain HTTP on that network, so pair only on a network you
+            trust. If the code has been forgotten, it is printed every time the TouchlineOS window opens.
           </p>
         </div>
 

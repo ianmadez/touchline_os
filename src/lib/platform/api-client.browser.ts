@@ -15,6 +15,7 @@
 import { dispatch, rawBody } from "../operations/dispatch";
 import type { RemoteErrorBody } from "../remote/protocol";
 import { announceLeaseRefusal, isRemoteRuntime, remoteInit } from "./remote";
+import { maybeStartAgent } from "../sync/replication/agent";
 import type { ApiFetch } from "./api-client";
 
 export const apiFetch: ApiFetch = async (input: string, init?: RequestInit) => {
@@ -47,6 +48,11 @@ export const apiFetch: ApiFetch = async (input: string, init?: RequestInit) => {
     params: url.searchParams,
     raw: rawBody(init),
   });
+
+  // This is the page owning its own database, which is the only case where it replicates to a bridge.
+  // Started here rather than at boot because a career has to exist first, and this module is the one
+  // thing every screen goes through.
+  if (typeof window !== "undefined") maybeStartAgent();
 
   return new Response(JSON.stringify(outcome.body), {
     status: outcome.status,

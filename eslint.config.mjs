@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Archived probe scripts. They are kept for their findings, are imported by nothing, and are not
+    // held to the app's rules.
+    "scripts/archive/**",
   ]),
 ]);
 

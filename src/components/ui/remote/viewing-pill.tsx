@@ -14,13 +14,34 @@
  * been read.
  */
 import React from "react";
+import { describeSync } from "@/lib/sync/replication/state";
+import { useSyncSnapshot } from "@/components/ui/bridge/sync-line";
 import { useRemote, useWriteAccess } from "./remote-provider";
 
 export function ViewingPill() {
   const { remote, state, leaseRefusal, dismissLeaseRefusal, takeControl } = useRemote();
   const { viewing, holderName } = useWriteAccess();
+  const snapshot = useSyncSnapshot();
+  const catchingUp = snapshot.phase === "catching-up";
 
-  if (!remote || !state) return null;
+  // The page owns its own database, so it has no lease and no `state` - but it can be behind the bridge,
+  // and saying so before a write is the one moment that matters: a change made while catching up is a
+  // change made against a stale picture.
+  if (!remote || !state) {
+    if (!catchingUp) return null;
+    return (
+      <div className="pointer-events-none fixed inset-x-0 z-40 flex justify-center px-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] md:bottom-6">
+        <div className="pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-2xl border border-slate-300/80 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-4 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.18)] backdrop-blur-xl">
+          <span aria-hidden="true" className="text-base leading-none">
+            ⏳
+          </span>
+          <p className="min-w-0 flex-1 font-sans text-[11px] leading-snug text-slate-700 dark:text-slate-200">
+            {describeSync(snapshot)}
+          </p>
+        </div>
+      </div>
+    );
+  }
   if (!viewing && !leaseRefusal) return null;
 
   const name = leaseRefusal ? null : holderName;

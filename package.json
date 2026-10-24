@@ -41,6 +41,8 @@
     "h2h:test": "tsx scripts/test-h2h.ts",
     "money:test": "tsx scripts/test-money.ts",
     "transfer:test": "tsx scripts/test-transfer.ts",
+    "replication:test": "tsx scripts/test-replication.ts",
+    "replication:e2e": "node scripts/replication-e2e.mjs",
     "saves:test": "tsx scripts/test-save-source.ts",
     "saves:dir:test": "tsx scripts/test-save-directory.ts",
     "bridge:test": "tsx scripts/test-bridge.ts",

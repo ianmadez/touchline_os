@@ -91,7 +91,7 @@ const MIN_READ_MS = 900;
  * `reconcileTourRevision`, which takes this value rather than deriving one, because "worth reshowing"
  * is an editorial call and cannot be computed.
  */
-const TOUR_REVISION = "2026-10-17-reasoning-engine";
+const TOUR_REVISION = "2026-10-24-devices-and-sync";
 
 /**
  * The fewest steps worth showing. A tour that survived filtering down to its tab button alone would
@@ -363,6 +363,11 @@ const TOURS: Record<string, TourStep[]> = {
       anchor: "settings-data",
       title: "Data management",
       body: "What is actually stored, how to take a copy of your career, and where to start over. Everything else on this screen is safe to poke at.",
+    },
+    {
+      anchor: "settings-devices",
+      title: "Your phone",
+      body: "The career in this browser is the main copy, and the PC keeps a live copy so your phone can open the same career. A change on either device appears on the other within a few seconds, and one device edits at a time: the other shows Viewing only, and Take control switches. If both copies changed while they were apart, it asks which one to keep. It never merges them. Open How it works here, or scan the code to pair a phone.",
     },
     {
       // The one tour whose closing step is the button itself, because on this screen it is on screen.

@@ -25,6 +25,12 @@ export interface SchemaTarget {
 }
 
 import { SCHEMA_DDL, SCHEMA_MIGRATIONS } from "./schema-sql";
+import {
+  REPLICATION_FINGERPRINT,
+  REPLICATION_FINGERPRINT_KEY,
+  REPLICATION_LEDGER_DDL,
+  REPLICATION_TRIGGERS_DDL,
+} from "../sync/replication/schema";
 
 /**
  * One number out of a query, whichever driver is underneath.
@@ -78,6 +84,50 @@ function readNumber(sqlite: SchemaTarget, sql: string): number | null {
 }
 
 /**
+ * One text value out of a query, with the same three driver shapes understood as `readNumber`.
+ *
+ * `better-sqlite3.exec` returns the database itself rather than a result set, so a prepared statement
+ * is tried first. Reading a value through `exec` alone silently returns null there, and null reads as
+ * "the fingerprint is not stored yet", which would recreate every trigger on every open and rewrite the
+ * browser's image each page load.
+ */
+function readText(sqlite: SchemaTarget, sql: string): string | null {
+  const cellOf = (row: unknown): string | null => {
+    if (!row || typeof row !== "object") return null;
+    const cell = Object.values(row as Record<string, unknown>)[0];
+    return typeof cell === "string" ? cell : null;
+  };
+
+  try {
+    const prepare = (sqlite as { prepare?: (statement: string) => { get?: () => unknown } }).prepare;
+    if (typeof prepare === "function") {
+      const statement = prepare.call(sqlite, sql);
+      if (statement && typeof statement.get === "function") {
+        const value = cellOf(statement.get());
+        if (value !== null) return value;
+      }
+    }
+  } catch {
+    // Fall through to the shapes below.
+  }
+
+  try {
+    const result = sqlite.exec(sql);
+    if (!Array.isArray(result) || result.length === 0) return null;
+    const first = result[0] as Record<string, unknown>;
+    const values = first.values;
+    if (Array.isArray(values)) {
+      const cell = (values[0] as unknown[])?.[0];
+      return typeof cell === "string" ? cell : null;
+    }
+    return cellOf(first);
+  } catch {
+    // A driver that cannot answer returns null, which reads as "not applied yet" and is safe.
+    return null;
+  }
+}
+
+/**
  * SQLite's schema cookie. Moves when DDL runs, and never for a plain read.
  *
  * This is the signal that separates "the schema was changed" from "the schema was visited", which the
@@ -111,6 +161,26 @@ export function applySchema(sqlite: SchemaTarget): boolean {
     } catch {
       // Already applied. This is the expected outcome for every statement but the newest one.
     }
+  }
+
+  // The replication ledger and its triggers, from the same place and for the same reason: the browser
+  // port has no shell to run a command in, so anything the schema needs has to be applied on open.
+  //
+  // The tables are created every time (they are `IF NOT EXISTS`). The triggers are only recreated when
+  // the fingerprint says their bodies have changed, and that matters more than it looks: recreating
+  // them on every open would move the schema cookie on every page load, and the browser port persists
+  // its whole image whenever that cookie moves. A read-only visit must not rewrite fifteen megabytes.
+  sqlite.exec(REPLICATION_LEDGER_DDL);
+  const appliedFingerprint = readText(
+    sqlite,
+    `SELECT value FROM _sync_meta WHERE key = '${REPLICATION_FINGERPRINT_KEY}'`
+  );
+  if (appliedFingerprint !== REPLICATION_FINGERPRINT) {
+    sqlite.exec(REPLICATION_TRIGGERS_DDL);
+    sqlite.exec(
+      `INSERT INTO _sync_meta (key, value) VALUES ('${REPLICATION_FINGERPRINT_KEY}', '${REPLICATION_FINGERPRINT}')
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    );
   }
 
   return schemaVersion(sqlite) !== before;

@@ -50,6 +50,14 @@ export type BridgeState =
   | "paired"
   /** Switched on and reachable, but there is no code yet or the bridge rejected it. */
   | "needs-code"
+  /**
+   * Reachable, but built from a different schema than this page.
+   *
+   * The page is redeployed far more often than the bridge, so this is the ordinary way a working setup
+   * breaks: nothing errors, the two sides simply disagree about the data. Reported as its own state so
+   * the UI can say which side to update instead of suggesting a re-pair that would not help.
+   */
+  | "outdated"
   /** This runtime has no bridge concept at all. The UI hides the feature rather than disabling it. */
   | "unsupported";
 

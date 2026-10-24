@@ -92,6 +92,8 @@ interface Stream {
   frames: { id: string; event: string; data: string }[];
   close: () => void;
   ready: Promise<void>;
+  /** Resolves when the server ends the stream, which is what a revocation has to cause. */
+  ended: Promise<void>;
 }
 
 /** Opens an event stream and parses the frames as they arrive. */
@@ -102,11 +104,17 @@ function openStream(port: number, token: string): Stream {
   const ready = new Promise<void>((resolve) => {
     resolveReady = resolve;
   });
+  let resolveEnded: () => void = () => {};
+  const ended = new Promise<void>((resolve) => {
+    resolveEnded = resolve;
+  });
 
   const req = http.request(
     { host: "127.0.0.1", port, path: "/api/remote/events", headers: { "x-touchline-device": token } },
     (res) => {
       res.setEncoding("utf8");
+      res.on("end", () => resolveEnded());
+      res.on("close", () => resolveEnded());
       res.on("data", (chunk: string) => {
         buffer += chunk;
         let index = buffer.indexOf("\n\n");
@@ -124,7 +132,7 @@ function openStream(port: number, token: string): Stream {
     }
   );
   req.end();
-  return { frames, close: () => req.destroy(), ready };
+  return { frames, close: () => req.destroy(), ready, ended };
 }
 
 async function main(): Promise<void> {
@@ -315,6 +323,53 @@ async function main(): Promise<void> {
     const stolen = await settingsWrite(tokenA, "E:\\stale");
     check("the displaced device is refused on its next write", stolen.status === 409, `status ${stolen.status}`);
 
+    // ------------------------------------------------------------------ 5b. the epoch, and catching up
+    //
+    // The epoch is what stops a screen opened before a handoff writing over what the new holder did. This
+    // asks for it directly, with the header the app sends, so the check is the server's rule rather than
+    // the UI's opinion of it.
+    const currentEpoch = String(store.lease()?.epoch ?? 0);
+    const withEpoch = (token: string, epoch: string, value: string) =>
+      request(lanPort, "/api/settings", {
+        method: "PATCH",
+        headers: { "x-touchline-device": token, "x-touchline-lease-epoch": epoch },
+        body: JSON.stringify({ saveDirectory: value }),
+      });
+
+    const current = await withEpoch(tokenB, currentEpoch, "G:\\current-epoch");
+    check("a write carrying the current epoch is accepted", current.status === 200, `status ${current.status}`);
+
+    const staleEpoch = await withEpoch(tokenB, String(Math.max(0, Number(currentEpoch) - 1)), "H:\\old-epoch");
+    check(
+      "a write carrying a stale epoch is refused with 409",
+      staleEpoch.status === 409,
+      `status ${staleEpoch.status}`
+    );
+    check("and names it as a lease problem", json(staleEpoch).code === "lease", String(json(staleEpoch).code));
+
+    const { describeSync } = await import("../src/lib/sync/replication/state");
+    const behind = describeSync({
+      phase: "catching-up",
+      pending: 0,
+      revision: 7,
+      applied: 4,
+      agent: true,
+      conflict: null,
+      error: null,
+    });
+    check("a device behind the PC is told to catch up, with the count", behind === "Catching up (3 changes).", behind);
+
+    const caughtUp = describeSync({
+      phase: "synced",
+      pending: 0,
+      revision: 7,
+      applied: 7,
+      agent: true,
+      conflict: null,
+      error: null,
+    });
+    check("and only says Synced once everything has been applied", caughtUp.includes("Synced"), caughtUp);
+
     // ------------------------------------------------------------------ 6. event stream
     console.log("\n6. The event stream, which is how a screen learns to refetch");
     const stream = openStream(lanPort, tokenB);
@@ -345,14 +400,34 @@ async function main(): Promise<void> {
     );
 
     const selfId = (list.devices ?? []).find((device) => device.self) as { id?: string } | undefined;
+
+    // Opened before the revoke, so the point is that an already-open stream dies with the device.
+    const doomedStream = openStream(lanPort, tokenB);
+    await Promise.race([doomedStream.ready, new Promise((resolve) => setTimeout(resolve, 2000))]);
+    check("the device to be revoked has an open stream", doomedStream.frames.length > 0, `${doomedStream.frames.length} frame(s)`);
+
     const revoke = await request(lanPort, `/api/remote/devices?id=${String(selfId?.id)}`, {
       method: "DELETE",
       headers: { "x-touchline-device": tokenA },
     });
     check("one device can revoke another", revoke.status === 200, `status ${revoke.status}`);
 
+    const streamClosed = await Promise.race([
+      doomedStream.ended.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 3000)),
+    ]);
+    check("the revoked device's stream is closed", streamClosed === true);
+    doomedStream.close();
+
     const afterRevoke = await request(lanPort, "/api/remote/state", { headers: { "x-touchline-device": tokenB } });
     check("the revoked token stops working immediately", afterRevoke.status === 401, `status ${afterRevoke.status}`);
+
+    const revokedRead = await request(lanPort, "/api/career", { headers: { "x-touchline-device": tokenB } });
+    check("a revoked device cannot read the career", revokedRead.status === 401, `status ${revokedRead.status}`);
+
+    const revokedWrite = await settingsWrite(tokenB, "I:\\revoked");
+    check("and cannot write to it either", revokedWrite.status === 401, `status ${revokedWrite.status}`);
+
     check(
       "and revoking the pen-holder frees the pen rather than locking everyone out",
       store.lease() === null || store.lease()?.deviceId !== selfId?.id

@@ -501,7 +501,7 @@ export function SettingsView({
           <Section
             tour="settings-devices"
             title="Devices"
-            description="Who else can open this career, and which device is editing it right now."
+            description="The same career on your phone, and which device is editing it right now."
           >
             <RemoteDevices />
           </Section>

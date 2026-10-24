@@ -61,9 +61,11 @@ Simple as pointing TouchlineOS at your save file, which it tries to automaticall
 <img width="500" height="261" alt="image" src="https://github.com/user-attachments/assets/db366d38-8f0d-4a88-89a2-bc3921d1cd58" />
 
 ### Phone pairing
-The same career on a second screen. The optional core on your PC serves the whole app to a paired phone, tablet or laptop on the same Wi-Fi: no account, no cloud copy, nothing leaving the house. Pairing is one six-character code, or a QR scan that fills it in for you; every paired device is listed in Settings → Devices with a Revoke button. One device holds the pen at a time, so two people cannot write over each other, and the other keeps reading until it takes control. While sharing is on, the core also watches your save folders, so a match played on the PC is already on the phone.
+The same career on a second screen. The career in this browser is the main copy, and the optional core on your PC keeps a live copy of it so your phone can open the same career. Pair once with a six-character code or a QR scan, and a change on either device appears on the other within a few seconds. One device edits at a time: the other shows Viewing only, and Take control switches. The first time you pair, this browser's copy is sent to the PC, and whatever the PC held before is saved to a backup folder first. If both copies changed while they were apart, TouchlineOS asks which one to keep, and it never merges them. Both devices must be on the same Wi-Fi: it runs over plain HTTP on your own network, so pair only on a network you trust, and nothing leaves your network.
 
-The steps are on the landing page, in Settings → Devices, and in [docs/remote-access.md](docs/remote-access.md).
+Every paired device is listed in Settings → Devices with a Revoke button. While sharing is on, the core also watches your save folders, so a match played on the PC is already on the phone.
+
+The steps are on the landing page, in Settings → Devices, and in [docs/remote-access.md](docs/remote-access.md). [docs/testing-phone-pairing.md](docs/testing-phone-pairing.md) is the full end-to-end check.
 
 ### Squad
 Your full roster is read straight from the save: OVR, potential, age, position, contract, form, jersey number + a manager's-eye layer you control yourself: assigned role, trust level, and importance marker (untouchable / key player / rotation / surplus). Faces are fetched automatically for real squad players, not youth, with a clean initials-disc fallback for anyone without one.
@@ -110,8 +112,8 @@ Sync behavior, theme, and career/data management, all kept honest, there are no 
 
 - **Parsing runs on your device.** The save decoder runs in your browser, with SQLite compiled to WebAssembly, or in the local Node service on the desktop build. Your save is read there and nowhere else.
 - **Zero cloud database uploads.** There is no server holding your career. Nothing about your save file, your squad or your notes leaves the machine, and there are no accounts to create.
-- **Session persistence is local.** A reference to the save file you picked, and your career database itself, live in your browser's own private storage: IndexedDB for the file reference and OPFS for the database image. On the desktop build the same data is a plain local SQLite file.
-- **A second screen stays on your network.** The optional core can serve the app to a paired phone over your own Wi-Fi. Nothing is uploaded, there is no relay and no account: the phone talks to the PC directly, and the listener only exists while you have turned sharing on. See [docs/remote-access.md](docs/remote-access.md).
+- **Session persistence is local.** A reference to the save file you picked, and your career database itself, live in this browser's own private storage on your machine. On the desktop build the same data is a plain local SQLite file.
+- **A second screen stays on your network.** The optional core can show the same career on a paired phone over your own Wi-Fi. Nothing is uploaded, there is no relay and no account: the phone talks to the PC directly, and the listener only exists while you have turned sharing on. It runs over plain HTTP on your own network, so pair only on a network you trust. See [docs/remote-access.md](docs/remote-access.md).
 
 ---
 
@@ -167,7 +169,7 @@ The result is always shown as a **band**, with its basis and evidence count stat
 
 - No AI/LLM layer. Every insight in the app today is deterministic code.
 - No deep youth academy tracking beyond what the save itself exposes.
-- No cloud sync, no accounts, no remote access from outside your own network. A phone can share the career over the LAN, deliberately and on your terms - see [docs/remote-access.md](docs/remote-access.md) - but there is no server in the middle and no way to reach it from the internet.
+- No cloud sync, no accounts, no remote access from outside your own network. A phone can show the same career over your own Wi-Fi, deliberately and on your terms - see [docs/remote-access.md](docs/remote-access.md) - but there is no server in the middle and no way to reach it from the internet.
 
 ---
 
@@ -186,7 +188,7 @@ Point the app at your FC Career save when prompted on first launch. Nothing is u
 ### On a phone
 
 ```powershell
-npm run build:browser                        # once, and after pulling changes
+npm run build:browser                        # once, and after any page change
 $env:TOUCHLINE_REMOTE="1"; npm run core      # prints a pairing code and an address
 ```
 
@@ -194,9 +196,20 @@ Open the printed address on the phone, on the same Wi-Fi, and enter the six-char
 scan the QR the window draws. After that the phone is paired and reopening the address goes straight to
 the career.
 
+The career in this browser is the main copy. The PC keeps a live copy of it so the phone can show the
+same career, and the first time you pair the desktop page, this browser's copy is sent to the PC and the
+old PC copy is saved to a backup folder. From then on a change on either device appears on the other
+within a few seconds. One device edits at a time: the other shows Viewing only, and Take control switches.
+A phone edit made while the page is closed waits, and is applied the next time the page opens.
+
+Both devices must be on the same Wi-Fi. It runs over plain HTTP on your own network, so pair only on a
+network you trust, and nothing leaves your network. The local desktop build keeps its own database and
+works as before.
+
 The same three steps are on the landing page and in **Settings → Devices**, which is also where the
 device list, **Take control**, **Revoke** and **Stop sharing** live. The security model, the firewall
-prompt and the troubleshooting table are in [docs/remote-access.md](docs/remote-access.md).
+prompt and the troubleshooting table are in [docs/remote-access.md](docs/remote-access.md), and the
+end-to-end check is in [docs/testing-phone-pairing.md](docs/testing-phone-pairing.md).
 
 The core runs from the project folder, so pairing a phone needs the repo checked out with `npm install`
 behind it. That is a limitation of the current packaging, not of the feature: a downloadable core is

@@ -19,6 +19,10 @@
  * defaults to off, and the only thing that turns it on is the manager choosing to pair.
  */
 import type { SaveCandidate } from "../parser/interface";
+import { setLastBridgeCompatibility } from "./bridge-version";
+import { compareSchema, type Compatibility, type SchemaReport } from "../sync/versions";
+import { maybeStartAgent, stopAgent } from "../sync/replication/agent";
+import { setSyncSnapshot } from "../sync/replication/state";
 import { DEFAULT_BRIDGE_PORT, type BridgeState } from "./types";
 
 // Re-exported so a caller already importing this module needs only one import site.
@@ -76,6 +80,9 @@ export function writeBridgeSettings(patch: Partial<BridgeSettings>): BridgeSetti
   } catch {
     // Storage blocked. The pairing then lasts for this page load only, which is still usable.
   }
+  // Replication follows the pairing: a bridge that has just been paired starts catching up, and one that
+  // has just been forgotten stops touching the port.
+  maybeStartAgent();
   return next;
 }
 
@@ -208,10 +215,37 @@ export async function fetchBridgeBytes(
 }
 
 /**
+ * What the bridge said about itself, and whether this page can talk to it.
+ *
+ * Two numbers rather than one: an `apiVersion` says which calls exist, and the schema fingerprint says
+ * whether the data means the same thing on both sides. The page is redeployed far more often than the
+ * bridge, so this is the check most likely to fire, and it has to fire before pairing rather than in the
+ * middle of a request.
+ */
+/**
+ * The direction of the last compatibility probe is recorded by the probe itself; see `./bridge-version`
+ * for why it lives in a neutral module rather than being returned as a second status field.
+ */
+export async function bridgeStatusReport(
+  settings: BridgeSettings = readBridgeSettings()
+): Promise<{ reachable: boolean; compatibility: Compatibility }> {
+  if (typeof window === "undefined") return { reachable: false, compatibility: "unknown" };
+  const response = await request(settings, "/status", { timeoutMs: PROBE_TIMEOUT_MS });
+  if (!response || response.status !== 200) return { reachable: false, compatibility: "unknown" };
+  const body = response.body as ({ service?: unknown } & SchemaReport) | null;
+  if (body?.service !== "touchline-bridge") return { reachable: false, compatibility: "unknown" };
+  const compatibility = compareSchema(body);
+  setLastBridgeCompatibility(compatibility);
+  return { reachable: true, compatibility };
+}
+
+/**
  * The one value the UI needs: is the bridge off, missing, unpaired, or working?
  *
  * Ordered so the cheapest decisive answer wins. Nothing is requested at all when the feature is off,
- * which is the default and therefore the overwhelmingly common case.
+ * which is the default and therefore the overwhelmingly common case. Compatibility is checked before the
+ * pairing code, because a bridge built from a different schema refuses nothing that looks like an error -
+ * it answers every call and disagrees about the data.
  */
 export async function bridgeState(
   settings: BridgeSettings = readBridgeSettings()
@@ -219,14 +253,35 @@ export async function bridgeState(
   if (typeof window === "undefined" || typeof window.localStorage === "undefined") {
     return "unsupported";
   }
-  if (!settings.enabled) return "off";
+  if (!settings.enabled) {
+    stopAgent();
+    setSyncSnapshot({ phase: "off" });
+    return "off";
+  }
 
-  if (!(await isBridgeListening(settings))) return "unreachable";
+  const report = await bridgeStatusReport(settings);
+  if (!report.reachable) {
+    // Kept running while the bridge is away: the outbox is the point, and a bridge that comes back has to
+    // find its queue still there.
+    maybeStartAgent();
+    setSyncSnapshot({ phase: "offline" });
+    return "unreachable";
+  }
+  if (report.compatibility !== "same") {
+    // Neither pairs nor replicates while the two sides disagree about the schema.
+    stopAgent();
+    setSyncSnapshot({ phase: "outdated" });
+    return "outdated";
+  }
 
   // Reachable. A code is required to read anything, so an accepted `GET /saves` is the only proof that
   // pairing actually works - checking for the mere presence of a code would call an outdated one paired.
   if (!settings.code) return "needs-code";
   const response = await fetchBridgeSaves(settings);
   if (!response) return "unreachable";
-  return response.status === 200 ? "paired" : "needs-code";
+  if (response.status === 200) {
+    maybeStartAgent();
+    return "paired";
+  }
+  return "needs-code";
 }

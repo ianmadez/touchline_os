@@ -49,6 +49,12 @@ import {
   hypothesisEvidence,
   assignments,
   rulesProfiles,
+  careerTrophies,
+  debriefMarks,
+  newsItems,
+  newsPublished,
+  transferInputs,
+  transferCounterpartyNames,
 } from "../db/schema";
 
 /** Raised for a payload that is not a readable backup, or cannot be applied as one. A 400. */
@@ -135,6 +141,17 @@ const CAREER_TABLES: CareerTableSpec[] = [
   { table: hypotheses, scope: "career" },
   { table: hypothesisEvidence, scope: "hypothesis" },
   { table: storylineEvents, scope: "storyline" },
+  // The six below were missing until the phone sync work, and their absence was a real loss: exporting a
+  // career and importing it elsewhere dropped the trophy cabinet, the starred debriefs, the whole news
+  // desk and the hand-entered transfer figures. Nothing referenced them, so nothing failed - the backup
+  // simply did not carry them, and `importTransferPackage` cleared what it could not restore. The
+  // transfer test already asserted every career-scoped table was carried, which is what caught it.
+  { table: careerTrophies, scope: "career" },
+  { table: debriefMarks, scope: "career" },
+  { table: newsItems, scope: "career" },
+  { table: newsPublished, scope: "career" },
+  { table: transferInputs, scope: "career" },
+  { table: transferCounterpartyNames, scope: "career" },
 ];
 
 /** The SQL table names a complete backup must carry. */

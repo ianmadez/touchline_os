@@ -28,7 +28,7 @@ your phone to open your career, you want the core.
 
 ```powershell
 npm install
-npm run build:browser     # once, and again after pulling changes
+npm run build:browser     # once, and again after any page change
 $env:TOUCHLINE_REMOTE="1" # or: npx tsx bridge/touchline-core.ts --share
 npm run core
 ```
@@ -66,18 +66,82 @@ the career, a phone cannot.
 
 ## What it actually does
 
-- **The PC owns the data.** The database, the save file and the parser stay on the PC. The phone sends
-  requests and receives rendered data; it never holds a copy of the career it could not get back.
+- **The PC serves the career, and keeps a copy the phone can read.** The database, the save file and the
+  parser stay on the PC. A career kept in this browser is the main copy, and the PC keeps a live copy of
+  it so the phone can open the same career. The phone talks to the PC and never holds anything it could
+  not get back.
 - **The save watcher reads your save for you.** While sharing is on, the core stats the save folders
   every 15 seconds and does a full scan every five minutes. When the game writes a new save it runs the
   same parse and sync the app has always run, records the changes, and tells every connected screen to
   refresh. That is what makes "play a match on the PC, open the phone in the kitchen, the result is
   there" work.
-- **One pen.** Only one device can write at a time. The first device to write takes it; another device
-  that tries is refused with a plain explanation and can press **Take control**. Taking it moves the
-  lease to a new epoch, so a screen that was open before cannot write over the top of what the new
-  holder did.
-- **Everything else is read-only.** A device without the pen can read every screen.
+- **One device edits at a time.** The first device to write becomes the editing one. Another device that
+  tries shows **Viewing only** and is refused with a plain explanation until it presses **Take control**.
+  Taking control moves the edit permission, so a screen that was open before cannot write over the top of
+  what the new device did.
+- **Everything else is read-only.** A device that is viewing can read every screen.
+
+---
+
+## The site's copy and the PC's copy
+
+There are two kinds of career in TouchlineOS, and they behave differently.
+
+- **A career in the browser** (the hosted site at <https://touchline-os.pages.dev>) lives in that
+  browser's own storage. That copy is the main one. The PC keeps a **live copy** of it so the phone can
+  open the same career.
+- **A career in the core** (`npm run core`) lives in `%LOCALAPPDATA%\TouchlineOS\career.db`. That is
+  already the PC's own database, so there is nothing to send it. The phone is a client of it.
+
+### The first pair
+
+Pair the bridge from the site and the site sends this browser's copy to the PC once. Before it is written,
+whatever the PC held before is saved to `backups\` (`<careerId>-pre-sync-<timestamp>.db`, five kept), so
+the PC copy is always backed up before it is replaced.
+
+From then on it is live. A change on either device appears on the other within a few seconds. There is no
+export, no import and no sync button: pairing is the whole setup.
+
+Both devices must be on the same Wi-Fi. It runs over plain HTTP on your own network, so pair only on a
+network you trust. Nothing leaves your network.
+
+### What is never done
+
+- **Nothing is merged.** Two copies of a football career differ in ways only a person can judge, so the
+  app never guesses. If the PC holds something this browser does not, sync stops and asks.
+- **This browser's data is never deleted** except by the one action on the **Two copies** screen, which
+  downloads a copy of it first.
+- **The PC copy is never overwritten without a backup.** A refused sync writes nothing at all.
+
+### Two copies
+
+If the PC already holds a career with the same id and holds anything this browser does not (rows, or rows
+edited more recently), sync stops and says **Two copies**. You get the row count and the newest edit on
+each side, and two choices:
+
+- **Keep this browser's copy.** The PC copy is backed up, then replaced. The browser is the main copy for
+  a browser career, so this is usually the right one.
+- **Use the PC copy.** This replaces what is in this browser. It downloads a copy of this browser's career
+  as a file first, and it asks you to type `REPLACE`, because it is the only action in the app that
+  discards a copy you can see.
+
+### What the sync line means
+
+| It says | It means |
+|---|---|
+| Synced with this PC | Both copies hold the same rows. Nothing is waiting. |
+| Sending N changes | Local edits are on their way to the PC. |
+| This PC is not reachable | The bridge window is closed or the PC is asleep. Edits wait in this browser and go when it comes back. Nothing is lost. |
+| Catching up (N changes) | The PC has changes this tab has not applied yet. Writes made now are made against a slightly old picture. |
+| This bridge is older than the web page | Update the bridge before syncing. |
+| Another tab is doing the syncing | Only one tab syncs, so two tabs cannot overwrite each other. Leave one tab open. |
+
+Every minute the two sides also compare row counts and content fingerprints. If they disagree, the PC copy
+is replaced from this browser, after a backup. A phone edit made while the page is closed waits, and is
+applied the next time the page opens.
+
+The full end-to-end check, with every command, is in
+[testing-phone-pairing.md](testing-phone-pairing.md).
 
 ---
 
@@ -117,9 +181,9 @@ the career, a phone cannot.
 ## Running it every day
 
 - **Put a shortcut in your Startup folder** if you want sharing always available.
-- **Build the app once after pulling changes.** The core serves `out-browser/`, which is
-  `npm run build:browser`. A stale build is a stale app, and the `/status` handshake exists so a stale
-  app says so rather than failing on an endpoint that changed shape.
+- **Build the app once after any page change.** The core serves `out-browser/`, which is
+  `npm run build:browser`. A stale build is a stale app on the phone, and the `/status` handshake exists
+  so a stale app says so rather than failing on an endpoint that changed shape.
 - **The pairing code never changes** unless you delete
   `%LOCALAPPDATA%\TouchlineOS\bridge.json`. That is deliberate: a code that rotated on every start would
   mean pairing on every start.
@@ -136,7 +200,10 @@ the career, a phone cannot.
 |---|---|
 | The phone says the PC is not answering | The core is not running, or the two devices are on different networks, or the firewall prompt was dismissed. |
 | The code field rejects the code | The code is six characters from the set shown on the PC; the letters `I`, `O`, `0` and `1` are never used. |
-| Everything says "Viewing" | Another device holds the pen. Press **Take control**. |
-| "This is out of date" | The app build on the phone is older than the PC's core. Rebuild with `npm run build:browser` and reload. |
+| Everything says "Viewing" | Another device is editing. Press **Take control**. |
+| "This is out of date" | The app build on the phone is older than the PC's core. Rebuild with `npm run build:browser`, restart the core, and reload. |
+| "Two copies of this career" | The PC holds rows this browser does not. Choose one side on that screen. Nothing is merged and nothing changes until you do. |
+| "Another tab is doing the syncing" | That is correct and deliberate: one tab syncs. Close the others if you want this one to do it. |
+| An edit on the phone has not reached the page | The page applies it the next time it opens. Open the tab and give it a few seconds. |
 | Port 4978 is in use | Start on another port: `npx tsx bridge/touchline-core.ts --share --port 4979`. |
 | A page opened at `localhost` cannot reach the career | The loopback listener only serves this machine's own origins. Use the LAN address for a phone. |

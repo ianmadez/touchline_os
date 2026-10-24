@@ -15,6 +15,8 @@
 import React, { useState } from "react";
 import { forgetRemoteSession, revokeDevice, setSharing } from "@/lib/platform/remote";
 import type { RemoteState } from "@/lib/remote/protocol";
+import { SyncLine, useSyncSnapshot } from "@/components/ui/bridge/sync-line";
+import { TwoCopies } from "@/components/ui/bridge/two-copies";
 import { PairingInstructions } from "./pairing-instructions";
 import { useRemote, useWriteAccess } from "./remote-provider";
 
@@ -37,14 +39,70 @@ function Chip({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * The answers to "what is the PC actually holding?", collapsed by default.
+ *
+ * It is a question asked once, so it does not deserve a paragraph on every visit. It is the same block
+ * on both kinds of page - one served by the core and one that pairs with it - because the facts do not
+ * change with which page you are looking at.
+ */
+function HowItWorks() {
+  return (
+    <details className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 px-3.5 py-3">
+      <summary className="cursor-pointer list-none font-sub text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 marker:content-none">
+        <span className="inline-flex items-center gap-1.5">
+          <span aria-hidden="true" className="transition-transform group-open:rotate-90">
+            ▸
+          </span>
+          How it works
+        </span>
+      </summary>
+      <ul className="mt-3 space-y-2 font-sans text-[11px] leading-relaxed text-slate-600 dark:text-slate-400">
+        <li>
+          The career in this browser is the main copy. The PC keeps a live copy of it so your phone can
+          open the same career.
+        </li>
+        <li>
+          The first time you paired, this browser&apos;s copy was sent to the PC, and whatever the PC held
+          before was saved to a backup folder first.
+        </li>
+        <li>A change on either device appears on the other within a few seconds.</li>
+        <li>One device edits at a time. The other shows Viewing only, and Take control switches.</li>
+        <li>
+          If both copies changed while they were apart, TouchlineOS asks which one to keep. It never
+          merges them.
+        </li>
+        <li>
+          A phone edit made while the page is closed waits, and is applied the next time the page opens.
+        </li>
+        <li>
+          Both devices must be on the same Wi-Fi. It runs over plain HTTP on your own network, so pair
+          only on a network you trust, and nothing leaves your network.
+        </li>
+        <li>The local desktop build keeps its own database and works as before.</li>
+      </ul>
+    </details>
+  );
+}
+
 export function RemoteDevices() {
   const { remote, state, adopt, takeControl, refresh } = useRemote();
   const { viewing, holderName } = useWriteAccess();
+  const snapshot = useSyncSnapshot();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (!remote) {
-    return <PairingInstructions compact />;
+    return (
+      <div className="space-y-4">
+        {snapshot.phase === "two-copies" && snapshot.conflict && (
+          <TwoCopies careerId={snapshot.conflict.careerId} comparison={snapshot.conflict} />
+        )}
+        <SyncLine />
+        <HowItWorks />
+        <PairingInstructions compact />
+      </div>
+    );
   }
 
   if (!state) {
@@ -89,7 +147,7 @@ export function RemoteDevices() {
               <span className="font-sub font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 Viewing ·{" "}
               </span>
-              {holderName ?? "Another device"} holds the pen, so changes made here are refused until you
+              {holderName ?? "Another device"} is editing, so changes made here are refused until you
               take control.
             </>
           ) : (
@@ -97,7 +155,8 @@ export function RemoteDevices() {
               <span className="font-sub font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                 Editing ·{" "}
               </span>
-              Changes made here are saved straight to the PC. Another device can take control at any time.
+              One device edits at a time, and this is the one. Changes made here reach the other device
+              within a few seconds.
             </>
           )}
         </p>
@@ -111,6 +170,10 @@ export function RemoteDevices() {
           </button>
         )}
       </div>
+
+      {/* Collapsed by default: this is the answer to "what is the PC actually holding?", which is a
+          question you ask once, not a paragraph to read past every visit. */}
+      <HowItWorks />
 
       {state.pairing && (
         <div className="grid gap-4 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center">
@@ -215,7 +278,8 @@ export function RemoteDevices() {
           Stop sharing
         </button>
         <p className="font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-          Closes the port on the PC. Pairing has to be done again to reopen it, which is the point.
+          Closes the PC&apos;s network port. Your career is untouched, and the devices you have already
+          paired stay paired: start the core with sharing again and they reconnect.
         </p>
       </div>
 

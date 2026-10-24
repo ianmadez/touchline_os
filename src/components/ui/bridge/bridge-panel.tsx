@@ -2,6 +2,9 @@
 
 import React, { useState } from "react";
 import type { BridgeState } from "@/lib/platform/types";
+import { lastBridgeCompatibility } from "@/lib/platform/bridge-version";
+import { SyncLine, useSyncSnapshot } from "./sync-line";
+import { TwoCopies } from "./two-copies";
 
 /**
  * The optional local bridge, as one control the manager can see and end.
@@ -44,6 +47,7 @@ export function BridgePanel({
   error = null,
 }: BridgePanelProps) {
   const [code, setCode] = useState("");
+  const snapshot = useSyncSnapshot();
 
   // The desktop build has no bridge and needs none - it already scans this machine directly. Hiding the
   // feature is the honest answer; offering a control that could never work is not.
@@ -62,26 +66,88 @@ export function BridgePanel({
   // ---------------------------------------------------------------- paired
   if (state === "paired") {
     return (
-      <div className={card}>
-        <div className="flex items-center justify-between gap-3">
-          <span className={label}>Connected to your local bridge</span>
-          <span className="font-sub text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-            ● Automatic
-          </span>
+      <div className="space-y-3">
+        {snapshot.phase === "two-copies" && snapshot.conflict && (
+          <TwoCopies
+            careerId={snapshot.conflict.careerId}
+            comparison={snapshot.conflict}
+          />
+        )}
+        <div className={card}>
+          <div className="flex items-center justify-between gap-3">
+            <span className={label}>Connected to your local bridge</span>
+            <span className="font-sub text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+              ● Automatic
+            </span>
+          </div>
+          <p className={body}>
+            The bridge is watching your save folder on this PC and handing the file straight to
+            TouchlineOS. No picker, no permission prompt, and it keeps its own list of your saves up to
+            date as it goes, so a save the game has just written turns up on its own.
+          </p>
+          <p className={body}>
+            The career in this browser is the main copy. The PC keeps a live copy of it so your phone can
+            show the same career, and a change on either device appears on the other within a few
+            seconds. One device edits at a time: the other shows Viewing only, and Take control switches.
+            A phone edit made while this page is closed waits, and is applied the next time the page
+            opens.
+          </p>
+          <p className={body}>
+            The first time you paired, this browser&rsquo;s copy was sent to the PC, and whatever the PC
+            held before was saved to a backup folder first. If both copies ever change while they are
+            apart, TouchlineOS asks which one to keep, and it never merges them.
+          </p>
+          <p className={body}>
+            It only ever listens on this machine, only answers this site, and never writes to your save.
+            All of that lasts as long as the bridge window is open: close it and the site quietly goes
+            back to asking for your file, with nothing broken and your career untouched.
+          </p>
+          <SyncLine />
+          <button onClick={onDisconnect} disabled={busy} className={secondary}>
+            {busy ? "Disconnecting…" : "Disconnect the bridge"}
+          </button>
         </div>
+      </div>
+    );
+  }
+
+  // ---------------------------------------------------------------- reachable, wrong version
+  //
+  // Checked before the pairing form, because a re-pair would not help: the two sides disagree about the
+  // schema, so the honest action is to update whichever one is older. The page is redeployed far more
+  // often than the bridge, so "update the bridge" is the usual answer - and the message says which.
+  if (state === "outdated") {
+    const direction = lastBridgeCompatibility();
+    return (
+      <div className={card}>
+        <span className={label}>
+          {direction === "page-older"
+            ? "This bridge is newer than this page"
+            : "This bridge is older than this page"}
+        </span>
         <p className={body}>
-          The bridge is watching your save folder on this PC and handing the file straight to
-          TouchlineOS. No picker, no permission prompt, and it keeps its own list of your saves up to
-          date as it goes, so a save the game has just written turns up on its own.
+          {direction === "page-older"
+            ? "Refresh the web page to catch up. The bridge you are running understands a newer shape of the data than the page in this tab is holding."
+            : "Update the bridge. The one running on this PC was built before the page you are looking at, so the two would disagree about the data even though every request would succeed."}
         </p>
         <p className={body}>
-          It only ever listens on this machine, only answers this site, and never writes to your save.
-          All of that lasts as long as the bridge window is open: close it and the site quietly goes
-          back to asking for your file, with nothing broken and your career untouched.
+          Nothing has been changed. Your save and your career are untouched, and picking your save file
+          above still works exactly as it did.
         </p>
-        <button onClick={onDisconnect} disabled={busy} className={secondary}>
-          {busy ? "Disconnecting…" : "Disconnect the bridge"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {direction === "page-older" ? (
+            <button onClick={() => window.location.reload()} className={primary}>
+              Refresh the page
+            </button>
+          ) : (
+            <a href={DOWNLOAD_HREF} className={primary} download>
+              Download the current bridge
+            </a>
+          )}
+          <button onClick={onDisconnect} disabled={busy} className={secondary}>
+            {busy ? "Disconnecting…" : "Stop using it"}
+          </button>
+        </div>
       </div>
     );
   }
@@ -103,6 +169,7 @@ export function BridgePanel({
         <p className={body}>
           Until then you can simply pick your save file above. Nothing is lost either way.
         </p>
+        <SyncLine />
         <div className="flex flex-wrap items-center gap-2">
           <a href={DOWNLOAD_HREF} className={secondary} download>
             Download the bridge
@@ -135,7 +202,8 @@ export function BridgePanel({
             TouchlineOS normally has to ask for your save file, and browsers insist on asking more than
             once. The bridge is a small optional helper you run on your own PC: it watches your save
             folder and serves the file to this page, so there is nothing to pick. Run it once, pair it
-            once, and every visit syncs itself.
+            once, and every visit reads your save on its own. It also keeps the live copy that your phone
+            opens.
           </>
         )}
       </p>

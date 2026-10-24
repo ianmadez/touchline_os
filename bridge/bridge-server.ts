@@ -15,6 +15,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { saveSource } from "../src/lib/platform/save-source";
+import { MIGRATION_LEVEL, SCHEMA_VERSION } from "../src/lib/sync/versions";
 import type { SaveCandidate } from "../src/lib/parser/interface";
 
 /** Chosen to avoid colliding with the reference companion's 4126, which a user may also be running. */
@@ -329,7 +330,7 @@ export function createBridgeServer(
       // The scan time is added, and nothing about the save itself: a page has to be able to tell
       // whether the bridge is awake and looking, without this route becoming a way to read a career
       // it has not paired with.
-      sendJson(res, 200, { service: SERVICE, version: VERSION, lastScanAt: scanCache?.at ?? null });
+      sendJson(res, 200, { service: SERVICE, version: VERSION, lastScanAt: scanCache?.at ?? null, schemaVersion: SCHEMA_VERSION, migrationLevel: MIGRATION_LEVEL });
       return;
     }
 

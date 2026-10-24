@@ -27,7 +27,7 @@ import {
   takeControl as requestControl,
   type RemoteReach,
 } from "@/lib/platform/remote";
-import { REMOTE_LEASE_EVENT, type RemoteState } from "@/lib/remote/protocol";
+import { REMOTE_DATA_EVENT, REMOTE_LEASE_EVENT, type RemoteState } from "@/lib/remote/protocol";
 
 /** How often a visible page tells the core it is still being looked at. */
 const HEARTBEAT_MS = 60_000;
@@ -160,6 +160,16 @@ export function RemoteProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener(REMOTE_LEASE_EVENT, handler);
     return () => window.removeEventListener(REMOTE_LEASE_EVENT, handler);
+  }, [remote]);
+
+  // A page that owns its own database has no stream to listen to, so replication announces its own
+  // arrivals on the same event a remote change uses. Screens then refetch by exactly the path they
+  // already use for another device, which is why none of them needed a second way to be told.
+  useEffect(() => {
+    if (remote) return;
+    const handler = () => setExternalRevision((count) => count + 1);
+    window.addEventListener(REMOTE_DATA_EVENT, handler);
+    return () => window.removeEventListener(REMOTE_DATA_EVENT, handler);
   }, [remote]);
 
   const takeControl = useCallback(async () => {
