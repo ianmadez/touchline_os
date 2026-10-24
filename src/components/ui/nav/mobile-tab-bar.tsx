@@ -33,7 +33,8 @@ export function MobileTabBar({
     <>
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95 md:hidden"
+        data-chrome="bar"
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95 md:hidden [transform:translateZ(0)]"
       >
         <div className="grid grid-cols-5">
           {primary.map((tab) => {
@@ -46,14 +47,14 @@ export function MobileTabBar({
                 data-tour={`tab-${tab.id}`}
                 aria-current={isActive ? "page" : undefined}
                 onClick={() => onSelectTab(tab.id)}
-                className={`mx-1 my-1 flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl px-1 font-sub text-[10px] font-bold uppercase tracking-wider transition-[background-color,color,box-shadow,transform] duration-150 active:scale-[0.97] cursor-pointer ${
+                className={`mx-1 my-1 flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1 font-sub text-[10px] font-bold uppercase tracking-wider transition-[background-color,color,box-shadow,transform] duration-150 active:scale-[0.97] cursor-pointer ${
                   isActive
                     ? "bg-slate-200/80 text-[#E11D48] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_0_rgba(15,23,42,0.10),1px_1px_0_rgba(15,23,42,0.05)] dark:bg-slate-800 dark:text-[#FF8C7A] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_0_rgba(0,0,0,0.6)]"
                     : "text-slate-500 active:bg-slate-100 dark:text-slate-400 dark:active:bg-slate-800/60"
                 }`}
               >
                 <Icon className="h-5 w-5" />
-                <span>{tab.shortLabel}</span>
+                <span className="max-w-full whitespace-nowrap leading-tight">{tab.shortLabel}</span>
               </button>
             );
           })}
@@ -64,7 +65,7 @@ export function MobileTabBar({
             aria-haspopup="dialog"
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen(true)}
-            className={`mx-1 my-1 flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl px-1 font-sub text-[10px] font-bold uppercase tracking-wider transition-[background-color,color,box-shadow,transform] duration-150 active:scale-[0.97] cursor-pointer ${
+            className={`mx-1 my-1 flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-xl px-1 font-sub text-[10px] font-bold uppercase tracking-wider transition-[background-color,color,box-shadow,transform] duration-150 active:scale-[0.97] cursor-pointer ${
               overflowActive
                 ? "bg-slate-200/80 text-[#E11D48] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_0_rgba(15,23,42,0.10),1px_1px_0_rgba(15,23,42,0.05)] dark:bg-slate-800 dark:text-[#FF8C7A] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_1px_0_rgba(0,0,0,0.6)]"
                 : "text-slate-500 active:bg-slate-100 dark:text-slate-400 dark:active:bg-slate-800/60"
@@ -81,7 +82,7 @@ export function MobileTabBar({
             >
               <path d="M5 12h.01M12 12h.01M19 12h.01" strokeWidth={3} />
             </svg>
-            <span>More</span>
+            <span className="whitespace-nowrap leading-tight">More</span>
           </button>
         </div>
       </nav>
@@ -96,3 +97,4 @@ export function MobileTabBar({
     </>
   );
 }
+

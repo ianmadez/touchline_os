@@ -68,6 +68,7 @@ export function Navbar({
         only appear once there is something to separate the bar from - so the resting page looks flat
         and the scrolled page has a defined edge. */}
     <header
+      data-chrome="bar"
       className={`sticky top-0 z-50 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b px-4 py-3 max-md:gap-2 max-md:px-3 text-slate-900 transition-[background-color,border-color,box-shadow] duration-200 dark:text-white ${
         scrolled
           ? "bg-white/95 dark:bg-slate-950/95 border-slate-200 dark:border-slate-800 backdrop-blur-xl shadow-sm dark:shadow-2xl"

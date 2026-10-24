@@ -106,7 +106,8 @@ html {
   /* Stop landscape text inflation from overriding the type ladder. */
   -webkit-text-size-adjust: 100%;
   /* The app has its own scroll containers and a fixed bottom bar; a pull-to-refresh gesture would
-     reload the career instead of scrolling it. */
+     reload the career instead of scrolling it. On Android Firefox this is also the single cheapest
+     way to stop the accidental reload that makes the app feel like a web page. */
   overscroll-behavior: none;
   /* Tours scroll anchors into view; this keeps them clear of the fixed mobile bar. */
   scroll-padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
@@ -119,10 +120,12 @@ body {
   min-height: 100vh;
   min-height: 100dvh;
   transition: background-color 0.2s ease, color 0.2s ease;
-  /* Crisper text on macOS. */
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+  /* Same reason as `html`: the overscroll chain must not reach the document. */
+    overscroll-behavior: none;
+    /* Crisper text on macOS. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
 /*
   Touch baseline. Everything here is gated on a coarse pointer, so a mouse and trackpad keep the
@@ -172,10 +175,103 @@ body {
 }
 
 button,
+a,
 [role="button"] {
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
+}
+
+/*
+  The two chrome bars and the floating pill are the only surfaces that stay on screen while the page
+  scrolls, so they are the only ones that pay for `backdrop-filter` once per scroll frame.
+
+  Android Firefox software-rasterises that blur on a mid-range GPU (a Samsung A15 is the reference
+  device here), and the result is not a slightly softer edge, it is visible scroll stutter with the
+  bar sometimes lagging behind the finger. iOS hands the same blur to the compositor, which is why
+  the app feels smooth on an iPhone and rough on the Android. The fill behind these surfaces is
+  already 95 percent opaque, so the blur contributes almost nothing to legibility.
+
+  So: keep the blur where a real pointer is, drop it on touch. Nothing moves, nothing changes colour.
+*/
+@media (pointer: coarse) {
+  /*
+    Every `backdrop-filter` in the app, not just the chrome.
+
+    Android Firefox software-rasterises this blur on a mid-range GPU (a Samsung A15 is the reference
+    device here). A scrolling list of cards whose fill is `bg-white/90 backdrop-blur-md` means a blur
+    pass per card per frame, and the result is not a softer edge, it is visible scroll stutter. iOS
+    hands the same work to the compositor, which is why the app felt smooth on an iPhone and rough on
+    the Android.
+
+    The fills stay exactly as they are, so nothing changes colour or moves. Only the frosting goes.
+    Two rules rather than one because the CSS minifier treats the prefixed and unprefixed properties
+    as duplicates and keeps only one of them, and it keeps the prefixed one, which Firefox ignores.
+  */
+  @supports (backdrop-filter: blur(1px)) {
+    *,
+    *::before,
+    *::after {
+      backdrop-filter: none !important;
+    }
+  }
+
+  @supports (-webkit-backdrop-filter: blur(1px)) {
+    *,
+    *::before,
+    *::after {
+      -webkit-backdrop-filter: none !important;
+    }
+  }
+
+  /*
+    With the frosting gone, a 95 percent fill still lets crisp text ghost through the bar as it
+    scrolls under. On a device that never gets the blur back, the honest fix is a solid fill: the bar
+    then reads as a bar rather than a smudge. Desktop keeps the glass.
+  */
+  [data-chrome] {
+    background-color: #ffffff;
+  }
+
+  .dark [data-chrome] {
+    background-color: #020617;
+  }
+
+  /*
+    Two entrance animations animate `filter: blur()`. On a desktop GPU that is free; on a mid-range
+    Android it is a full-surface Gaussian pass per frame and it visibly stutters on the first screen
+    the manager sees. The same movement without the blur reads almost identically at this size, so
+    touch devices get the flat variants.
+  */
+  .animate-splash-logo {
+    animation-name: splashLogoInFlat;
+  }
+
+  .animate-os-mark {
+    animation-name: osLaunchMarkFlat;
+  }
+}
+
+@keyframes splashLogoInFlat {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes osLaunchMarkFlat {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 /* Clears the fixed mobile tab bar (56px plus its safe-area padding) and returns to the original
@@ -202,14 +298,33 @@ button,
   display: none;
 }
 
-/* Stop headings from leaving a single orphaned word on the last line. */
+/* The splash's two glows. A radial gradient instead of `blur-3xl`: identical soft edge at the size
+   and opacity used here, painted as one gradient instead of a Gaussian pass over a 384px surface.
+   The Android reference device (Samsung A15, Firefox) stuttered on the old version during launch. */
+.splash-glow {
+  background-image: radial-gradient(
+    circle at center,
+    rgb(244 63 94 / 0.16),
+    rgb(244 63 94 / 0.06) 45%,
+    transparent 70%
+  );
+}
+
+/* Stop headings from leaving a single orphaned word on the last line, and stop body copy from ending
+   on one word. A heading that drops "Phone" onto its own line is what reads as truncated typing even
+   when nothing is cut, which is why this lives with the wrapping rules rather than with the type. */
 h1,
 h2,
-h3 {
+h3,
+legend,
+summary {
   text-wrap: balance;
 }
 
-p {
+p,
+li,
+dd,
+figcaption {
   text-wrap: pretty;
 }
 
@@ -289,7 +404,12 @@ p {
 }
 
 .animate-page-in {
-  animation: pageFadeIn 260ms var(--ease-brand) forwards;
+  /* Deliberately no `forwards`. The end state of the keyframe is identity anyway, and a filled
+     animation keeps a `transform` on the container, which makes the whole tab a composited layer
+     that has to be rasterised again on every scroll. On a mid-range Android that is a measurable
+     cost for zero visual difference. The exit below does need `forwards`, because it must stay
+     invisible until it unmounts. */
+  animation: pageFadeIn 260ms var(--ease-brand);
 }
 
 .animate-page-out {

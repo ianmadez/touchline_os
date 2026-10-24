@@ -1412,7 +1412,9 @@ export default function TouchlineApp() {
     <main className="min-h-dvh relative flex flex-col">
 
       {displayedTab === "LANDING" || displayedTab === "PORTAL" || displayedTab === "DASHBOARD" ? (
-        <div className="fixed inset-0 bg-[url('/stadium-bg.jpg')] bg-cover bg-center opacity-30 dark:opacity-15 blur-[1px] pointer-events-none transition-opacity duration-300" />
+        // No blur: a 1px Gaussian over a full viewport is a full-screen filter pass for something
+        // nobody can see at 30 percent opacity, and the photo is already soft.
+        <div className="fixed inset-0 bg-[url('/stadium-bg.jpg')] bg-cover bg-center opacity-30 dark:opacity-15 pointer-events-none transition-opacity duration-300" />
       ) : (
         <div className="fixed inset-0 bg-slate-100 dark:bg-[#090D16] pointer-events-none transition-colors duration-300" />
       )}
@@ -1493,12 +1495,17 @@ export default function TouchlineApp() {
           {/* Subtle Ambient Grid & Light Glow Background. Kept outside the scrolling layer so the
               backdrop stays put while the menu scrolls over it. */}
           <div className="absolute inset-0 bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] dark:bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:24px_24px] opacity-50 pointer-events-none" />
-          <div className="absolute -top-32 -left-32 w-96 h-96 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-rose-500/5 rounded-full blur-3xl pointer-events-none" />
+          {/* A radial gradient rather than a blurred circle. The same soft glow, painted once, with
+              no 64px Gaussian pass: on a mid-range Android `blur-3xl` on a 384px element is one of the
+              most expensive things a page can do, and this is the first screen. */}
+          <div className="splash-glow absolute -top-32 -left-32 h-96 w-96 rounded-full pointer-events-none" />
+          <div className="splash-glow absolute -bottom-32 -right-32 h-96 w-96 rounded-full opacity-60 pointer-events-none" />
 
           {/* The menu scrolls. A detected save, an open bridge panel and the settings button can add up
-              to more than one screen of height on a laptop, and clipping that hid the footer entirely. */}
-          <div className="absolute inset-0 flex flex-col justify-between gap-6 overflow-y-auto overscroll-contain p-4 sm:p-8 lg:p-10">
+              to more than one screen of height on a laptop, and clipping that hid the footer entirely.
+              The padding and the gaps are sized so the whole menu, panel closed, fits a 1366 by 768
+              laptop without scrolling: at that height every 16 pixels counts. */}
+          <div className="absolute inset-0 flex flex-col justify-between gap-4 overflow-y-auto overscroll-contain p-4 sm:p-8 lg:p-8">
               {/* Top Bar */}
               <div className="relative z-10 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-slate-200 dark:border-slate-800 pb-4 max-md:flex-col max-md:items-start max-md:gap-y-1.5 animate-slide-in-top">
                 <span className="font-heading text-xl tracking-wider text-slate-900 dark:text-slate-100">

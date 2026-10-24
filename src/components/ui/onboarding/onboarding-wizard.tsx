@@ -304,7 +304,7 @@ export function OnboardingWizard({
                         </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 font-sub truncate max-w-md">
+                    <p className="max-w-md break-all font-sub text-[11px] text-slate-500 dark:text-slate-400 max-md:whitespace-normal md:truncate">
                       {cand.filePath}
                     </p>
                   </div>
@@ -666,7 +666,7 @@ export function OnboardingWizard({
                               : "bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
                           }`}
                         >
-                          <span className="truncate">{formation.name}</span>
+                          <span className="min-w-0 break-words">{formation.name}</span>
                           {isSelected && <span className="text-[10px] text-white">✓</span>}
                         </button>
                       );
@@ -694,7 +694,7 @@ export function OnboardingWizard({
                               : "bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
                           }`}
                         >
-                          <span className="truncate">{formation.name}</span>
+                          <span className="min-w-0 break-words">{formation.name}</span>
                           {isSelected && <span className="text-[10px] text-white">✓</span>}
                         </button>
                       );
@@ -722,7 +722,7 @@ export function OnboardingWizard({
                               : "bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
                           }`}
                         >
-                          <span className="truncate">{formation.name}</span>
+                          <span className="min-w-0 break-words">{formation.name}</span>
                           {isSelected && <span className="text-[10px] text-white">✓</span>}
                         </button>
                       );

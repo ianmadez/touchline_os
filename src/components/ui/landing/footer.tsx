@@ -5,7 +5,7 @@ import { SUPPORT_LINE } from "@/lib/ui/compatibility";
 
 export function Footer() {
   return (
-    <footer className="w-full bg-white dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-800 py-6 px-6 mt-auto">
+    <footer className="relative z-10 w-full bg-white dark:bg-slate-900 border-t border-slate-200/80 dark:border-slate-800 py-6 px-6 mt-auto max-md:pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
       <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
           <span className="font-heading text-sm text-slate-900 dark:text-slate-100">

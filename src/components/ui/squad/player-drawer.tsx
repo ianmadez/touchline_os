@@ -408,7 +408,7 @@ export function PlayerDrawer({
                           >
                             {isOut ? "Out injured" : "Fit to play"}
                           </span>
-                          <span className="block truncate text-[10px] text-slate-600 dark:text-slate-400">
+                          <span className="block break-words text-[10px] text-slate-600 dark:text-slate-400">
                             {isOut
                               ? [timeOut, injuryUntil ? `back ${injuryUntil}` : null]
                                   .filter(Boolean)

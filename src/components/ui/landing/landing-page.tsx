@@ -161,13 +161,13 @@ export function LandingPage({
                 {(saveCandidate.fileSizeBytes / 1024 / 1024).toFixed(2)} MB
               </span>
             </div>
-            <h3 className="font-heading text-xs text-slate-900 dark:text-slate-100 truncate">
+            <h3 className="break-words font-heading text-xs text-slate-900 dark:text-slate-100 md:truncate">
               {saveCandidate.fileName}
             </h3>
             {/* One line, and it says where the save came from rather than echoing a path. On the
                 desktop build `foundIn` already names the exact folder that was probed; in a browser the
                 path is only ever the file name, so it said nothing while the provenance says everything. */}
-            <p className="font-sub text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+            <p className="mt-0.5 break-words font-sub text-[10px] text-slate-500 dark:text-slate-400 md:truncate">
               {saveProvenanceLabel(saveCandidate.foundIn) ?? saveCandidate.filePath}
             </p>
           </div>

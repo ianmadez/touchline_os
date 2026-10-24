@@ -550,7 +550,7 @@ function AddDealForm({
               </span>
             ) : null}
             {matches.length > 0 ? (
-              <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
+              <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
                 {matches.map((match) => (
                   <li key={match.eaPlayerId}>
                     <button
@@ -558,7 +558,7 @@ function AddDealForm({
                       onClick={() => pick(match)}
                       className="flex w-full items-baseline justify-between gap-2 px-3 py-2 text-left font-sub text-[11px] text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
                     >
-                      <span className="truncate">{match.name}</span>
+                      <span className="min-w-0 break-words text-left">{match.name}</span>
                       <span className="shrink-0 text-[10px] text-slate-400">
                         {match.ours ? "your squad" : match.clubName ?? "club not named"} ·{" "}
                         {match.primaryPosition}

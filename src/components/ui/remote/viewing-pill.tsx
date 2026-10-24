@@ -31,7 +31,7 @@ export function ViewingPill() {
     if (!catchingUp) return null;
     return (
       <div className="pointer-events-none fixed inset-x-0 z-40 flex justify-center px-3 bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] md:bottom-6">
-        <div className="pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-2xl border border-slate-300/80 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-4 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.18)] backdrop-blur-xl">
+        <div className="pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-2xl border border-slate-300/80 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-4 py-3 shadow-[0_8px_30px_rgba(15,23,42,0.18)] backdrop-blur-xl" data-chrome="pill">
           <span aria-hidden="true" className="text-base leading-none">
             ⏳
           </span>
@@ -84,3 +84,5 @@ export function ViewingPill() {
     </div>
   );
 }
+
+

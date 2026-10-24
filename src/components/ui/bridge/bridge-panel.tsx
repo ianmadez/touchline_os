@@ -39,6 +39,32 @@ interface BridgePanelProps {
 /** Where the download lives. Served statically by both builds. */
 const DOWNLOAD_HREF = "/bridge/touchline-bridge.zip";
 
+/**
+ * The long explanation, folded away.
+ *
+ * The main menu is a single screen that must fit without scrolling, and four paragraphs of prose in a
+ * panel that is often the fourth thing down it was enough to push `ENTER OS` below the fold. The
+ * explanation still has to exist - a paired bridge that behaves invisibly is the wrong kind of
+ * invisible - so it collapses instead: the state line above stays, and the detail opens on request.
+ * The body scrolls inside itself rather than growing the panel, so opening it cannot push the menu
+ * around either.
+ */
+function BridgeExplainer({ children }: { children: React.ReactNode }) {
+  return (
+    <details className="group rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 px-3 py-2">
+      <summary className="cursor-pointer list-none font-sub text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 marker:content-none">
+        <span className="inline-flex items-center gap-1.5">
+          <span aria-hidden="true" className="transition-transform group-open:rotate-90">
+            ▸
+          </span>
+          How it works
+        </span>
+      </summary>
+      <div className="mt-2 max-h-[7.5rem] space-y-2 overflow-y-auto overscroll-contain pr-1">{children}</div>
+    </details>
+  );
+}
+
 export function BridgePanel({
   state,
   onPair,
@@ -81,27 +107,32 @@ export function BridgePanel({
             </span>
           </div>
           <p className={body}>
-            The bridge is watching your save folder on this PC and handing the file straight to
-            TouchlineOS. No picker, no permission prompt, and it keeps its own list of your saves up to
-            date as it goes, so a save the game has just written turns up on its own.
+            The bridge is watching your save folder on this PC, so there is nothing to pick, and it holds
+            the live copy your phone opens. A change on either device shows up on the other within a few
+            seconds.
           </p>
-          <p className={body}>
-            The career in this browser is the main copy. The PC keeps a live copy of it so your phone can
-            show the same career, and a change on either device appears on the other within a few
-            seconds. One device edits at a time: the other shows Viewing only, and Take control switches.
-            A phone edit made while this page is closed waits, and is applied the next time the page
-            opens.
-          </p>
-          <p className={body}>
-            The first time you paired, this browser&rsquo;s copy was sent to the PC, and whatever the PC
-            held before was saved to a backup folder first. If both copies ever change while they are
-            apart, TouchlineOS asks which one to keep, and it never merges them.
-          </p>
-          <p className={body}>
-            It only ever listens on this machine, only answers this site, and never writes to your save.
-            All of that lasts as long as the bridge window is open: close it and the site quietly goes
-            back to asking for your file, with nothing broken and your career untouched.
-          </p>
+          <BridgeExplainer>
+            <p className={body}>
+              It keeps its own list of your saves up to date as it goes, so a save the game has just
+              written turns up on its own.
+            </p>
+            <p className={body}>
+              The career in this browser is the main copy. The PC keeps a live copy of it so your phone
+              can show the same career. One device edits at a time: the other shows Viewing only, and Take
+              control switches. A phone edit made while this page is closed waits, and is applied the next
+              time the page opens.
+            </p>
+            <p className={body}>
+              The first time you paired, this browser&rsquo;s copy was sent to the PC, and whatever the PC
+              held before was saved to a backup folder first. If both copies ever change while they are
+              apart, TouchlineOS asks which one to keep, and it never merges them.
+            </p>
+            <p className={body}>
+              It only ever listens on this machine, only answers this site, and never writes to your save.
+              All of that lasts as long as the bridge window is open: close it and the site quietly goes
+              back to asking for your file, with nothing broken and your career untouched.
+            </p>
+          </BridgeExplainer>
           <SyncLine />
           <button onClick={onDisconnect} disabled={busy} className={secondary}>
             {busy ? "Disconnecting…" : "Disconnect the bridge"}
@@ -199,29 +230,29 @@ export function BridgePanel({
           </>
         ) : (
           <>
-            TouchlineOS normally has to ask for your save file, and browsers insist on asking more than
-            once. The bridge is a small optional helper you run on your own PC: it watches your save
-            folder and serves the file to this page, so there is nothing to pick. Run it once, pair it
-            once, and every visit reads your save on its own. It also keeps the live copy that your phone
-            opens.
+            Browsers insist on asking for your save file more than once. The bridge is a small optional
+            helper on your own PC: it watches your save folder and hands the file to this page, so there
+            is nothing to pick.
           </>
         )}
       </p>
 
       {!needsCode && (
-        <p className={body}>
-          It keeps its own list of your saves fresh as it goes, so a save the game has just written is
-          noticed without a nudge. It only listens on your machine, only answers this site, and never
-          writes to your save file.
-        </p>
-      )}
-
-      {!needsCode && (
-        <p className={body}>
-          That works in every browser, including Firefox and Safari, which cannot remember a file at
-          all. You will need Node.js, which is the only requirement — nothing else to install. Entirely
-          optional: everything works without it.
-        </p>
+        <BridgeExplainer>
+          <p className={body}>
+            Run it once, pair it once, and every visit reads your save on its own. It keeps its own list
+            of your saves fresh as it goes, so a save the game has just written is noticed without a
+            nudge, and it holds the live copy your phone opens.
+          </p>
+          <p className={body}>
+            It only listens on your machine, only answers this site, and never writes to your save file.
+          </p>
+          <p className={body}>
+            That works in every browser, including Firefox and Safari, which cannot remember a file at
+            all. You will need Node.js, which is the only requirement, and nothing else to install.
+            Entirely optional: everything works without it.
+          </p>
+        </BridgeExplainer>
       )}
 
       <div className="flex flex-wrap items-center gap-2">

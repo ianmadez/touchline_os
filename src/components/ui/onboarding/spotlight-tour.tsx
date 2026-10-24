@@ -1010,13 +1010,18 @@ export function SpotlightTour({ careerId, tab, enabled, restartToken }: Spotligh
         style={{ top: hole.top, left: hole.left, width: hole.width, height: hole.height }}
       />
 
-      <div className="pointer-events-none fixed inset-0 z-[102] flex flex-col p-4" style={{ justifyContent }}>
+      {/* The bottom padding is the mobile tab bar, not decoration: without it the card sat over the
+          bar and the four words a manager uses to leave the tour were the four words it covered. */}
+      <div
+        className="pointer-events-none fixed inset-0 z-[102] flex flex-col p-4 pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))] md:pb-4"
+        style={{ justifyContent }}
+      >
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="tour-step-title"
           aria-live="polite"
-          className="animate-panel-in pointer-events-auto w-[380px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+          className="animate-panel-in pointer-events-auto w-[380px] max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
           style={{ marginLeft: cardLeft, maxHeight: `calc(100dvh - ${CARD_MARGIN * 2}px)` }}
         >
           <div className="flex items-start justify-between gap-3">

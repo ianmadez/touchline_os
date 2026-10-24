@@ -187,7 +187,7 @@ function Segmented<T extends string>({
             disabled={disabled}
             data-compact
             onClick={() => onChange(option)}
-            className={`max-w-full whitespace-normal text-center px-3 py-1.5 rounded-lg font-sub text-[11px] font-bold uppercase cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed max-md:min-h-10 max-md:w-full max-md:whitespace-nowrap max-md:px-2 max-md:py-2 max-md:text-[10px] ${
+            className={`max-w-full whitespace-normal text-center px-3 py-1.5 rounded-lg font-sub text-[11px] font-bold uppercase cursor-pointer transition-colors disabled:opacity-40 disabled:cursor-not-allowed max-md:min-h-10 max-md:w-full max-md:break-words max-md:whitespace-normal max-md:leading-tight max-md:px-2 max-md:py-2 max-md:text-[10px] ${
               active
                 ? "bg-[#E11D48] text-white"
                 : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-800"
@@ -532,7 +532,7 @@ export function SettingsView({
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 font-sans text-xs">
                 <div className="flex justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-1.5">
                   <dt className="text-slate-500 dark:text-slate-400">Active career</dt>
-                  <dd className="font-bold text-slate-900 dark:text-slate-100 truncate">
+                  <dd className="min-w-0 break-all text-right font-bold text-slate-900 dark:text-slate-100">
                     {diagnostics.activeCareer?.careerId ?? "none"}
                   </dd>
                 </div>
