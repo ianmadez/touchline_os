@@ -1,11 +1,13 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { sha1Hex } from "../parser/sha";
 import { db } from "../db/client";
+import { pickActiveCareer } from "../career-selection";
 import {
   careers,
   careerSnapshots,
   managerOnboardingProfiles,
   playerSnapshots,
+  players,
   storylines,
   storylineEvents,
   leagueTeams,
@@ -179,9 +181,33 @@ export class CareerService {
     return db.select().from(careers).where(eq(careers.id, careerId)).get();
   }
 
-  /** Most recently touched career, used when a refresh has no career id stored. */
+  /**
+   * The career to open when a refresh has no career id stored.
+   *
+   * Newest first, but the newest career that can actually be managed wins over one that cannot, so a
+   * partial row written later (a fixture, or a career left behind by an interrupted seed) cannot take
+   * the manager's career away from them. See `career-selection.ts` for why this is a preference rather
+   * than a filter, and why the squad size is what decides it.
+   */
   async getLatestCareerRow() {
-    return db.select().from(careers).orderBy(desc(careers.updatedAt)).limit(1).get();
+    // Counted with a join rather than a correlated subquery. Inside a raw `sql` template Drizzle
+    // renders a column unqualified (`"career_id" = "id"`), which then compares the subquery's own
+    // table with itself and counts zero for every career - a rule that silently degrades to "newest
+    // wins", which is the bug this method exists to fix. A join keeps both sides qualified.
+    const candidates = await db
+      .select({
+        id: careers.id,
+        squadSize: sql<number>`count(${players.id})`,
+      })
+      .from(careers)
+      .leftJoin(players, eq(players.careerId, careers.id))
+      .groupBy(careers.id, careers.updatedAt)
+      .orderBy(desc(careers.updatedAt));
+
+    const chosen = pickActiveCareer(candidates, (row) => Number(row.squadSize));
+    if (!chosen) return undefined;
+
+    return db.select().from(careers).where(eq(careers.id, chosen.id)).get();
   }
 
   async hydrate(careerId: string): Promise<CareerHydrationPayload | null> {

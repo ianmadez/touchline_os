@@ -13,12 +13,33 @@ import fs from "fs";
 import path from "path";
 import { GAME_METAS } from "../parser/game-versions";
 import { sha1Hex } from "../parser/sha";
-import { classifySlot, looksLikeSaveFile } from "../parser/save-naming";
+import { classifySlot, isReferenceFolderName, looksLikeSaveFile } from "../parser/save-naming";
 import type { SaveCandidate, SaveSearchLocation } from "../parser/interface";
 import type { SaveSource } from "./types";
 
 const MAX_SCAN_DEPTH = 3;
 const MAX_DIR_ENTRIES = 5000;
+
+/**
+ * The size band a save offered by the scan must sit in.
+ *
+ * Both ends exist because the list has no way to say "this one is not really a save" once a row is in
+ * it: a candidate is shown with its name and its size, and a manager has no reason to doubt either.
+ *
+ * The floor is where the `0.00 MB` rows came from. Every real save measured for this project is
+ * between three and sixteen megabytes, because a career container carries a database block with a
+ * table directory inside it. What the list held instead was a synthetic 2.7 KB fixture and whatever
+ * a half-written copy left behind: both rendered as `0.00 MB` next to a real career, and both fail to
+ * parse the moment they are chosen.
+ *
+ * This filters what is OFFERED, never what is refused. A path handed in explicitly (one the wizard
+ * carries, or a file the manager picked themselves) is checked for being a readable file and nothing
+ * more, so a small save that someone means to open still opens.
+ */
+const MIN_SCAN_SAVE_BYTES = 1024 * 1024;
+
+/** Guard rail: a legit FC career save is a few MB; refuse anything absurd. */
+const MAX_SAVE_BYTES = 256 * 1024 * 1024;
 
 /**
  * The folders older FIFA titles write careers into, taken from the supported-games registry.
@@ -100,6 +121,9 @@ function walk(dir: string, depth: number, out: string[]): string[] {
     if (out.length >= MAX_DIR_ENTRIES) break;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
+      // A folder that says it holds reference or test material is not descended into at all, so its
+      // files are never even considered. See `isReferenceFolderName`.
+      if (isReferenceFolderName(entry.name)) continue;
       walk(full, depth - 1, out);
     } else if (entry.isFile()) {
       out.push(full);
@@ -160,6 +184,15 @@ async function detectSaves(saveDirectory?: string, allowPicker?: { allowPicker?:
       }
       if (!fileStat.isFile()) continue;
 
+      // Out of the size band: an empty file, a stub left by an interrupted copy, or something that is
+      // not a save at all. Recorded as seen first so a later location offering the same path cannot
+      // reintroduce it, then dropped silently: the list is the only place it would have been
+      // mentioned, and a row saying "ignored" is not something a manager asked to read.
+      if (fileStat.size < MIN_SCAN_SAVE_BYTES || fileStat.size > MAX_SAVE_BYTES) {
+        seen.add(key);
+        continue;
+      }
+
       seen.add(key);
       const slot = classifySlot(fileName);
       candidates.push({
@@ -177,9 +210,6 @@ async function detectSaves(saveDirectory?: string, allowPicker?: { allowPicker?:
 
   return candidates.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
 }
-
-/** Guard rail: a legit FC career save is a few MB; refuse anything absurd. */
-const MAX_SAVE_BYTES = 256 * 1024 * 1024;
 
 /**
  * Resolves a request into a concrete, validated save candidate.

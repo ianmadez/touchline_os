@@ -52,6 +52,7 @@ import {
 import { pullChanges, pushChanges, reseed, seedCareer, syncClientId, syncStatus } from "./client";
 import { BULK_TABLES, DELTA_TABLES } from "./tables";
 import { setSyncSnapshot, readSyncSnapshot } from "./state";
+import { pickActiveCareer } from "../../career-selection";
 
 /** Short enough that a write is on the other device well inside the three second target. */
 const TICK_MS = 500;
@@ -91,12 +92,15 @@ function setAppliedRevision(careerId: string, revision: number): void {
   setSyncSnapshot({ applied: revision });
 }
 
-/** The career this database holds, by the same rule the app uses: most recently touched wins. */
+/** The career this database opens, by the same rule the app uses: newest that can be managed. */
 export function currentCareerId(): string | null {
-  const rows = storage.db.all<{ id: string }>(
-    sql`SELECT id FROM careers ORDER BY updated_at DESC LIMIT 1`
+  const rows = storage.db.all<{ id: string; squadSize: number }>(
+    sql`SELECT c.id AS id,
+               (SELECT COUNT(*) FROM players p WHERE p.career_id = c.id) AS squadSize
+          FROM careers c
+      ORDER BY c.updated_at DESC`
   );
-  return rows[0]?.id ?? null;
+  return pickActiveCareer(rows, (row) => Number(row.squadSize))?.id ?? null;
 }
 
 // ---------------------------------------------------------------- one tab

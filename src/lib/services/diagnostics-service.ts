@@ -6,6 +6,7 @@
  */
 import { desc, eq, and, sql } from "drizzle-orm";
 import { db } from "../db/client";
+import { pickActiveCareer } from "../career-selection";
 import {
   careers,
   careerSnapshots,
@@ -53,12 +54,20 @@ export interface DiagnosticsData {
 }
 
 export async function collectDiagnostics(): Promise<DiagnosticsData> {
-  const activeCareer = await db
-    .select()
+  // The same rule the app opens a career by, so this panel never labels one career "active" while the
+  // screens behind it are showing another. Counted with a join for the reason documented in
+  // `CareerService.getLatestCareerRow`: an unqualified column inside a raw `sql` subquery counts zero.
+  const careerCandidates = await db
+    .select({
+      career: careers,
+      squadSize: sql<number>`count(${players.id})`,
+    })
     .from(careers)
-    .orderBy(desc(careers.updatedAt))
-    .limit(1)
-    .get();
+    .leftJoin(players, eq(players.careerId, careers.id))
+    .groupBy(careers.id, careers.updatedAt)
+    .orderBy(desc(careers.updatedAt));
+
+  const activeCareer = pickActiveCareer(careerCandidates, (row) => Number(row.squadSize))?.career;
 
   const snapshotCounts = await db
     .select({ careerId: careerSnapshots.careerId, value: sql<number>`count(*)` })

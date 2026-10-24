@@ -32,3 +32,21 @@ export function looksLikeSaveFile(fileName: string): boolean {
   if (NON_CAREER_RE.test(fileName)) return false;
   return classifySlot(fileName).kind !== "unknown";
 }
+
+/**
+ * Folder names that hold reference or test material rather than a manager's own careers.
+ *
+ * The scan walks a few levels below each save location, which is right for the games that nest careers
+ * in `settings` subfolders and wrong for a checkout that keeps sample saves beside the real ones. Every
+ * reference save in `data/saves/not-my-own-saves` was being offered as though the manager had written
+ * it, indistinguishable in the list from their own career, so a folder that says what it is decides it.
+ *
+ * Matched on a whole name, case-insensitively, and never on a path substring: a manager whose Windows
+ * profile happens to contain the word "sample" must not lose every save they own.
+ */
+const REFERENCE_FOLDER_RE =
+  /^(not[-_ ]?my[-_ ]?own([-_ ]?saves?)?|fixtures?|mocks?|test|tests|samples?|references?|examples?)$/i;
+
+export function isReferenceFolderName(name: string): boolean {
+  return REFERENCE_FOLDER_RE.test(name.trim());
+}

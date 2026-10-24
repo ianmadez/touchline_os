@@ -131,6 +131,14 @@ function acceptFiles(files: File[]): { candidates: SaveCandidate[]; filteredOut:
     const slot = classifySlot(file.name);
     const id = sha1Hex(`${file.name}|${file.size}|${file.lastModified}`).slice(0, 16);
 
+    // An empty file cannot be a career, and listing it would put `0.00 MB` in front of the manager with
+    // nothing to explain it. The picker is the only path a page has to a save, so a file left out here
+    // has to be named or the press looks like it did nothing.
+    if (file.size === 0) {
+      filteredOut = `${file.name} is empty, so there is nothing in it to read.`;
+      continue;
+    }
+
     // The wizard drops `database` slots, so name the one file that was actually chosen rather than
     // returning nothing and looking like a failure.
     if (slot.kind === "database") {
