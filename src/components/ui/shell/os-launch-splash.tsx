@@ -35,7 +35,7 @@ export function OsLaunchSplash({
 
       <div className="relative flex flex-col items-center gap-2 px-6 text-center">
         <span className="animate-os-mark font-heading text-3xl tracking-wider text-slate-900 sm:text-4xl dark:text-slate-100">
-          TOUCHLINE<span className="text-[#E11D48]">OS</span>
+          TOUCHLINE<span className="text-[#E11D48] dark:text-[#FF8C7A]">OS</span>
         </span>
         <span className="animate-os-word font-sub text-[10px] font-bold uppercase tracking-[0.4em] text-slate-400 [animation-delay:90ms]">
           Starting your session

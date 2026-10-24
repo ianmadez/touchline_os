@@ -628,6 +628,30 @@ figcaption {
 }
 
 
+/*
+  The phone tab bar.
+
+  Anchored to the VISIBLE bottom rather than the layout bottom. `--tl-visual-bottom` is the gap between
+  the two, published by `use-visual-viewport-bar`: it is the address bar while that is sliding, and the
+  software keyboard when that is up. Without it `bottom: 0` means the bottom of a viewport the manager
+  cannot see, which is what made the bar appear to drift up the screen.
+
+  No `transform` here, deliberately. A compositor hint on a fixed element is a well-trodden source of
+  "the bar lags behind the scroll" on Android Firefox: the page is scrolled by the compositor while the
+  fixed layer is re-anchored on a later frame. The bar does not need one.
+
+  While the keyboard is up the bar leaves, because a tab bar sitting on top of the form being typed into
+  is a control nobody wants, and it costs no layout because it occupies no space.
+*/
+[data-chrome="bar"]:is(nav) {
+  bottom: var(--tl-visual-bottom, 0px);
+  transition: bottom 120ms var(--ease-brand), transform 180ms var(--ease-brand);
+}
+
+html[data-keyboard-open] [data-chrome="bar"]:is(nav) {
+  transform: translateY(120%);
+}
+
 /* While a tour is up, the navigation tabs lose their clicks and keep their highlight.
    The tour's backdrop leaves a real gap over the control it is describing, so that control stays
    usable - right for a button, wrong for a tab. A tour belongs to one screen, so a tab click ends it
@@ -636,6 +660,43 @@ figcaption {
    landing page's anchor list. */
 html[data-tour-open] [data-tour^="tab-"] {
   pointer-events: none;
+}
+
+/*
+  Keyboard focus, in one place.
+
+  Eighty controls across the app set `focus:outline-none` and replace it with a border colour change,
+  which is invisible on a dark card and barely there on a light one. Anyone driving this with a keyboard
+  had no reliable way to see where they were, and the dark theme made it worse rather than better: the
+  focus border was the same rose the active tab already uses, so "focused" and "selected" looked alike.
+
+  `:focus-visible` rather than `:focus`, so a mouse click does not leave a ring behind. This rule is
+  unlayered, so it wins over Tailwind's layered `focus:outline-none` without needing `!important` or a
+  change at eighty call sites, which is the same reason the touch rules above are written this way.
+
+  Two colours because the rose is legible on both themes but its darker form is nearly the same value as
+  a dark card: the light theme gets the brand rose, the dark theme its lighter pair. In forced-colors mode
+  the system's own highlight is the only colour guaranteed to be visible, so it is handed back.
+*/
+:focus-visible {
+  outline: 2px solid #e11d48;
+  outline-offset: 2px;
+}
+
+.dark :focus-visible {
+  outline-color: #ff8c7a;
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid CanvasText;
+  }
+}
+
+/* A range input is drawn as a track rather than a box, and a ring around the whole track reads as if the
+   label were focused. An offset ring on the thumb's own row keeps the indicator where the interaction is. */
+input[type="range"]:focus-visible {
+  outline-offset: 4px;
 }
 
 /* The app shipped with no reduced-motion guard at all. This neutralises movement for users who ask the OS for less

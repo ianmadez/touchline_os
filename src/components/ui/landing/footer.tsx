@@ -9,7 +9,7 @@ export function Footer() {
       <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
           <span className="font-heading text-sm text-slate-900 dark:text-slate-100">
-            TOUCHLINE<span className="text-[#E11D48]">OS</span>
+            TOUCHLINE<span className="text-[#E11D48] dark:text-[#FF8C7A]">OS</span>
           </span>
           <p className="font-sub text-xs text-slate-500 dark:text-slate-400 mt-0.5 max-w-md">
             It reads your save, remembers every squad change it finds, and reads each block of matches

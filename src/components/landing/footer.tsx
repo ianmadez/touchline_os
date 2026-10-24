@@ -8,7 +8,7 @@ export function Footer() {
       <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
           <span className="font-heading text-sm text-slate-900 dark:text-slate-100">
-            TOUCHLINE<span className="text-[#E11D48]">OS</span>
+            TOUCHLINE<span className="text-[#E11D48] dark:text-[#FF8C7A]">OS</span>
           </span>
           <p className="font-sub text-xs text-slate-500 dark:text-slate-400 mt-0.5 max-w-md">
             TouchlineOS runs beside your career mode—remembering every squad change, tracking your manager philosophy, and giving every season real narrative weight.

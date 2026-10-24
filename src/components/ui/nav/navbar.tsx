@@ -75,13 +75,16 @@ export function Navbar({
           : "bg-white/80 dark:bg-slate-950/70 border-transparent backdrop-blur-md"
       }`}
     >
-      {/* Brand Logo */}
-      <div
+      {/* Brand Logo. A button rather than a div: it navigates, and a div is invisible to everyone
+          driving this with a keyboard or a screen reader. */}
+      <button
+        type="button"
         onClick={() => onSelectTab("LANDING")}
+        aria-label="TouchlineOS home"
         className="flex items-center gap-2 min-w-0 overflow-hidden cursor-pointer group justify-self-start"
       >
         <span className="font-heading text-base sm:text-lg lg:text-xl text-slate-900 dark:text-white tracking-wider shrink-0">
-          TOUCHLINE<span className="text-[#E11D48]">OS</span>
+          TOUCHLINE<span className="text-[#E11D48] dark:text-[#FF8C7A]">OS</span>
         </span>
         {!isLanding && (clubBadgeUrl !== "" || hasClubName) && (
           <span className="text-xs font-sub text-slate-500 dark:text-slate-400 border-l border-slate-200 dark:border-slate-800 pl-2.5 ml-1 hidden xl:inline-flex items-center gap-2 min-w-0">
@@ -103,7 +106,7 @@ export function Navbar({
             )}
           </span>
         )}
-      </div>
+      </button>
 
       {/* Dead-Centered Navigation Bar */}
       <nav className="justify-self-center min-w-0">

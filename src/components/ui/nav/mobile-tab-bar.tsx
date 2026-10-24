@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 
 import type { AppTab } from "@/lib/session";
+import { useVisualViewportBar } from "@/lib/ui/use-visual-viewport-bar";
 import { MoreSheet } from "./more-sheet";
 import { appTabsFor, PRIMARY_TAB_IDS } from "./tab-items";
 
@@ -24,6 +25,7 @@ export function MobileTabBar({
   isOnboardingComplete: boolean;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
+  useVisualViewportBar();
   const tabs = appTabsFor(isOnboardingComplete);
   const primary = tabs.filter((tab) => PRIMARY_TAB_IDS.includes(tab.id));
   const overflow = tabs.filter((tab) => !PRIMARY_TAB_IDS.includes(tab.id));
@@ -34,7 +36,7 @@ export function MobileTabBar({
       <nav
         aria-label="Primary"
         data-chrome="bar"
-        className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95 md:hidden [transform:translateZ(0)]"
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom,0px)] dark:border-slate-800 dark:bg-slate-950 md:hidden"
       >
         <div className="grid grid-cols-5">
           {primary.map((tab) => {

@@ -284,10 +284,12 @@ export function OnboardingWizard({
             {saveCandidates.map((cand) => {
               const isSelected = selectedSave?.id === cand.id;
               return (
-                <div
+                <button
                   key={cand.id}
+                  type="button"
                   onClick={() => setSelectedSave(cand)}
-                  className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
+                  aria-pressed={isSelected}
+                  className={`w-full text-left p-4 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
                     isSelected
                       ? "border-[#E11D48] bg-rose-50/50 dark:bg-rose-950/20 shadow-xs"
                       : "border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 hover:border-slate-300 dark:hover:border-slate-700"
@@ -316,7 +318,7 @@ export function OnboardingWizard({
                       {new Date(cand.lastModified).toLocaleDateString()}
                     </span>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>

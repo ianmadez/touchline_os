@@ -1384,7 +1384,7 @@ export default function TouchlineApp() {
       <main className="min-h-dvh flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-6">
         <div className="w-full max-w-sm text-center space-y-4">
           <span className="block font-heading text-2xl tracking-wider text-slate-900 dark:text-slate-100">
-            TOUCHLINE<span className="text-[#E11D48]">OS</span>
+            TOUCHLINE<span className="text-[#E11D48] dark:text-[#FF8C7A]">OS</span>
           </span>
           {bootError ? (
             <>
@@ -1509,7 +1509,7 @@ export default function TouchlineApp() {
               {/* Top Bar */}
               <div className="relative z-10 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-slate-200 dark:border-slate-800 pb-4 max-md:flex-col max-md:items-start max-md:gap-y-1.5 animate-slide-in-top">
                 <span className="font-heading text-xl tracking-wider text-slate-900 dark:text-slate-100">
-                  TOUCHLINE<span className="text-[#E11D48]">OS</span>
+                  TOUCHLINE<span className="text-[#E11D48] dark:text-[#FF8C7A]">OS</span>
                 </span>
                 <span className="font-sub text-xs text-slate-400 font-bold uppercase tracking-widest max-md:text-[10px] max-md:tracking-[0.18em]">
                   START TRACKING YOUR SAVE

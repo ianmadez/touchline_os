@@ -73,6 +73,18 @@ export interface CoreServerOptions {
   port: number;
   /** The static app to serve. Null on the loopback listener, which has no page of its own. */
   appDir?: string | null;
+  /**
+   * Where to fetch the app from when `appDir` holds no build.
+   *
+   * This exists because of the download. The app is about 60 MB, Cloudflare Pages refuses any single
+   * file over 25 MiB, and the download is served by Pages, so packing the app into the zip would make
+   * the deployment fail. Instead the core fetches each file the phone asks for, once, and keeps it in
+   * `appCacheDir`, so the download stays a few megabytes and a phone still gets a working app with no
+   * internet after the first visit.
+   */
+  appUrl?: string | null;
+  /** Where those fetched files are kept. Required for `appUrl` to do anything. */
+  appCacheDir?: string | null;
   env?: NodeJS.ProcessEnv;
   /** Called when sharing is switched off from a device, so the entry point can close the LAN socket. */
   onSharingDisabled?: () => void;
@@ -475,7 +487,11 @@ export function createCoreServer(options: CoreServerOptions): CoreServer {
     return allowed.includes(host) || host === "127.0.0.1" || host === "localhost";
   };
 
-  const serveApp = (req: http.IncomingMessage, res: http.ServerResponse, url: URL): void => {
+  const serveApp = async (
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: URL
+  ): Promise<void> => {
     const appDir = options.appDir ?? null;
     if (!appDir) {
       sendJson(res, 404, { success: false, error: "This listener does not serve the app." });
@@ -500,6 +516,11 @@ export function createCoreServer(options: CoreServerOptions): CoreServer {
     }
 
     if (!fs.existsSync(target)) {
+      // No build on this PC. A downloaded core falls back to the website itself, one file at a time,
+      // and keeps each file it fetches. See `appUrl` for why the app is not simply shipped with it.
+      const fetched = await fetchIntoCache(relative, res);
+      if (fetched) return;
+
       res.writeHead(404, { "content-type": "text/html; charset=utf-8" });
       res.end(
         `<!doctype html><html><body style="font:14px system-ui;padding:2rem;background:#0f172a;color:#e2e8f0">` +
@@ -537,6 +558,71 @@ export function createCoreServer(options: CoreServerOptions): CoreServer {
         : "no-store",
     });
     fs.createReadStream(target).pipe(res);
+  };
+
+  /**
+   * Serves one app file from the cached copy of the website, fetching it the first time.
+   *
+   * The cache is keyed by the requested path, and only a `200` is ever written: an error page from the
+   * website must not become the file the phone keeps forever. Files are written through a temporary
+   * name and moved into place, so a half-written asset can never be served.
+   *
+   * Returns false when there is nothing to serve from, which is the caller's cue to answer with the
+   * "not built" page.
+   */
+  const fetchIntoCache = async (
+    relative: string,
+    res: http.ServerResponse
+  ): Promise<boolean> => {
+    const site = options.appUrl;
+    const cacheDir = options.appCacheDir;
+    if (!site || !cacheDir) return false;
+
+    // A folder or a bare root is the app's entry point, the same rule the disk path above follows.
+    const wanted = relative.endsWith("/") || relative === "" ? `${relative}index.html` : relative;
+    const safe = wanted.replace(/^\/+/, "").replace(/\.\.(\/|\\|$)/g, "");
+    const cached = path.join(cacheDir, safe);
+
+    if (!fs.existsSync(cached)) {
+      try {
+        const response = await fetch(`${site.replace(/\/+$/, "")}/${safe}`, {
+          headers: { accept: "*/*" },
+          signal: AbortSignal.timeout(30_000),
+        });
+        if (!response.ok) return false;
+        const bytes = Buffer.from(await response.arrayBuffer());
+        fs.mkdirSync(path.dirname(cached), { recursive: true });
+        const scratch = `${cached}.${process.pid}.tmp`;
+        fs.writeFileSync(scratch, bytes);
+        fs.renameSync(scratch, cached);
+        console.log(`  fetched ${safe} (${Math.round(bytes.length / 1024)} KB) from the website`);
+      } catch (error) {
+        console.log(`  could not fetch ${safe}: ${(error as Error).message}`);
+        return false;
+      }
+    }
+
+    const extension = path.extname(cached).toLowerCase();
+    if (extension === ".html") {
+      // Same marker as the disk path, for the same reason: a page served by this core is remote.
+      let html = fs.readFileSync(cached, "utf8");
+      const marker = `<meta name="${"touchline-remote"}" content="apiVersion=${REMOTE_API_VERSION};minClientVersion=${REMOTE_MIN_CLIENT_VERSION}">`;
+      html = html.includes("<head>")
+        ? html.replace("<head>", `<head>${marker}`)
+        : `${marker}${html}`;
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      res.end(html);
+      return true;
+    }
+
+    res.writeHead(200, {
+      "content-type": CONTENT_TYPES[extension] ?? "application/octet-stream",
+      "cache-control": safe.includes("/_next/static/")
+        ? "public, max-age=31536000, immutable"
+        : "no-store",
+    });
+    fs.createReadStream(cached).pipe(res);
+    return true;
   };
 
   const handlePair = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
@@ -837,7 +923,7 @@ export function createCoreServer(options: CoreServerOptions): CoreServer {
             sendJson(res, 405, { success: false, error: "Only GET is supported here." });
             return;
           }
-          serveApp(req, res, url);
+          await serveApp(req, res, url);
           return;
         }
 

@@ -51,7 +51,7 @@ export function PhoneMockup() {
           {/* The wordmark, as the app has it. */}
           <div className="flex items-center justify-between px-3 pb-1.5">
             <span className="font-heading text-[9px] tracking-wider text-slate-900 dark:text-slate-100">
-              TOUCHLINE<span className="text-[#E11D48]">OS</span>
+              TOUCHLINE<span className="text-[#E11D48] dark:text-[#FF8C7A]">OS</span>
             </span>
             <span className="flex h-4 w-4 items-center justify-center rounded-full border border-slate-200 dark:border-slate-700 text-[6px] text-slate-400">
               ◐

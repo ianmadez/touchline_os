@@ -95,7 +95,7 @@ export function RemotePairingScreen({ onPaired, offline = false }: RemotePairing
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <span className="font-heading text-2xl tracking-wider text-slate-900 dark:text-slate-100">
-            TOUCHLINE<span className="text-[#E11D48]">OS</span>
+            TOUCHLINE<span className="text-[#E11D48] dark:text-[#FF8C7A]">OS</span>
           </span>
           <p className="mt-3 font-sub text-xs uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
             Connect to your PC

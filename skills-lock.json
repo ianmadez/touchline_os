@@ -13,6 +13,12 @@
       "skillPath": ".agents/skills/anti-slop/SKILL.md",
       "computedHash": "426f84f4cb0245ac72970ab7856518fbbd06f3b45ba1f9eef82ceef27d305d0c"
     },
+    "better-accessibility": {
+      "source": "jakubkrehel/skills",
+      "sourceType": "github",
+      "skillPath": "skills/better-accessibility/SKILL.md",
+      "computedHash": "0daa40156a9ee10342c5a17c5a73d48d2477df4fc2978cad061801ed3044a0ec"
+    },
     "better-ui": {
       "source": "jakubkrehel/skills",
       "sourceType": "github",

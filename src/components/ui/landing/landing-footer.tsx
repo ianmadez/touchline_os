@@ -16,7 +16,7 @@ export function LandingFooter({ onOpenLegal }: LandingFooterProps) {
           {/* Col 1: Brand Philosophy */}
           <div className="md:col-span-4 space-y-3">
             <span className="font-heading text-2xl text-slate-900 dark:text-slate-100">
-              TOUCHLINE<span className="text-[#E11D48]">OS</span>
+              TOUCHLINE<span className="text-[#E11D48] dark:text-[#FF8C7A]">OS</span>
             </span>
             <p className="font-sans text-xs text-slate-600 dark:text-slate-300 leading-relaxed max-w-sm">
               A persistent football intelligence and roleplay layer that turns an EA FC Career Mode save into a living managerial career.

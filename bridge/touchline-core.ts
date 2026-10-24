@@ -39,11 +39,25 @@ import { prepareCore } from "./core";
 import { DeviceStore } from "./device-store";
 import { DEFAULT_REMOTE_PORT } from "../src/lib/remote/protocol";
 
+/**
+ * Where a downloaded core gets the app from, when this PC has no build of its own.
+ *
+ * The download cannot carry the app: it is about 60 MB, every file Cloudflare Pages serves is capped at
+ * 25 MiB, and a download over that cap fails to deploy. So the core fetches the files a phone asks for
+ * and keeps them, which makes the download a few megabytes and a phone work offline after its first
+ * visit. A checkout never uses this, because `out-browser` is right there.
+ */
+const DEFAULT_APP_URL = "https://touchline-os.pages.dev";
+
 interface CliOptions {
   share: boolean | null;
   lanPort: number;
   loopbackPort: number;
   appDir: string;
+  /** Where the app is fetched from when this PC holds no build. Empty means "do not fetch". */
+  appUrl: string;
+  /** Where fetched app files are kept. */
+  appCacheDir: string;
   noLoopback: boolean;
   /** Skips the save watcher. Used by the end-to-end check, which wants a predictable empty career. */
   noWatch: boolean;
@@ -78,6 +92,11 @@ function readOptions(): CliOptions {
     lanPort: numeric("--port", Number(process.env.TOUCHLINE_REMOTE_PORT ?? DEFAULT_REMOTE_PORT)),
     loopbackPort: numeric("--loopback-port", Number(process.env.TOUCHLINE_BRIDGE_PORT ?? DEFAULT_PORT)),
     appDir: path.resolve(flag("--app") ?? process.env.TOUCHLINE_APP_DIR ?? path.join(process.cwd(), "out-browser")),
+    appUrl: flag("--app-url") ?? process.env.TOUCHLINE_APP_URL ?? DEFAULT_APP_URL,
+    appCacheDir: (() => {
+      const raw = flag("--app-cache") ?? process.env.TOUCHLINE_APP_CACHE ?? "";
+      return raw === "" ? "" : path.resolve(raw);
+    })(),
     noLoopback: process.argv.includes("--no-loopback"),
     noWatch: process.argv.includes("--no-watch") || process.env.TOUCHLINE_NO_WATCH === "1",
   };
@@ -134,6 +153,8 @@ async function main(): Promise<void> {
         hostName,
         port: options.lanPort,
         appDir: options.appDir,
+        appUrl: options.appUrl || null,
+        appCacheDir: options.appCacheDir || path.join(boot.paths.dataDir, "app"),
         onSharingDisabled: () => {
           console.log("\n  Sharing stopped from a device. This PC is no longer serving the app.");
           lan?.close().catch(() => {});
@@ -141,7 +162,7 @@ async function main(): Promise<void> {
       })
     : null;
 
-  const watcher = store.sharing() && !options.noWatch
+  const watcher = !options.noWatch
     ? createSaveWatcher({
         log: (line) => console.log(line),
         onChanged: (outcome) => {
@@ -187,7 +208,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  if (lanUp) watcher?.start();
+  // Watching is not conditional on sharing. With pairing off this is what a manager runs instead of the
+  // old save-only bridge, and the thing that made that useful was the folder watch: a save the game has
+  // just written turns up without anyone pressing anything.
+  watcher?.start();
   startPeriodicRescan();
 
   const phoneUrl = pairingAddress(options.lanPort) ?? `http://${hostName}:${options.lanPort}`;
@@ -195,8 +219,10 @@ async function main(): Promise<void> {
   printBanner({ config, options, boot, store, loopbackUp, lanUp, phoneUrl });
 
   if (lanUp && !appLooksBuilt(options.appDir)) {
-    console.log(`  Note: ${options.appDir} has no index.html yet, so a phone would see a build message.`);
-    console.log("  Build it once with:  npm run build:browser\n");
+    console.log(
+      `  Note: the app is not built on this PC, so a phone fetches it from ${options.appUrl || "(nowhere)"}`
+    );
+    console.log("  and it is kept for next time. Build it locally with:  npm run build:browser\n");
   }
 
   if (lanUp) {
@@ -259,8 +285,9 @@ function printBanner(input: BannerInput): void {
   } else {
     console.log("    Your phone:       sharing is off");
     console.log("");
-    console.log("  To use this career on a phone, start again with one of:");
-    console.log("    npm run core            (set TOUCHLINE_REMOTE=1 first)");
+    console.log("  To use this career on a phone, start it again with sharing on:");
+    console.log("    TouchlineBridge.cmd share          (the download)");
+    console.log("    npm run core                       (set TOUCHLINE_REMOTE=1 first)");
     console.log("    npx tsx bridge/touchline-core.ts --share");
     console.log("  That opens one port on your own network, and nothing else. It never leaves your Wi-Fi.");
   }

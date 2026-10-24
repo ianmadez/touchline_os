@@ -1577,6 +1577,87 @@ export function DebriefView({
             </div>
           </div>
 
+          {/*
+            The league picture at kick-off. Every number here is the manager reading the table,
+            because that is the only source that can exist: the save zeroes points and results for
+            every club in our division. Recording where the two sides stood is what makes it
+            possible to say anything about a rival at all.
+          */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-sub text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                League table at kick-off
+              </span>
+              <span className="font-sub text-[10px] uppercase text-slate-500 dark:text-slate-400">
+                logged by you · the save keeps no league table
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 max-md:overflow-visible max-md:whitespace-normal dark:text-slate-400">
+                  {clubName || "Your club"}
+                </span>
+                <div className="flex items-end gap-3">
+                  <div className="w-20">
+                    <TableNumberBox
+                      id="debrief-own-position"
+                      label="Position"
+                      ariaLabel={`${clubName || "Our club"} position`}
+                      value={ownPosition}
+                      onChange={setOwnPosition}
+                    />
+                  </div>
+                  <div className="w-24">
+                    <TableNumberBox
+                      id="debrief-own-points"
+                      label="Points"
+                      ariaLabel={`${clubName || "Our club"} points`}
+                      value={ownPoints}
+                      onChange={setOwnPoints}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 max-md:overflow-visible max-md:whitespace-normal dark:text-slate-400">
+                  {opponentLabel || "Opponent"}
+                </span>
+                <div className="flex items-end gap-3">
+                  <div className="w-20">
+                    <TableNumberBox
+                      id="debrief-opponent-position"
+                      label="Position"
+                      ariaLabel={`${opponentLabel || "Opponent"} position`}
+                      value={opponentPosition}
+                      onChange={setOpponentPosition}
+                    />
+                  </div>
+                  <div className="w-24">
+                    <TableNumberBox
+                      id="debrief-opponent-points"
+                      label="Points"
+                      ariaLabel={`${opponentLabel || "Opponent"} points`}
+                      value={opponentPoints}
+                      onChange={setOpponentPoints}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {pointsGap !== null && (
+              <p className="text-[11px] font-sub tabular-nums text-slate-500 dark:text-slate-400">
+                {pointsGap === 0
+                  ? "Level on points going in."
+                  : pointsGap > 0
+                    ? `${pointsGap} point${pointsGap === 1 ? "" : "s"} behind them going in.`
+                    : `${Math.abs(pointsGap)} point${Math.abs(pointsGap) === 1 ? "" : "s"} ahead of them going in.`}
+              </p>
+            )}
+          </div>
+
           {/* Scoreline & Venue Row */}
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
@@ -1725,6 +1806,268 @@ export function DebriefView({
             </div>
           )}
 
+          {/* Tactical Questions */}
+          <div className="space-y-4">
+            <div>
+              <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                <label className="font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  Tactical Plan Adherence (1 to 5)
+                </label>
+                <span className="shrink-0 font-sub text-xs font-bold tabular-nums text-[#E11D48] dark:text-[#FF8C7A]">
+                  {tacticalAdherence} / 5
+                </span>
+              </div>
+              <input
+                type="range"
+                min="1"
+                max="5"
+                step="1"
+                value={tacticalAdherence}
+                onChange={(e) => setTacticalAdherence(parseInt(e.target.value))}
+                className="w-full accent-[#E11D48] cursor-pointer"
+              />
+            </div>
+
+            {/* Match Focus Points */}
+            {activeAnomalies.length > 0 && (
+              <div className="p-4 rounded-xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 space-y-3 animate-fade-in-up">
+                <div className="flex items-center justify-between">
+                  <span className="font-sub text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                    Match Focus Points
+                  </span>
+                  <span className="font-sub text-[10px] uppercase font-bold text-amber-600 dark:text-amber-500">
+                    Based on recent form &amp; trends
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {activeAnomalies.map((anomaly) => (
+                    <div
+                      key={anomaly.id}
+                      className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-sub text-xs font-bold text-slate-900 dark:text-slate-100">
+                          {anomaly.title}
+                        </span>
+                        <span
+                          className={`text-[10px] font-sub font-bold uppercase px-2 py-0.5 rounded ${
+                            anomaly.tone === "rose"
+                              ? "bg-rose-500/15 text-rose-600 dark:text-rose-400"
+                              : anomaly.tone === "amber"
+                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                              : anomaly.tone === "emerald"
+                              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                              : "bg-sky-500/15 text-sky-600 dark:text-sky-400"
+                          }`}
+                        >
+                          {anomaly.badgeText}
+                        </span>
+                      </div>
+                      <p className="font-sans text-xs text-slate-600 dark:text-slate-300">
+                        {anomaly.question}
+                      </p>
+                      <textarea
+                        rows={2}
+                        placeholder={anomaly.placeholder}
+                        value={dynamicAnswers[anomaly.id] || ""}
+                        onChange={(e) =>
+                          setDynamicAnswers((prev) => ({
+                            ...prev,
+                            [anomaly.id]: e.target.value,
+                          }))
+                        }
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#E11D48]"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div data-tour="debrief-contributions" className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="font-sub text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Goals &amp; Assists
+                </span>
+                <span className="font-sub text-[10px] uppercase text-slate-500 dark:text-slate-400">
+                  logged by you · not in the save
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="flex-1 min-w-[10rem]">
+                  <label className="block text-[10px] font-sub font-bold uppercase text-slate-500 dark:text-slate-400 mb-1">
+                    Player
+                  </label>
+                  <select
+                    value={contributionPlayerId}
+                    onChange={(e) => setContributionPlayerId(e.target.value)}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#E11D48] cursor-pointer font-sub"
+                  >
+                    <option value="">-- Select Squad Member --</option>
+                    {players.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.primaryPosition})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="w-16">
+                  <label className="block text-[10px] font-sub font-bold uppercase text-slate-500 dark:text-slate-400 mb-1">
+                    Goals
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="10"
+                    value={contributionGoals}
+                    onChange={(e) => setContributionGoals(parseInt(e.target.value) || 0)}
+                    className="w-full h-9 text-center font-heading text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:border-[#E11D48] focus:outline-none"
+                  />
+                </div>
+
+                <div className="w-16">
+                  <label className="mb-1 block text-[10px] font-sub font-bold uppercase text-slate-500 dark:text-slate-400">
+                    Assists <span className="font-normal normal-case">(Optional)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="10"
+                    value={contributionAssists}
+                    onChange={(e) => setContributionAssists(parseInt(e.target.value) || 0)}
+                    className="w-full h-9 text-center font-heading text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:border-[#E11D48] focus:outline-none"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={addContribution}
+                  disabled={
+                    !contributionPlayerId || (contributionGoals === 0 && contributionAssists === 0)
+                  }
+                  className="h-10 px-4 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 font-sub text-[11px] font-bold uppercase cursor-pointer transition-[background-color,transform] duration-200 hover:bg-[#E11D48] dark:hover:bg-[#FF8C7A] active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
+                >
+                  Add
+                </button>
+              </div>
+
+              {contributions.length > 0 && (
+                <ul className="space-y-1.5">
+                  {contributions.map((entry) => (
+                    <li
+                      key={entry.playerId}
+                      className="flex items-center justify-between gap-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-3 py-2"
+                    >
+                      <span className="text-xs font-sub font-bold text-slate-800 dark:text-slate-100">
+                        {entry.playerName}
+                      </span>
+                      <span className="flex items-center gap-2 text-[11px] font-sub font-bold text-slate-600 dark:text-slate-300">
+                        {entry.goals > 0 && <span>{entry.goals} goal{entry.goals === 1 ? "" : "s"}</span>}
+                        {entry.assists > 0 && (
+                          <span>{entry.assists} assist{entry.assists === 1 ? "" : "s"}</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeContribution(entry.playerId)}
+                          aria-label={`Remove ${entry.playerName}`}
+                          title={`Remove ${entry.playerName}`}
+                          className="-mr-2 inline-flex min-h-10 min-w-10 items-center justify-center text-slate-400 hover:text-[#E11D48] cursor-pointer transition-colors active:scale-[0.96]"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <p className="text-[11px] font-sub text-slate-500 dark:text-slate-400 tabular-nums">
+                {goalsLogged === 0 && ourScore === 0
+                  ? "No goals to account for."
+                  : goalsUnlogged === 0
+                    ? `${goalsLogged} of ${ourScore} goals accounted for${
+                        assistsLogged > 0
+                          ? ` · ${assistsLogged} assist${assistsLogged === 1 ? "" : "s"}`
+                          : ""
+                      }.`
+                    : `${goalsLogged} of ${ourScore} goals accounted for · ${goalsUnlogged} still unassigned.`}
+              </p>
+            </div>
+
+            <div data-tour="debrief-standouts">
+              <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
+                <label
+                  className="block font-sub text-xs font-bold uppercase tracking-wider text-slate-700 max-md:flex max-md:items-center max-md:gap-1 dark:text-slate-300"
+                  title="(can select more than one)"
+                >
+                  Standout Performers
+                  <Hint label="standout performers">You can select more than one.</Hint>
+                </label>
+                <div className="flex items-center gap-2">
+                  {standoutPlayerIds.length > 0 && (
+                    <span className="font-sub text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">
+                      {standoutPlayerIds.length} selected
+                    </span>
+                  )}
+                  <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 dark:border-slate-800 p-0.5">
+                    {([["POSITION", "Position"], ["PICKED", "My picks"]] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setStandoutSort(value)}
+                        aria-pressed={standoutSort === value}
+                        title={
+                          value === "POSITION"
+                            ? "Order chips goalkeeper to striker"
+                            : "Order chips by the order you picked them"
+                        }
+                        className={`px-2 py-0.5 rounded font-sub text-[10px] font-bold uppercase cursor-pointer transition-colors ${
+                          standoutSort === value
+                            ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900"
+                            : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <p className="mb-1.5 text-[10px] font-sub text-slate-500 dark:text-slate-400">
+                (can select more than one)
+              </p>
+              <div className="max-h-44 overflow-y-auto overscroll-contain rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-2 flex flex-wrap gap-1.5">
+                {players.length === 0 ? (
+                  <p className="text-xs text-slate-500 dark:text-slate-400 italic p-2">
+                    No squad synced yet - sync a save to pick performers.
+                  </p>
+                ) : (
+                  orderedStandoutPlayers.map((p) => {
+                    const selected = standoutPlayerIds.includes(p.id);
+                    return (
+                      <button
+                        type="button"
+                        key={p.id}
+                        onClick={() => toggleStandout(p.id)}
+                        aria-pressed={selected}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-sub font-bold cursor-pointer border transition-colors ${
+                          selected
+                            ? "bg-amber-400 text-slate-950 border-amber-400"
+                            : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-amber-400 hover:text-amber-600 dark:hover:text-amber-400"
+                        }`}
+                      >
+                        {p.name}
+                        <span className="ml-1 font-normal opacity-70">{p.primaryPosition}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
           {/*
             What you saw after the match. Entirely optional, and entirely yours: the save holds no match
             events at all, so this is the only possible source. The figures under the boxes are worked out
@@ -1843,349 +2186,6 @@ export function DebriefView({
                   : "This expected goals is an estimate from the counts on an older debrief, which was logged before the game's own figure had a box here."}
             </p>
           </div>
-
-          {/*
-            The league picture at kick-off. Every number here is the manager reading the table,
-            because that is the only source that can exist: the save zeroes points and results for
-            every club in our division. Recording where the two sides stood is what makes it
-            possible to say anything about a rival at all.
-          */}
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-sub text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                League table at kick-off
-              </span>
-              <span className="font-sub text-[10px] uppercase text-slate-500 dark:text-slate-400">
-                logged by you · the save keeps no league table
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 max-md:overflow-visible max-md:whitespace-normal dark:text-slate-400">
-                  {clubName || "Your club"}
-                </span>
-                <div className="flex items-end gap-3">
-                  <div className="w-20">
-                    <TableNumberBox
-                      id="debrief-own-position"
-                      label="Position"
-                      ariaLabel={`${clubName || "Our club"} position`}
-                      value={ownPosition}
-                      onChange={setOwnPosition}
-                    />
-                  </div>
-                  <div className="w-24">
-                    <TableNumberBox
-                      id="debrief-own-points"
-                      label="Points"
-                      ariaLabel={`${clubName || "Our club"} points`}
-                      value={ownPoints}
-                      onChange={setOwnPoints}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <span className="block truncate text-[10px] font-sub font-bold uppercase tracking-wider text-slate-500 max-md:overflow-visible max-md:whitespace-normal dark:text-slate-400">
-                  {opponentLabel || "Opponent"}
-                </span>
-                <div className="flex items-end gap-3">
-                  <div className="w-20">
-                    <TableNumberBox
-                      id="debrief-opponent-position"
-                      label="Position"
-                      ariaLabel={`${opponentLabel || "Opponent"} position`}
-                      value={opponentPosition}
-                      onChange={setOpponentPosition}
-                    />
-                  </div>
-                  <div className="w-24">
-                    <TableNumberBox
-                      id="debrief-opponent-points"
-                      label="Points"
-                      ariaLabel={`${opponentLabel || "Opponent"} points`}
-                      value={opponentPoints}
-                      onChange={setOpponentPoints}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {pointsGap !== null && (
-              <p className="text-[11px] font-sub tabular-nums text-slate-500 dark:text-slate-400">
-                {pointsGap === 0
-                  ? "Level on points going in."
-                  : pointsGap > 0
-                    ? `${pointsGap} point${pointsGap === 1 ? "" : "s"} behind them going in.`
-                    : `${Math.abs(pointsGap)} point${Math.abs(pointsGap) === 1 ? "" : "s"} ahead of them going in.`}
-              </p>
-            )}
-          </div>
-
-          {/* Tactical Questions */}
-          <div className="space-y-4">
-            {/* Match Focus Points */}
-            {activeAnomalies.length > 0 && (
-              <div className="p-4 rounded-xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 space-y-3 animate-fade-in-up">
-                <div className="flex items-center justify-between">
-                  <span className="font-sub text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
-                    Match Focus Points
-                  </span>
-                  <span className="font-sub text-[10px] uppercase font-bold text-amber-600 dark:text-amber-500">
-                    Based on recent form &amp; trends
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  {activeAnomalies.map((anomaly) => (
-                    <div
-                      key={anomaly.id}
-                      className="p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-2"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-sub text-xs font-bold text-slate-900 dark:text-slate-100">
-                          {anomaly.title}
-                        </span>
-                        <span
-                          className={`text-[10px] font-sub font-bold uppercase px-2 py-0.5 rounded ${
-                            anomaly.tone === "rose"
-                              ? "bg-rose-500/15 text-rose-600 dark:text-rose-400"
-                              : anomaly.tone === "amber"
-                              ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                              : anomaly.tone === "emerald"
-                              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                              : "bg-sky-500/15 text-sky-600 dark:text-sky-400"
-                          }`}
-                        >
-                          {anomaly.badgeText}
-                        </span>
-                      </div>
-                      <p className="font-sans text-xs text-slate-600 dark:text-slate-300">
-                        {anomaly.question}
-                      </p>
-                      <textarea
-                        rows={2}
-                        placeholder={anomaly.placeholder}
-                        value={dynamicAnswers[anomaly.id] || ""}
-                        onChange={(e) =>
-                          setDynamicAnswers((prev) => ({
-                            ...prev,
-                            [anomaly.id]: e.target.value,
-                          }))
-                        }
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#E11D48]"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div>
-              <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-                <label className="font-sub text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Tactical Plan Adherence (1 to 5)
-                </label>
-                <span className="shrink-0 font-sub text-xs font-bold tabular-nums text-[#E11D48] dark:text-[#FF8C7A]">
-                  {tacticalAdherence} / 5
-                </span>
-              </div>
-              <input
-                type="range"
-                min="1"
-                max="5"
-                step="1"
-                value={tacticalAdherence}
-                onChange={(e) => setTacticalAdherence(parseInt(e.target.value))}
-                className="w-full accent-[#E11D48] cursor-pointer"
-              />
-            </div>
-
-            <div data-tour="debrief-standouts">
-              <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
-                <label
-                  className="block font-sub text-xs font-bold uppercase tracking-wider text-slate-700 max-md:flex max-md:items-center max-md:gap-1 dark:text-slate-300"
-                  title="(can select more than one)"
-                >
-                  Standout Performers
-                  <Hint label="standout performers">You can select more than one.</Hint>
-                </label>
-                <div className="flex items-center gap-2">
-                  {standoutPlayerIds.length > 0 && (
-                    <span className="font-sub text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">
-                      {standoutPlayerIds.length} selected
-                    </span>
-                  )}
-                  <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 dark:border-slate-800 p-0.5">
-                    {([["POSITION", "Position"], ["PICKED", "My picks"]] as const).map(([value, label]) => (
-                      <button
-                        key={value}
-                        type="button"
-                        onClick={() => setStandoutSort(value)}
-                        aria-pressed={standoutSort === value}
-                        title={
-                          value === "POSITION"
-                            ? "Order chips goalkeeper to striker"
-                            : "Order chips by the order you picked them"
-                        }
-                        className={`px-2 py-0.5 rounded font-sub text-[10px] font-bold uppercase cursor-pointer transition-colors ${
-                          standoutSort === value
-                            ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900"
-                            : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-100"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <p className="mb-1.5 text-[10px] font-sub text-slate-500 dark:text-slate-400">
-                (can select more than one)
-              </p>
-              <div className="max-h-44 overflow-y-auto overscroll-contain rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 p-2 flex flex-wrap gap-1.5">
-                {players.length === 0 ? (
-                  <p className="text-xs text-slate-500 dark:text-slate-400 italic p-2">
-                    No squad synced yet - sync a save to pick performers.
-                  </p>
-                ) : (
-                  orderedStandoutPlayers.map((p) => {
-                    const selected = standoutPlayerIds.includes(p.id);
-                    return (
-                      <button
-                        type="button"
-                        key={p.id}
-                        onClick={() => toggleStandout(p.id)}
-                        aria-pressed={selected}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-sub font-bold cursor-pointer border transition-colors ${
-                          selected
-                            ? "bg-amber-400 text-slate-950 border-amber-400"
-                            : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-amber-400 hover:text-amber-600 dark:hover:text-amber-400"
-                        }`}
-                      >
-                        {p.name}
-                        <span className="ml-1 font-normal opacity-70">{p.primaryPosition}</span>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-
-            <div data-tour="debrief-contributions" className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="font-sub text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                  Goals &amp; Assists
-                </span>
-                <span className="font-sub text-[10px] uppercase text-slate-500 dark:text-slate-400">
-                  logged by you · not in the save
-                </span>
-              </div>
-
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="flex-1 min-w-[10rem]">
-                  <label className="block text-[10px] font-sub font-bold uppercase text-slate-500 dark:text-slate-400 mb-1">
-                    Player
-                  </label>
-                  <select
-                    value={contributionPlayerId}
-                    onChange={(e) => setContributionPlayerId(e.target.value)}
-                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#E11D48] cursor-pointer font-sub"
-                  >
-                    <option value="">-- Select Squad Member --</option>
-                    {players.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.primaryPosition})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="w-16">
-                  <label className="block text-[10px] font-sub font-bold uppercase text-slate-500 dark:text-slate-400 mb-1">
-                    Goals
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="10"
-                    value={contributionGoals}
-                    onChange={(e) => setContributionGoals(parseInt(e.target.value) || 0)}
-                    className="w-full h-9 text-center font-heading text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:border-[#E11D48] focus:outline-none"
-                  />
-                </div>
-
-                <div className="w-16">
-                  <label className="mb-1 block text-[10px] font-sub font-bold uppercase text-slate-500 dark:text-slate-400">
-                    Assists <span className="font-normal normal-case">(Optional)</span>
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="10"
-                    value={contributionAssists}
-                    onChange={(e) => setContributionAssists(parseInt(e.target.value) || 0)}
-                    className="w-full h-9 text-center font-heading text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg focus:border-[#E11D48] focus:outline-none"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={addContribution}
-                  disabled={
-                    !contributionPlayerId || (contributionGoals === 0 && contributionAssists === 0)
-                  }
-                  className="h-10 px-4 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 font-sub text-[11px] font-bold uppercase cursor-pointer transition-[background-color,transform] duration-200 hover:bg-[#E11D48] dark:hover:bg-[#FF8C7A] active:scale-[0.96] disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
-                >
-                  Add
-                </button>
-              </div>
-
-              {contributions.length > 0 && (
-                <ul className="space-y-1.5">
-                  {contributions.map((entry) => (
-                    <li
-                      key={entry.playerId}
-                      className="flex items-center justify-between gap-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-3 py-2"
-                    >
-                      <span className="text-xs font-sub font-bold text-slate-800 dark:text-slate-100">
-                        {entry.playerName}
-                      </span>
-                      <span className="flex items-center gap-2 text-[11px] font-sub font-bold text-slate-600 dark:text-slate-300">
-                        {entry.goals > 0 && <span>{entry.goals} goal{entry.goals === 1 ? "" : "s"}</span>}
-                        {entry.assists > 0 && (
-                          <span>{entry.assists} assist{entry.assists === 1 ? "" : "s"}</span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => removeContribution(entry.playerId)}
-                          aria-label={`Remove ${entry.playerName}`}
-                          title={`Remove ${entry.playerName}`}
-                          className="-mr-2 inline-flex min-h-10 min-w-10 items-center justify-center text-slate-400 hover:text-[#E11D48] cursor-pointer transition-colors active:scale-[0.96]"
-                        >
-                          ✕
-                        </button>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <p className="text-[11px] font-sub text-slate-500 dark:text-slate-400 tabular-nums">
-                {goalsLogged === 0 && ourScore === 0
-                  ? "No goals to account for."
-                  : goalsUnlogged === 0
-                    ? `${goalsLogged} of ${ourScore} goals accounted for${
-                        assistsLogged > 0
-                          ? ` · ${assistsLogged} assist${assistsLogged === 1 ? "" : "s"}`
-                          : ""
-                      }.`
-                    : `${goalsLogged} of ${ourScore} goals accounted for · ${goalsUnlogged} still unassigned.`}
-              </p>
-            </div>
 
                 <div data-tour="debrief-notes">
                   <label
