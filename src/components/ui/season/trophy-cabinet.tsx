@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { apiFetch } from "@/lib/platform/api-client";
+import { TOGGLE_BOX_CLASS } from "@/components/ui/sub-tabs";
 import { ordinal } from "@/lib/ui/format";
 
 /**
@@ -409,7 +410,7 @@ export function TrophyCabinet({ careerId }: { careerId: string }) {
           </p>
         </div>
 
-        <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1.5 dark:border-slate-800 dark:bg-slate-950">
+        <div className={`flex items-center gap-1.5 rounded-xl ${TOGGLE_BOX_CLASS} p-1.5`}>
           {[
             { id: false, label: "My division" },
             { id: true, label: "Whole country" },

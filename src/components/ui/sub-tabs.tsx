@@ -42,6 +42,22 @@ interface SubTabsProps<T extends string> {
  * All of it is `max-md`: at 768 and above the strip keeps wrapping exactly as it did, which is
  * what the desktop screenshots are measured against.
  */
+/**
+ * The box an inner tab strip or a small segmented toggle sits in.
+ *
+ * Two layers in both themes: a thin outline and a fill that is not the card's own. The dark half of that
+ * lives in `globals.css` as `.tl-toggle-box`, because the dark overrides there are `!important` and would
+ * win over any `dark:` utility written here.
+ *
+ * Shared rather than repeated so the strip in Debrief, the one in the trophy cabinet and the small
+ * toggles beside a form cannot drift apart again.
+ */
+export const TOGGLE_BOX_CLASS = "tl-toggle-box border border-slate-200 bg-slate-100";
+
+/** The same two layers, for the fills that fade a scrolling track at its edges. */
+const TOGGLE_BOX_FADE = "from-slate-100 dark:from-slate-800";
+const TOGGLE_BOX_FADE_SOFT = "via-slate-100/90 dark:via-slate-800/90";
+
 export function TabStrip({
   children,
   className = "",
@@ -101,7 +117,7 @@ export function TabStrip({
   return (
     <div
       data-tour={tour}
-      className={`relative min-w-0 max-w-full rounded-xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-950 ${className}`}
+      className={`relative min-w-0 max-w-full rounded-xl ${TOGGLE_BOX_CLASS} ${className}`}
     >
       <div
         ref={track}
@@ -115,13 +131,13 @@ export function TabStrip({
       {edges.left && (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 left-0 w-6 rounded-l-xl bg-gradient-to-r from-slate-100 to-transparent md:hidden dark:from-slate-950"
+          className={`pointer-events-none absolute inset-y-0 left-0 w-6 rounded-l-xl bg-gradient-to-r ${TOGGLE_BOX_FADE} to-transparent md:hidden`}
         />
       )}
       {edges.right && (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 right-0 flex w-9 items-center justify-end rounded-r-xl bg-gradient-to-l from-slate-100 via-slate-100/90 to-transparent pr-1.5 text-slate-400 md:hidden dark:from-slate-950 dark:via-slate-950/90 dark:text-slate-500"
+          className={`pointer-events-none absolute inset-y-0 right-0 flex w-9 items-center justify-end rounded-r-xl bg-gradient-to-l ${TOGGLE_BOX_FADE} ${TOGGLE_BOX_FADE_SOFT} to-transparent pr-1.5 text-slate-400 md:hidden dark:text-slate-400`}
         >
           <Chevron />
         </span>
@@ -129,7 +145,7 @@ export function TabStrip({
       {edges.left && !edges.right && (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 right-0 flex w-8 items-center justify-end rounded-r-xl bg-gradient-to-l from-slate-100 to-transparent pr-1.5 text-slate-400 md:hidden dark:from-slate-950 dark:text-slate-500"
+          className={`pointer-events-none absolute inset-y-0 right-0 flex w-8 items-center justify-end rounded-r-xl bg-gradient-to-l ${TOGGLE_BOX_FADE} to-transparent pr-1.5 text-slate-400 md:hidden dark:text-slate-400`}
         >
           <Chevron flipped />
         </span>

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { SubTabs } from "@/components/ui/sub-tabs";
+import { SubTabs, TOGGLE_BOX_CLASS } from "@/components/ui/sub-tabs";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Hint } from "@/components/ui/hint";
 import { portal, useScrollLock } from "@/components/ui/portal";
@@ -102,6 +102,18 @@ type DebriefSubTab = "MATCH" | "GROUP" | "REVIEW";
  * itself: the pipeline is behind a further import inside the pane.
  */
 type StatsPane = "MANUAL" | "SCREENSHOT";
+
+/**
+ * One action on a saved debrief's row: Open, Edit, Delete, Keep.
+ *
+ * Sized to sit three of them beside the star and the score pill without wrapping onto a second line,
+ * which is what used to happen to Delete. The depth comes from a box shadow rather than a fill: the row
+ * sits on a tinted card, so a raised edge reads as a control at rest and a deeper shadow on hover reads
+ * as the one about to be pressed. Deliberately `data-compact`, because the app-wide 44px touch floor
+ * would undo the whole point on a phone.
+ */
+const DEBRIEF_ROW_ACTION =
+  "inline-flex min-h-8 items-center whitespace-nowrap rounded-lg px-2 text-[9px] uppercase tracking-wider text-slate-400 shadow-[0_1px_2px_rgba(15,23,42,0.10),0_1px_0_rgba(255,255,255,0.7)] transition-[background-color,color,box-shadow] duration-200 ease-[var(--ease-brand)] hover:shadow-[0_3px_8px_rgba(15,23,42,0.22)] dark:text-slate-500 dark:shadow-[0_1px_2px_rgba(0,0,0,0.45),0_1px_0_rgba(255,255,255,0.04)] dark:hover:shadow-[0_3px_8px_rgba(0,0,0,0.65)] cursor-pointer";
 
 const STATS_PANES: ReadonlyArray<{ id: StatsPane; label: string }> = [
   { id: "MANUAL", label: "Manual" },
@@ -2012,7 +2024,7 @@ export function DebriefView({
                       {standoutPlayerIds.length} selected
                     </span>
                   )}
-                  <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 dark:border-slate-800 p-0.5">
+                  <div className={`flex items-center gap-0.5 rounded-lg ${TOGGLE_BOX_CLASS} p-0.5`}>
                     {([["POSITION", "Position"], ["PICKED", "My picks"]] as const).map(([value, label]) => (
                       <button
                         key={value}
@@ -2330,7 +2342,7 @@ export function DebriefView({
                               : `Star the debrief against ${payload.opponent || "an unnamed opponent"}`
                           }
                           title={starredIds.includes(evt.id) ? "Unstar this match" : "Keep this match as memorable"}
-                          className={`inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg px-2 text-sm transition-colors duration-200 ease-[var(--ease-brand)] cursor-pointer ${
+                            className={`inline-flex min-h-8 min-w-8 items-center justify-center rounded-lg px-1.5 text-sm transition-[background-color,color,box-shadow] duration-200 ease-[var(--ease-brand)] cursor-pointer ${
                             starredIds.includes(evt.id)
                               ? "text-[#E11D48] hover:bg-[#E11D48]/10 dark:text-[#FF8C7A]"
                               : "text-slate-300 hover:bg-slate-200 hover:text-slate-600 dark:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-300"
@@ -2338,7 +2350,7 @@ export function DebriefView({
                         >
                           <span aria-hidden="true">{starredIds.includes(evt.id) ? "★" : "☆"}</span>
                         </button>
-                        <span className={`rounded-md px-2 py-0.5 text-[10px] tabular-nums ${
+                          <span className={`rounded-md px-1.5 py-0.5 text-[10px] tabular-nums ${
                           payload.result === "WIN" ? "bg-emerald-500/15 text-emerald-600" :
                           payload.result === "LOSS" ? "bg-rose-500/15 text-rose-600" : "bg-amber-500/15 text-amber-600"
                         }`}>
@@ -2348,7 +2360,8 @@ export function DebriefView({
                           type="button"
                           onClick={() => void openDebriefDetail(evt.id)}
                           aria-label={`Open the full record of the match against ${payload.opponent || "an unnamed opponent"}`}
-                          className="inline-flex min-h-10 items-center rounded-lg px-2.5 text-[10px] uppercase tracking-wider text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-800 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-100 cursor-pointer"
+                          data-compact
+                          className={`${DEBRIEF_ROW_ACTION} hover:text-slate-800 dark:hover:text-slate-100`}
                         >
                           Open
                         </button>
@@ -2356,7 +2369,8 @@ export function DebriefView({
                           type="button"
                           onClick={() => startEditDebrief(evt)}
                           aria-label={`Edit the debrief against ${payload.opponent || "an unnamed opponent"}`}
-                          className="inline-flex min-h-10 items-center rounded-lg px-2.5 text-[10px] uppercase tracking-wider text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-800 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-100 cursor-pointer"
+                          data-compact
+                          className={`${DEBRIEF_ROW_ACTION} hover:text-slate-800 dark:hover:text-slate-100`}
                         >
                           {editingId === evt.id ? "Editing" : "Edit"}
                         </button>
@@ -2366,14 +2380,16 @@ export function DebriefView({
                               type="button"
                               onClick={() => void deleteDebrief(evt.id)}
                               disabled={deletingId === evt.id}
-                              className="inline-flex min-h-10 items-center rounded-lg bg-rose-600 px-2.5 text-[10px] uppercase tracking-wider text-white transition-[background-color,transform] duration-200 hover:bg-rose-500 active:scale-[0.96] disabled:opacity-50 disabled:active:scale-100 cursor-pointer"
+                              data-compact
+                              className="inline-flex min-h-8 items-center whitespace-nowrap rounded-lg bg-rose-600 px-2 text-[9px] uppercase tracking-wider text-white shadow-[0_1px_2px_rgba(15,23,42,0.12)] transition-[background-color,box-shadow,transform] duration-200 hover:bg-rose-500 hover:shadow-[0_3px_8px_rgba(15,23,42,0.22)] active:scale-[0.96] disabled:opacity-50 disabled:active:scale-100 cursor-pointer"
                             >
                               {deletingId === evt.id ? "Deleting…" : "Confirm"}
                             </button>
                             <button
                               type="button"
                               onClick={() => setConfirmDeleteId(null)}
-                              className="inline-flex min-h-10 items-center rounded-lg px-2.5 text-[10px] uppercase tracking-wider text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100 cursor-pointer"
+                              data-compact
+                              className={`${DEBRIEF_ROW_ACTION} hover:text-slate-800 dark:hover:text-slate-100`}
                             >
                               Keep
                             </button>
@@ -2383,7 +2399,8 @@ export function DebriefView({
                             type="button"
                             onClick={() => setConfirmDeleteId(evt.id)}
                             aria-label={`Delete the debrief against ${payload.opponent || "an unnamed opponent"}`}
-                            className="inline-flex min-h-10 items-center rounded-lg px-2.5 text-[10px] uppercase tracking-wider text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 dark:text-slate-500 dark:hover:bg-rose-500/10 dark:hover:text-rose-400 cursor-pointer"
+                            data-compact
+                            className={`${DEBRIEF_ROW_ACTION} hover:text-rose-600 dark:hover:text-rose-400`}
                           >
                             Delete
                           </button>

@@ -361,6 +361,27 @@ figcaption {
   background-color: #1e293b !important;
 }
 
+/*
+  Inner tab strips and segmented toggles.
+
+  These boxes are built the same way in both themes: a `border-slate-200` outline around a `bg-slate-100`
+  fill, which gives the light theme two layers - a hairline edge and a tint that is not the card's own.
+  The dark overrides above collapse both of those to `#1e293b`, so the outline and the fill became the
+  same colour and the box disappeared, leaving a lone red pill floating on the card. That is what a
+  toggle looked like in dark mode.
+
+  Fixed here rather than by giving each strip its own dark colours, because the collision was between two
+  rules in this file: a component that wrote `dark:border-slate-700` could not win against an `!important`
+  declaration, so the same bug would come back on the next strip anyone added.
+
+  #334155 on #1e293b inside a #0f172a card is three distinguishable steps, which is what the light theme
+  gets from white on #f1f5f9 inside #ffffff.
+*/
+.dark .tl-toggle-box {
+  border-color: #334155 !important;
+  background-color: #1e293b !important;
+}
+
 /* Keep light-on-dark hover states bright even when the base utility is overridden above.
    Gated to a real pointer: on touch a tapped element keeps :hover until the next tap, which would
    leave text stuck white on the pale surface it was hovering over. */
