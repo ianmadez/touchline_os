@@ -203,6 +203,20 @@ export function clearCareerLedger(careerId: string): void {
   storage.db.run(sql`DELETE FROM _sync_bulk_dirty WHERE career_id = ${careerId}`);
 }
 
+/**
+ * Drops every "last content hash applied" record.
+ *
+ * Those records answer one question: has this table been applied at exactly this content? They are only
+ * ever written by `applyBatch`, and only ever true while nothing else has written the table since. An
+ * import through the transfer service replaces the rows without touching them, so after a reseed they
+ * describe a state that no longer exists - and a push whose hash happened to match would be skipped for
+ * a table the replica actually needed. Forgetting them costs one re-send of each block, which is the
+ * same rows it already has.
+ */
+export function forgetBulkHashes(): void {
+  storage.db.run(sql`DELETE FROM _sync_meta WHERE key LIKE 'bulk:%'`);
+}
+
 /** A value in the ledger's own key-value table: applied revision, last hash, and so on. */
 export function readMeta(key: string): string | null {
   const rows = storage.db.all<{ value: string }>(sql`SELECT value FROM _sync_meta WHERE key = ${key}`);

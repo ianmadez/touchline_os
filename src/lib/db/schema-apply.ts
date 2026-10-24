@@ -80,7 +80,12 @@ function readNumber(sqlite: SchemaTarget, sql: string): number | null {
   } catch {
     // A driver that cannot answer returns null rather than throwing into a caller that cannot act on it.
   }
-  return null;
+
+  // Last, and this is the one that works on both: a prepared statement with `raw()` for better-sqlite3,
+  // the `values` shape for sql.js. Reaching this at all means the branches above found nothing, which on
+  // better-sqlite3 is every plain SELECT.
+  const rows = readRows(sqlite, sql);
+  return rows.length > 0 ? asNumber(rows[0][0]) : null;
 }
 
 /**
@@ -137,6 +142,117 @@ export function schemaVersion(sqlite: SchemaTarget): number {
   return readNumber(sqlite, "PRAGMA schema_version") ?? -1;
 }
 
+/** Columns are: id, seq, table, from, to, on_update, on_delete, match. */
+interface ForeignKeyRow {
+  table: string;
+  from: string;
+  to: string;
+  on_delete: string;
+}
+
+/**
+ * Every row of a query, as arrays, whichever driver is underneath.
+ *
+ * The same trap as `readNumber`, one level worse: `better-sqlite3.exec` returns THE DATABASE, so a
+ * caller that only understands the `sql.js` shape reads zero rows and believes there is nothing to do.
+ * That is exactly how the repair below first shipped doing nothing at all on the PC and on any test
+ * that used it. `raw()` is what makes better-sqlite3 hand back arrays instead of objects.
+ */
+function readRows(sqlite: SchemaTarget, sql: string): unknown[][] {
+  try {
+    const prepare = (sqlite as {
+      prepare?: (statement: string) => { raw?: () => { all?: () => unknown[] } };
+    }).prepare;
+    if (typeof prepare === "function") {
+      const raw = prepare.call(sqlite, sql)?.raw?.();
+      if (raw && typeof raw.all === "function") {
+        const rows = raw.all();
+        if (Array.isArray(rows)) return rows as unknown[][];
+      }
+    }
+  } catch {
+    // Fall through to the other shape.
+  }
+
+  try {
+    const result = sqlite.exec(sql);
+    if (Array.isArray(result) && result.length > 0) {
+      const values = (result[0] as { values?: unknown[][] }).values;
+      if (Array.isArray(values)) return values;
+    }
+  } catch {
+    // A driver that cannot answer leaves the caller with no rows.
+  }
+  return [];
+}
+
+/**
+ * Columns whose parent row is gone.
+ *
+ * THE BUG THIS EXISTS TO PREVENT, in full, because it took a bridge that refused every write to find.
+ *
+ * A foreign key declared `ON DELETE SET NULL` is a promise SQLite keeps only when
+ * `PRAGMA foreign_keys` is ON. The browser port turns it on in `applySchema`, but it did not always:
+ * databases written by an earlier build ran with enforcement off, so deleting a career snapshot left
+ * every `career_events` row that pointed at it holding a dead id. Nothing complained, because nothing
+ * was checking.
+ *
+ * The replica on the PC checks. Its `career_events` insert pointed at a snapshot it did not have, the
+ * whole batch rolled back, the page retried the same batch every half second, and the drift check's
+ * repair could not help either: the package it sent carried the same dead ids, so the import failed in
+ * exactly the same way. One unenforced pragma, a permanently stuck sync, and an error log with no way
+ * to see any of it.
+ *
+ * So the repair is here, run on every open by both drivers: for every foreign key whose declared action
+ * is `SET NULL`, clear a reference that no longer resolves. That is precisely what SQLite would have
+ * done at the moment the parent was deleted, so this is not a new decision about the data, it is the
+ * old one applied late. It is idempotent, and a database that is already consistent is not touched.
+ *
+ * Deliberately restricted to `SET NULL`. A `CASCADE` reference that dangles means a row should have been
+ * deleted, and deleting a manager's rows on the strength of a guess is not this function's business: it
+ * is left alone so the problem surfaces where it can be seen.
+ */
+export function repairDanglingReferences(sqlite: SchemaTarget): number {
+  let repaired = 0;
+
+  const tables = readRows(
+    sqlite,
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+  ).map((row) => String(row[0]));
+
+  for (const table of tables) {
+    const keys: ForeignKeyRow[] = readRows(sqlite, `PRAGMA foreign_key_list(${JSON.stringify(table)})`).map(
+      (row) => ({
+        table: String(row[2]),
+        from: String(row[3]),
+        to: String(row[4]),
+        on_delete: String(row[6] ?? "").toUpperCase(),
+      })
+    );
+
+    for (const key of keys) {
+      if (key.on_delete !== "SET NULL") continue;
+      const dangling = `SELECT COUNT(*) FROM ${table}
+                         WHERE ${key.from} IS NOT NULL
+                           AND ${key.from} NOT IN (SELECT ${key.to} FROM ${key.table} WHERE ${key.to} IS NOT NULL)`;
+      try {
+        const count = readNumber(sqlite, dangling) ?? 0;
+        if (count === 0) continue;
+        sqlite.exec(
+          `UPDATE ${table} SET ${key.from} = NULL
+            WHERE ${key.from} IS NOT NULL
+              AND ${key.from} NOT IN (SELECT ${key.to} FROM ${key.table} WHERE ${key.to} IS NOT NULL)`
+        );
+        repaired += count;
+      } catch {
+        // A table that cannot be repaired here is left exactly as it was.
+      }
+    }
+  }
+
+  return repaired;
+}
+
 /**
  * Creates what is missing and migrates what is already there.
  *
@@ -182,6 +298,11 @@ export function applySchema(sqlite: SchemaTarget): boolean {
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`
     );
   }
+
+  // Last, because it depends on every table above existing. A database that was written while foreign
+  // keys went unenforced can hold references to rows that are gone, and the replica on the PC refuses
+  // every one of them. See `repairDanglingReferences`.
+  repairDanglingReferences(sqlite);
 
   return schemaVersion(sqlite) !== before;
 }

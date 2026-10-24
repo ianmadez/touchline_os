@@ -30,16 +30,18 @@ import { storage } from "../src/lib/platform/storage";
 import {
   buildTransferPackage,
   importTransferPackage,
+  incompletePackageReason,
   TransferPackageError,
   type CareerTransferPackage,
 } from "../src/lib/services/career-transfer-service";
-import { applyBatch, toDelta } from "../src/lib/sync/replication/apply";
+import { applyBatch, ReplicationApplyError, toDelta } from "../src/lib/sync/replication/apply";
 import {
   ackChanges,
   clearBulkDirty,
   clearCareerLedger,
   deltasFor,
   dirtyBulkTables,
+  forgetBulkHashes,
   pendingChanges,
   readTable,
   rowCounts,
@@ -365,7 +367,20 @@ function handlePush(body: Record<string, unknown>): { status: number; body: unkn
   );
   const blocks = bulk.filter((block) => block && tableClass(block.table) === "bulk");
 
-  applyBatch(careerId, fresh.map(toDelta), blocks);
+  try {
+    applyBatch(careerId, fresh.map(toDelta), blocks);
+  } catch (error) {
+    if (error instanceof ReplicationApplyError) {
+      // A refusal the page can act on, rather than a 500 it retries forever. `unappliable` means the two
+      // copies disagree in a way no individual row can fix, so the page replaces this one from its own
+      // copy - which is the model's answer for every disagreement.
+      return {
+        status: 409,
+        body: { code: "unappliable", revision, detail: error.detail },
+      };
+    }
+    throw error;
+  }
 
   let latest = revision;
   for (const delta of fresh) {
@@ -487,6 +502,15 @@ async function handleReseed(body: Record<string, unknown>): Promise<{ status: nu
   const pkg = body.package;
   if (!isPackage(pkg)) return { status: 400, body: { error: "That is not a career package." } };
 
+  // Checked BEFORE the snapshot is taken. The import refuses a package that carries fewer tables than a
+  // career is made of, and it has to refuse it: replacing with an incomplete package would delete the
+  // tables the package did not carry. But the refusal used to happen after `VACUUM INTO` had written a
+  // full copy of the database, and nothing removed it, so a page whose reseed could never succeed wrote
+  // ninety megabytes a minute until the disk filled. A refusal that costs nothing is the only kind that
+  // can be retried safely.
+  const refusal = packageRefusal(pkg);
+  if (refusal) return { status: 400, body: { error: refusal } };
+
   const backup = backupBeforeSync(careerId, "pre-reseed");
   if (!backup) {
     return {
@@ -506,9 +530,27 @@ async function handleReseed(body: Record<string, unknown>): Promise<{ status: nu
 
   clearCareerLedger(careerId);
   resetJournal(careerId);
+  // The import wrote this career's rows through the transfer service, not through `applyBatch`, so the
+  // "last hash applied" record for each bulk table now describes rows that are not here any more. Left
+  // in place it would let the next push skip a block the replica actually needed.
+  forgetBulkHashes();
 
   const reply: ReseedReply = { result: "replaced", revision: 0, backup };
   return { status: 200, body: reply };
+}
+
+/**
+ * Why this package may not replace the copy here, or null when it may.
+ *
+ * Only the completeness rule, and only when the career is already here: the import is still the
+ * authority on everything else, and this exists so the caller can find out before it writes a snapshot.
+ */
+function packageRefusal(pkg: CareerTransferPackage): string | null {
+  const existing = storage.db.all<{ id: string }>(
+    sql`SELECT id FROM careers WHERE id = ${pkg.career.id}`
+  );
+  if (existing.length === 0) return null;
+  return incompletePackageReason(pkg);
 }
 
 /** Reads a whole body, refusing politely once it is larger than a career package could be. */

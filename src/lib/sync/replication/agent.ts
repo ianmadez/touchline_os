@@ -188,6 +188,19 @@ async function flush(careerId: string, clientId: string): Promise<"ok" | "stale"
     await seed(careerId, true);
     return "stale";
   }
+  if (outcome.kind === "unappliable") {
+    // Retrying is pointless: the bridge refuses this batch and will refuse it every time. This browser
+    // holds the main copy, so the answer is to replace the PC's with it, which also backs up what is
+    // being replaced. Rate-limited, because the loop below runs twice a second and a repair that keeps
+    // failing must not become its own storm.
+    setSyncSnapshot({ phase: "syncing", pending: queued, error: outcome.detail });
+    const repaired = await replaceReplicaWithPage(careerId);
+    if (!repaired) {
+      setSyncSnapshot({ phase: "offline", pending: queued, error: outcome.detail });
+      return "offline";
+    }
+    return "stale";
+  }
   if (outcome.kind === "stale") {
     setSyncSnapshot({ phase: "catching-up", revision: outcome.revision });
     return "stale";
@@ -264,6 +277,43 @@ async function seed(careerId: string, force: boolean): Promise<boolean> {
 }
 
 /**
+ * How long after one repair attempt before another may start.
+ *
+ * A failed apply retries twice a second, and a repair is megabytes each way. Without this a disagreement
+ * that cannot be repaired turns the healing mechanism into the thing that hammers the disk.
+ */
+const REPAIR_COOLDOWN_MS = 60_000;
+
+let lastRepair = 0;
+
+/**
+ * Replaces the PC's copy with this browser's.
+ *
+ * The model's answer to every disagreement, in one place: a PAGE career lives in this browser, the
+ * replica on the PC is a copy of it, and the only thing to do when they do not match is make the copy
+ * match. The bridge snapshots what it is about to overwrite before it does.
+ *
+ * Returns false when it did not happen, and never throws: the caller is a loop, and a failed repair is
+ * a state to report rather than an exception to crash on.
+ */
+async function replaceReplicaWithPage(careerId: string): Promise<boolean> {
+  if (Date.now() - lastRepair < REPAIR_COOLDOWN_MS) return false;
+  lastRepair = Date.now();
+
+  const pkg = await buildTransferPackage(careerId);
+  if (!pkg) return false;
+
+  const reply = await reseed(careerId, "page-to-pc", pkg);
+  if (!reply) return false;
+
+  // The bridge now holds exactly this career. Anything still in the outbox is already part of it, so
+  // pushing it again is harmless and keeping it is safer than dropping a write that happened mid-reseed.
+  setAppliedRevision(careerId, reply.revision);
+  setSyncSnapshot({ phase: "synced", revision: reply.revision, conflict: null });
+  return true;
+}
+
+/**
  * Compares the two sides, and makes them equal if they are not.
  *
  * Catch up first: a bridge that has journalled a phone write and not yet been pulled looks drifted from
@@ -295,26 +345,40 @@ async function driftCheck(careerId: string, clientId: string): Promise<void> {
   }
   if (same) return;
 
-  const pkg = await buildTransferPackage(careerId);
-  if (!pkg) return;
-  const reply = await reseed(careerId, "page-to-pc", pkg);
-  if (!reply) {
-    setSyncSnapshot({ phase: "offline" });
-    return;
+  await replaceReplicaWithPage(careerId);
+}
+
+/** Remembers when the last drift check ran, so a reload does not keep postponing it. */
+const DRIFT_KEY = "touchline.sync.drift.v1";
+
+function readLastDrift(): number {
+  try {
+    const raw = window.localStorage.getItem(DRIFT_KEY);
+    const value = raw === null ? 0 : Number(raw);
+    return Number.isFinite(value) && value > 0 ? value : Date.now();
+  } catch {
+    return Date.now();
   }
-  // The bridge now holds exactly this career. Anything still in the outbox is already part of it, so
-  // pushing it again is harmless and keeping it is safer than dropping a write that happened mid-reseed.
-  setAppliedRevision(careerId, reply.revision);
-  setSyncSnapshot({ phase: "synced", revision: reply.revision });
+}
+
+function rememberDrift(at: number): void {
+  try {
+    window.localStorage.setItem(DRIFT_KEY, String(at));
+  } catch {
+    // Storage blocked: the check then runs on this page's own clock, which is what it did before.
+  }
 }
 
 async function runLoop(careerId: string, signal: AbortSignal): Promise<void> {
   const clientId = syncClientId();
   let busy = false;
   let lastPull = 0;
-  // Not zero: the first tick would otherwise treat a drift check as overdue and compare (and possibly
-  // reseed) the moment the seed finished, which is exactly when the two sides are known to agree.
-  let lastDrift = Date.now();
+  // Not zero, and not the start of this page load either: the first tick must not treat a drift check as
+  // overdue the moment the seed finished, which is exactly when the two sides are known to agree. Kept
+  // across reloads because a page that is reloaded more often than the interval would otherwise never
+  // compare the two sides at all, and the comparison is the only thing that repairs a disagreement that
+  // no individual row can.
+  let lastDrift = readLastDrift();
 
   const tick = async (): Promise<void> => {
     if (busy || signal.aborted) return;
@@ -334,6 +398,7 @@ async function runLoop(careerId: string, signal: AbortSignal): Promise<void> {
       }
       if (now - lastDrift >= DRIFT_EVERY_MS) {
         lastDrift = now;
+        rememberDrift(now);
         await driftCheck(careerId, clientId);
       }
     } catch (error) {

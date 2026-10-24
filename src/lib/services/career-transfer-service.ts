@@ -157,6 +157,25 @@ const CAREER_TABLES: CareerTableSpec[] = [
 /** The SQL table names a complete backup must carry. */
 const ALL_CAREER_TABLES = CAREER_TABLES.map((spec) => getTableName(spec.table));
 
+/**
+ * Why this package would lose data if it replaced the career of the same id already here.
+ *
+ * Shared rather than duplicated, because the caller needs to know this BEFORE it does anything
+ * expensive. The reseed path used to write a full copy of the database first and only then discover
+ * that the package it had been handed could never be imported, so a page whose repair could not
+ * succeed kept writing ninety megabytes a minute.
+ */
+export function incompletePackageReason(pkg: CareerTransferPackage): string | null {
+  const missing = ALL_CAREER_TABLES.filter((name) => !pkg.tables.includes(name));
+  if (missing.length === 0) return null;
+  return (
+    `${pkg.career.id} is already here, and this backup carries ${pkg.tables.length} of the ` +
+    `${ALL_CAREER_TABLES.length} tables a career is made of, so replacing it would delete the other ` +
+    `${missing.length} (${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ", …" : ""}). ` +
+    `Export a fresh backup from this build and import that instead.`
+  );
+}
+
 /** Reads one table's rows for a career. */
 function readCareerRows(name: string, spec: CareerTableSpec, careerId: string): Row[] {
   if (spec.scope === "storyline") {
@@ -392,12 +411,8 @@ export async function importTransferPackage(
     const replacing = Boolean(existing);
 
     if (replacing) {
-      const missing = ALL_CAREER_TABLES.filter((name) => !pkg.tables.includes(name));
-      if (missing.length > 0) {
-        throw new PartialBackupError(
-          `${careerId} is already here, and this backup carries ${pkg.tables.length} of the ${ALL_CAREER_TABLES.length} tables a career is made of, so replacing it would delete the other ${missing.length} (${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ", …" : ""}). Export a fresh backup from this build and import that instead.`
-        );
-      }
+      const refusal = incompletePackageReason(pkg);
+      if (refusal) throw new PartialBackupError(refusal);
 
       // Child-first, then the root. The cascade would clear these on its own; doing it explicitly
       // keeps the result the same whichever way foreign keys are configured.

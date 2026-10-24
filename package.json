@@ -42,6 +42,7 @@
     "money:test": "tsx scripts/test-money.ts",
     "transfer:test": "tsx scripts/test-transfer.ts",
     "replication:test": "tsx scripts/test-replication.ts",
+    "replication:repair:test": "tsx scripts/test-replication-repair.ts",
     "replication:e2e": "node scripts/replication-e2e.mjs",
     "saves:test": "tsx scripts/test-save-source.ts",
     "saves:dir:test": "tsx scripts/test-save-directory.ts",

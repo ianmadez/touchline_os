@@ -112,16 +112,26 @@ export type PushOutcome =
   | { kind: "stale"; revision: number }
   /** The bridge does not hold this career, so there is nothing to push into. */
   | { kind: "unseeded" }
+  /**
+   * The bridge holds this career but cannot write what was sent, and no retry will change that.
+   *
+   * The two copies disagree in a way that no single row can fix, so the answer is the one the model
+   * gives everywhere else: this browser's copy is the main one, and the PC's copy is replaced from it.
+   */
+  | { kind: "unappliable"; detail: string }
   | { kind: "unreachable" };
 
 export async function pushChanges(request: PushRequest): Promise<PushOutcome> {
-  const answer = await call<PushReply & { code?: string }>("/sync/push", {
+  const answer = await call<PushReply & { code?: string; detail?: string }>("/sync/push", {
     method: "POST",
     body: request,
   });
   if (!answer) return { kind: "unreachable" };
   if (answer.status === 409) {
     if (answer.body?.code === "unseeded") return { kind: "unseeded" };
+    if (answer.body?.code === "unappliable") {
+      return { kind: "unappliable", detail: answer.body.detail ?? "" };
+    }
     return { kind: "stale", revision: answer.body?.revision ?? 0 };
   }
   if (answer.status !== 200 || !answer.body) return { kind: "unreachable" };

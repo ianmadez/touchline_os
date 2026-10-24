@@ -78,58 +78,196 @@ export function toDelta(wire: WireDelta): Delta {
 }
 
 /**
+ * A batch that could not be applied, with the row that stopped it.
+ *
+ * This exists because the alternative is what actually happened: SQLite reports a foreign key violation
+ * as `FOREIGN KEY constraint failed`, naming neither the table nor the row, the bridge turned that into
+ * a 500, the page read a 500 as "not there" and resent the same batch every half second. The manager's
+ * log filled with identical stack traces and nothing said which row was wrong or why.
+ *
+ * So the failure is diagnosed rather than guessed at: the batch is replayed inside a transaction that is
+ * rolled back, one statement at a time, with the deferred checks turned off, and the offending row's
+ * foreign keys are then inspected to name the parent that is missing.
+ */
+export class ReplicationApplyError extends Error {
+  readonly detail: string;
+
+  constructor(detail: string) {
+    super(detail);
+    this.name = "ReplicationApplyError";
+    this.detail = detail;
+  }
+}
+
+function isForeignKeyViolation(error: unknown): boolean {
+  const code = (error as { code?: string })?.code ?? "";
+  const message = (error as { message?: string })?.message ?? "";
+  return code === "SQLITE_CONSTRAINT_FOREIGNKEY" || /FOREIGN KEY constraint failed/i.test(message);
+}
+
+/**
+ * Finds the delta a failed batch cannot write.
+ *
+ * Only ever called after a failure, and always rolled back: the caller has already lost the batch, so
+ * this costs one wasted pass in the rare case and nothing at all in the ordinary one.
+ *
+ * The batch is applied again exactly as it was, and SQLite's own `foreign_key_check` is then asked
+ * which rows do not resolve, before the transaction is abandoned. That is more reliable than replaying
+ * statement by statement with the checks turned on: `defer_foreign_keys` cannot be changed inside a
+ * transaction, so a replay would have reported nothing at all and blamed no one.
+ */
+function diagnose(careerId: string, deltas: Delta[], bulk: WireBulk[]): ReplicationApplyError {
+  const fallback =
+    "This PC could not apply the change and could not say which row was to blame. Its copy and this " +
+    "browser's copy disagree, so it needs replacing from this browser.";
+
+  const touched = [
+    ...new Set([
+      ...deltas.filter((delta) => tableClass(delta.table) === "delta").map((delta) => delta.table),
+      ...bulk.filter((block) => tableClass(block.table) === "bulk").map((block) => block.table),
+    ]),
+  ];
+
+  try {
+    storage.withTransaction(() => {
+      storage.db.run(sql`PRAGMA defer_foreign_keys = ON`);
+      setLoggingSuppressed(true);
+      try {
+        writeBatch(careerId, deltas, bulk);
+      } finally {
+        setLoggingSuppressed(false);
+      }
+
+      const found = firstViolation(touched);
+      throw new ReplicationApplyError(found ?? fallback);
+    });
+  } catch (error) {
+    if (error instanceof ReplicationApplyError) return error;
+    return new ReplicationApplyError(fallback);
+  }
+
+  // `withTransaction` cannot return normally here: the callback always throws.
+  return new ReplicationApplyError(fallback);
+}
+
+/**
+ * The first row, in any of these tables, that points at a parent this database does not have.
+ *
+ * `foreign_key_check` reports violations of the CURRENT state, deferred or not, which is what makes it
+ * usable as the last thing a doomed transaction does.
+ */
+function firstViolation(tables: string[]): string | null {
+  for (const table of tables) {
+    let report: { rowid?: unknown; parent?: unknown }[];
+    try {
+      report = storage.db.all<{ rowid: number; parent: string }>(
+        `PRAGMA foreign_key_check(${JSON.stringify(table)})`
+      );
+    } catch {
+      continue;
+    }
+    const first = report[0];
+    if (!first) continue;
+
+    const parent = typeof first.parent === "string" ? first.parent : "another";
+    const rowid = Number(first.rowid);
+    let named = "";
+    try {
+      const row = storage.db.all<Record<string, unknown>>(
+        `SELECT * FROM ${JSON.stringify(table)} WHERE rowid = ${Number.isFinite(rowid) ? rowid : 0} LIMIT 1`
+      )[0];
+      const key = row?.id ?? row?.["career_id"];
+      if (typeof key === "string" && key !== "") named = ` ${key}`;
+    } catch {
+      // The key is a convenience in the message, never a requirement for reporting it.
+    }
+
+    return `A ${table}${named} row points at a ${parent} row this PC does not have.`;
+  }
+  return null;
+}
+
+/**
+ * The deltas in the order they must be applied.
+ *
+ * 0. deletes of child rows (they must go before the parent they point at)
+ * 1. every other delete
+ * 2. ordinary inserts and updates
+ * 3. inserts and updates of child rows (their parents are already there by now)
+ */
+function orderForApply(deltas: Delta[]): Delta[] {
+  return deltas
+    .filter((delta) => tableClass(delta.table) === "delta")
+    .map((delta, index) => ({ delta, index, rank: rankOf(delta) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map((entry) => entry.delta);
+}
+
+/**
+ * The batch itself, with no transaction and no ledger handling of its own.
+ *
+ * Shared by `applyBatch` and by `diagnose`, which has to re-run exactly this to be able to say which row
+ * was to blame. Two copies of this would drift, and the one that drifted would be the one used only when
+ * something had already gone wrong.
+ */
+function writeBatch(careerId: string, deltas: Delta[], bulk: WireBulk[]): void {
+  for (const delta of orderForApply(deltas)) {
+    if (delta.op === "D") deleteRow(delta.table, delta.key);
+    else if (delta.row) insertRow(delta.table, delta.row);
+  }
+
+  // Bulk tables are deleted in reverse declaration order and written forwards, which is the order
+  // the transfer service uses: it is the one order that satisfies every foreign key between them.
+  const changed = bulk.filter(
+    (block) => tableClass(block.table) === "bulk" && readMeta(bulkMetaKey(block.table)) !== block.hash
+  );
+  if (changed.length === 0) return;
+
+  for (const table of [...BULK_TABLES].reverse()) {
+    if (changed.some((block) => block.table === table)) {
+      storage.db.run(sql`DELETE FROM ${sql.identifier(table)} WHERE career_id = ${careerId}`);
+    }
+  }
+  const forward = BULK_TABLES.filter((table) => changed.some((block) => block.table === table));
+  for (const table of forward) {
+    const block = changed.find((entry) => entry.table === table);
+    if (!block) continue;
+    for (const row of block.rows) insertRow(table, row);
+  }
+  for (const block of changed) writeMeta(bulkMetaKey(block.table), block.hash);
+  clearBulkDirty(
+    careerId,
+    changed.map((block) => block.table)
+  );
+}
+
+/**
  * Applies one batch and records what was done.
  *
  * `bulk` blocks are applied only when their hash differs from the hash last applied, which is what lets
  * a 19,000 row table be compared with a few hundred bytes and skipped entirely when it has not moved.
  * The `_sync_bulk_dirty` markers for applied tables are cleared, because the local ledger no longer has
  * anything to say about them - the content is the remote side's.
+ *
+ * A foreign key failure is turned into `ReplicationApplyError`, which names the row: see `diagnose` for
+ * why that is worth a second pass in the rare case it is needed.
  */
 export function applyBatch(careerId: string, deltas: Delta[], bulk: WireBulk[] = []): void {
-  storage.withTransaction(() => {
-    // A bulk table can reference another bulk table, and the blocks that arrive are only the ones whose
-    // hash moved. Deferring the checks to COMMIT means the tables can be emptied and refilled in whatever
-    // order the sender's journal produced, and a violation is still refused - just at the end, with a
-    // rollback, rather than halfway through.
-    storage.db.run(sql`PRAGMA defer_foreign_keys = ON`);
-    setLoggingSuppressed(true);
-    try {
-      const ordered = deltas
-        .filter((delta) => tableClass(delta.table) === "delta")
-        .map((delta, index) => ({ delta, index, rank: rankOf(delta) }))
-        .sort((a, b) => a.rank - b.rank || a.index - b.index);
-
-      for (const { delta } of ordered) {
-        if (delta.op === "D") deleteRow(delta.table, delta.key);
-        else if (delta.row) insertRow(delta.table, delta.row);
+  try {
+    storage.withTransaction(() => {
+      // A bulk table can reference another bulk table, and the blocks that arrive are only the ones whose
+      // hash moved. Deferring the checks to COMMIT means the tables can be emptied and refilled in whatever
+      // order the sender's journal produced, and a violation is still refused - just at the end, with a
+      // rollback, rather than halfway through.
+      storage.db.run(sql`PRAGMA defer_foreign_keys = ON`);
+      setLoggingSuppressed(true);
+      try {
+        writeBatch(careerId, deltas, bulk);
+      } finally {
+        setLoggingSuppressed(false);
       }
-
-      // Bulk tables are deleted in reverse declaration order and written forwards, which is the order
-      // the transfer service uses: it is the one order that satisfies every foreign key between them.
-      const changed = bulk.filter(
-        (block) =>
-          tableClass(block.table) === "bulk" && readMeta(bulkMetaKey(block.table)) !== block.hash
-      );
-      if (changed.length > 0) {
-        for (const table of [...BULK_TABLES].reverse()) {
-          if (changed.some((block) => block.table === table)) {
-            storage.db.run(sql`DELETE FROM ${sql.identifier(table)} WHERE career_id = ${careerId}`);
-          }
-        }
-        const forward = BULK_TABLES.filter((table) => changed.some((block) => block.table === table));
-        for (const table of forward) {
-          const block = changed.find((entry) => entry.table === table);
-          if (!block) continue;
-          for (const row of block.rows) insertRow(table, row);
-        }
-        for (const block of changed) writeMeta(bulkMetaKey(block.table), block.hash);
-        clearBulkDirty(
-          careerId,
-          changed.map((block) => block.table)
-        );
-      }
-    } finally {
-      setLoggingSuppressed(false);
-    }
-  });
+    });
+  } catch (error) {
+    throw isForeignKeyViolation(error) ? diagnose(careerId, deltas, bulk) : error;
+  }
 }
