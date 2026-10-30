@@ -188,9 +188,14 @@ Point the app at your FC Career save when prompted on first launch. Nothing is u
 ### On a phone
 
 ```powershell
-npm run build:browser                        # once, and after any page change
-$env:TOUCHLINE_REMOTE="1"; npm run core      # prints a pairing code and an address
+npm run build:browser     # once, and after any page change
+npm run phone             # turns the phone link on, and prints a pairing code
 ```
+
+`npm run phone` starts the app with one change: instead of answering only this PC, it also answers
+devices on your own Wi-Fi, and shows the address a phone should open. `npm run core` alone stays private
+to this computer, which is why the phone link is its own command rather than the default. It stops when
+the window closes.
 
 Open the printed address on the phone, on the same Wi-Fi, and enter the six-character code once - or
 scan the QR the window draws. After that the phone is paired and reopening the address goes straight to

@@ -29,9 +29,23 @@ your phone to open your career, you want the core.
 ```powershell
 npm install
 npm run build:browser     # once, and again after any page change
-$env:TOUCHLINE_REMOTE="1" # or: npx tsx bridge/touchline-core.ts --share
-npm run core
+npm run phone             # turns the phone link on and prints the pairing code
 ```
+
+`npm run phone` is the whole of step three. It starts the same program `npm run core` starts, with one
+thing changed: instead of answering only this PC, it also answers devices on your own Wi-Fi, and prints
+the address a phone should open plus a QR code for it.
+
+That is all "phone link" means. The app listens on a port. By default the port is bound to `127.0.0.1`,
+which only this computer can reach, so a phone gets nothing. Turning the phone link on binds a second
+listener to your network interface instead, which is the only difference.
+
+- It is **off unless you ask for it**. `npm run core` alone stays private to this PC.
+- It **stops when the window closes**. Nothing is left running.
+- It **never reaches the internet**. One port, your LAN, plain HTTP, on the network you are already on.
+- `npm run share` is the same command under its older name, and `npx tsx bridge/touchline-core.ts --share`
+  is the same thing without npm in the way. `--share` is the switch; the other two just set it for you.
+- From the one-file download, the equivalent is `TouchlineBridge.cmd share`.
 
 **What this needs today.** The core is run from a checkout, with `npm install` behind it, because it
 hosts the whole app: a real SQLite database and the parser both need the project's dependencies. The
@@ -148,7 +162,7 @@ The full end-to-end check, with every command, is in
 ## What keeps it safe
 
 - **It listens on your network, and only when you ask.** The LAN listener does not exist unless
-  `--share` / `TOUCHLINE_REMOTE=1` was given. Stopping sharing closes the socket; starting it again is a
+  `npm run phone` (or `--share`) was used. Stopping sharing closes the socket; starting it again is a
   decision made at the PC.
 - **A device token for every call.** Pairing returns a 32-byte token, stored hashed on the PC. It travels
   in a header; the cookie that is also set is only there because `EventSource` cannot send a header.
@@ -205,5 +219,5 @@ The full end-to-end check, with every command, is in
 | "Two copies of this career" | The PC holds rows this browser does not. Choose one side on that screen. Nothing is merged and nothing changes until you do. |
 | "Another tab is doing the syncing" | That is correct and deliberate: one tab syncs. Close the others if you want this one to do it. |
 | An edit on the phone has not reached the page | The page applies it the next time it opens. Open the tab and give it a few seconds. |
-| Port 4978 is in use | Start on another port: `npx tsx bridge/touchline-core.ts --share --port 4979`. |
+| Port 4978 is in use | Start on another port: `npm run phone -- --port 4979`. |
 | A page opened at `localhost` cannot reach the career | The loopback listener only serves this machine's own origins. Use the LAN address for a phone. |

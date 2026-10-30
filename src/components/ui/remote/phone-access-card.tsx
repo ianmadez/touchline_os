@@ -19,7 +19,7 @@ import { useRemote } from "./remote-provider";
 import { PairingInstructions } from "./pairing-instructions";
 
 interface PhoneAccessCardProps {
-  /** Takes the manager to Settings, where the device list, revoke and Stop sharing live. */
+  /** Takes the manager to Settings, where the device list, revoke and turning the phone link off live. */
   onManageDevices?: () => void;
   /** Landing page styling is roomier than the Settings card. */
   variant?: "landing" | "settings";
@@ -51,7 +51,7 @@ export function PhoneAccessCard({ onManageDevices, variant = "landing" }: PhoneA
       <div className="min-w-0 space-y-3">
         <div>
           <p className="font-sub text-[11px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-            Sharing on · {state?.hostName}
+            Phone link on · {state?.hostName}
           </p>
           <p className="mt-1 font-sans text-xs leading-relaxed text-slate-600 dark:text-slate-400">
             Scan the code with the phone&apos;s camera, or type the address below into it. It asks for the

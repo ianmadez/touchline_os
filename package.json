@@ -56,7 +56,9 @@
     "save:extract": "tsx scripts/extract-fc27-container.ts",
     "core": "tsx bridge/touchline-core.ts",
     "remote:test": "tsx scripts/test-remote.ts",
-    "remote:e2e": "node scripts/remote-e2e.mjs"
+    "remote:e2e": "node scripts/remote-e2e.mjs",
+    "phone": "node scripts/phone-link.mjs",
+    "share": "node scripts/phone-link.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

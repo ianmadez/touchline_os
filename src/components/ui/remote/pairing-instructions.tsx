@@ -79,28 +79,47 @@ export function PairingInstructions({ compact = false }: { compact?: boolean }) 
     <div className="space-y-4">
       <p className="font-sans text-xs leading-relaxed text-slate-600 dark:text-slate-400">
         {compact
-          ? "Sharing is a listener on the PC, so it is switched on from the PC. Three steps, once."
-          : "The career in this browser is the main copy, and the PC keeps a live copy of it so your phone can open the same career. Turn sharing on there, pair the phone once, and a change on either device appears on the other within a few seconds."}
+          ? "Phone pairing needs a listener on the PC, so it is switched on from the PC. Three steps, once."
+          : "The career in this browser is the main copy, and the PC keeps a live copy of it so your phone can open the same career. Turn the phone link on there, pair the phone once, and a change on either device appears on the other within a few seconds."}
       </p>
 
       <ol className="space-y-3.5">
-        <Step number="01" title="Build the phone copy">
+        <Step number="01" title="Build the copy your phone will load">
           <p className="mb-2">
-            Once, and again after any page change. The core serves this build to your phone.
+            Once, and again after any page change. The PC serves this build to the phone.
           </p>
           <Command command="npm run build:browser" />
         </Step>
 
-        <Step number="02" title="Start the core with sharing on">
+        <Step number="02" title="Turn on the phone link">
           <p className="mb-2">
-            Leave the window open while you want the phone to work. It prints a pairing code and the
-            address to open.
+            One command, in the project folder. It opens a single port on your home network so a phone
+            can load the app, prints a pairing code, and stays open while you want the phone to work.
           </p>
-          <Command command='$env:TOUCHLINE_REMOTE="1"; npm run core' />
-          <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-500">
-            Not using npm? <code className="font-mono">npx tsx bridge/touchline-core.ts --share</code> does
-            the same and takes the flag directly.
-          </p>
+          <Command command="npm run phone" />
+          <details className="mt-2">
+            <summary className="cursor-pointer font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              What it actually does
+            </summary>
+            <div className="mt-2 space-y-1.5 font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+              <p>
+                Normally the app only answers the PC it is running on, which is why a phone cannot see it.
+                This command starts the same program with that one restriction lifted: it also answers
+                devices on your own Wi-Fi, at the address it prints.
+              </p>
+              <p>
+                It is off unless you run it. Closing the window turns it off again, and nothing about it
+                reaches the internet. If you would rather not use npm,{" "}
+                <code className="font-mono">npx tsx bridge/touchline-core.ts --share</code> is the same
+                thing: <code className="font-mono">--share</code> is the switch that lifts that
+                restriction.
+              </p>
+              <p>
+                Downloaded the one-file bridge instead? Run <code className="font-mono">share</code> on it:{" "}
+                <code className="font-mono">TouchlineBridge.cmd share</code>.
+              </p>
+            </div>
+          </details>
         </Step>
 
         <Step number="03" title="Open the address on the phone">
@@ -114,9 +133,9 @@ export function PairingInstructions({ compact = false }: { compact?: boolean }) 
       <div className="space-y-1.5 border-t border-slate-200 dark:border-slate-800 pt-3">
         <p className="font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
           Pair only on a network you trust: it runs over plain HTTP on your own Wi-Fi. Nothing is
-          uploaded, and nothing leaves your network. The listener only exists while sharing is on.
-          Windows may ask once whether Node.js may accept connections, so allow it on private networks
-          only.
+          uploaded, and nothing leaves your network. The phone link only exists while that window is
+          open. Windows may ask once whether Node.js may accept connections, so allow it on private
+          networks only.
         </p>
         <p className="font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
           If both copies change while they are apart, TouchlineOS asks which one to keep. It never merges

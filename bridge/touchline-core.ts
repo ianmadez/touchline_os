@@ -283,13 +283,17 @@ function printBanner(input: BannerInput): void {
     console.log(`    Your phone:       ${phoneUrl}  (same Wi-Fi)`);
     console.log(`    Paired devices:   ${store.devices().length}`);
   } else {
-    console.log("    Your phone:       sharing is off");
+    console.log("    Your phone:       off");
     console.log("");
-    console.log("  To use this career on a phone, start it again with sharing on:");
-    console.log("    TouchlineBridge.cmd share          (the download)");
-    console.log("    npm run core                       (set TOUCHLINE_REMOTE=1 first)");
-    console.log("    npx tsx bridge/touchline-core.ts --share");
-    console.log("  That opens one port on your own network, and nothing else. It never leaves your Wi-Fi.");
+    console.log("  This PC can use the career. A phone cannot yet, because nothing is answering");
+    console.log("  on your network: the app is only reachable from this computer.");
+    console.log("");
+    console.log("  To let a phone open it, stop this and run:");
+    console.log("    npm run phone                      (from the project folder)");
+    console.log("    TouchlineBridge.cmd share          (from the download)");
+    console.log("");
+    console.log("  That opens one port on your own Wi-Fi so the phone can load the app, and");
+    console.log("  nothing else. It never leaves your network, and it stops when this closes.");
   }
   console.log("");
 }

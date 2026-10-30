@@ -7,7 +7,7 @@
  * disk. "Which devices can see this?" and "who is editing right now?" are the two questions that
  * creates, and they are answered here rather than in a dialog nobody opens.
  *
- * Deliberately no "turn sharing on" switch. Sharing is a listener, and switching a listener on is the
+ * Deliberately no "turn the phone link on" switch. It is a listener, and switching a listener on is the
  * one action that must happen at the machine that owns the data - a phone cannot open a port on a PC
  * that is not listening for it. Stopping it *is* offered, because that is the action somebody worried
  * about a phone left on a train actually wants.
@@ -137,7 +137,7 @@ export function RemoteDevices() {
           Connected to {state.hostName}
         </span>
         <span className="font-sans text-[11px] text-slate-500 dark:text-slate-400 break-all">{state.url}</span>
-        <Chip>{state.sharing ? "sharing on" : "sharing off"}</Chip>
+        <Chip>{state.sharing ? "phone link on" : "phone link off"}</Chip>
       </div>
 
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 px-3.5 py-3">
@@ -275,11 +275,11 @@ export function RemoteDevices() {
           data-compact
           className="min-h-9 rounded-lg border border-slate-300 dark:border-slate-700 px-3 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200 transition-colors hover:border-rose-400 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer disabled:opacity-50"
         >
-          Stop sharing
+          Turn off phone link
         </button>
         <p className="font-sans text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
           Closes the PC&apos;s network port. Your career is untouched, and the devices you have already
-          paired stay paired: start the core with sharing again and they reconnect.
+          paired stay paired: run npm run phone again and they reconnect.
         </p>
       </div>
 
