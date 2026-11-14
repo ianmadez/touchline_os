@@ -224,7 +224,11 @@ future work, and the landing page says so rather than implying the hosted site c
 
 ## A note on honesty
 
-Several features in this app exist specifically *because* something was found to be unreliable, ambiguous, or simply absent in the save, and the honest answer was judged more valuable than a confident-looking guess. Wages and transfer values are shown as bands with a stated confidence level, never a bare number. Board objectives the save can't decode are shown as undecoded rather than captioned with an invented meaning. Season totals are labeled for what they verifiably are (all-competition figures, not league-only) rather than mislabeled for what would look tidier. This isn't a limitation apologized for in a footnote but it's the design. Thank you and enjoy TouchlineOS 
+Several features in this app exist specifically *because* something was found to be unreliable, ambiguous, or simply absent in the save, and the honest answer was judged more valuable than a confident-looking guess. Wages and transfer values are shown as bands with a stated confidence level, never a bare number. Board objectives the save can't decode are shown as undecoded rather than captioned with an invented meaning. Season totals are labeled for what they verifiably are (all-competition figures, not league-only) rather than mislabeled for what would look tidier. This isn't a limitation apologized for in a footnote but it's the design.
+
+AI coding tools were also used in the development of the app in places only concerned with writing the backend library files and scrubbing through tens of thousands of chunked and encrypted database entries in order to extract the information needed to make TouchlineOS translate meaningful information in a valuable way to its users. 
+
+Thank you and enjoy TouchlineOS 
 
 ## Donations
 [![Donate](https://shields.io)](https://ko-fi.com/ianmadezoss)
