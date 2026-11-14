@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { SaveCandidate } from "@/lib/parser/interface";
 import { SUPPORT_LINE, folderList, supportDetail } from "@/lib/ui/compatibility";
 import type { BridgeState, SaveSourceMode } from "@/lib/platform/types";
@@ -93,7 +94,7 @@ export function LandingPage({
     },
     {
       q: "Do I have to pick my save file every time I visit?",
-      a: "Usually not. In Chrome and Edge the site remembers the file you chose and only re-asks for permission now and then. In any browser - including Firefox and Safari, which cannot remember a file at all - you can run the optional local bridge: a small free helper you download once that watches your save folder and serves the file to the page, so there is nothing to pick and a new save is noticed on its own. It runs only on your PC, only answers TouchlineOS, and never writes to your save. TouchlineOS works fully without it; you would simply pick your save file again, which takes a moment.",
+      a: "On the web, once per visit unless you set something up. FC 25 and FC 26 keep careers inside AppData, and Chrome and Edge won't let a page remember a file there (that's the \"contains system files\" message), so by default you pick the save with the normal file dialog, which opens it from anywhere. If your save sits outside AppData, Chrome and Edge can remember it instead. In any browser - including Firefox and Safari, which cannot remember a file at all - you can run the optional local bridge: a small free helper you download once that watches your save folder and serves the file to the page, so there is nothing to pick and a new save is noticed on its own. It runs only on your PC, only answers TouchlineOS, and never writes to your save. TouchlineOS works fully without it; you would simply pick your save file again, which takes a moment.",
     },
     {
       q: "Can I use TouchlineOS on my phone?",
@@ -441,9 +442,13 @@ export function LandingPage({
             </div>
           </div>
 
-          {/* Card 7: And Much More (4 cols) */}
-          <div className="md:col-span-4 bg-gradient-to-br from-slate-900 to-slate-950 text-white border border-slate-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center justify-center text-center space-y-3">
-            <span className="w-10 h-10 rounded-2xl bg-[#E11D48] text-white font-heading text-lg flex items-center justify-center">
+          {/* Card 7: And Much More (4 cols). The whole card is the link, so the target is the card
+              people are already looking at rather than a small line inside it. */}
+          <Link
+            href="/features"
+            className="group md:col-span-4 bg-gradient-to-br from-slate-900 to-slate-950 text-white border border-slate-800 hover:border-rose-500/60 rounded-3xl p-6 shadow-2xl flex flex-col items-center justify-center text-center space-y-3 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#E11D48]"
+          >
+            <span className="w-10 h-10 rounded-2xl bg-[#E11D48] group-hover:bg-[#FF8C7A] text-white font-heading text-lg flex items-center justify-center transition-colors">
               +
             </span>
             <h3 className="font-heading text-lg uppercase">
@@ -453,7 +458,10 @@ export function LandingPage({
               Match facts scanning, loan deals with wage splits, board objective tracking, and a local
               database you can export.
             </p>
-          </div>
+            <span className="font-sub text-xs font-bold uppercase tracking-widest text-[#FF8C7A] group-hover:text-white transition-colors">
+              Full feature breakdown →
+            </span>
+          </Link>
         </div>
       </section>
 

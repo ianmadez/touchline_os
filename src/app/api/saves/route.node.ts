@@ -51,7 +51,7 @@ export async function POST(request: Request) {
       outcome = await reconnectRememberedSave();
       break;
     case "choose":
-      outcome = await chooseSave();
+      outcome = await chooseSave(payload);
       break;
     case "forget":
       outcome = await forgetRememberedSave();

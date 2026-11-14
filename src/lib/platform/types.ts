@@ -92,11 +92,20 @@ export interface SaveSource {
    * runs on load, on entering a tab, and after pairing a bridge - and a browser build that opened a
    * picker on any of those would be opening a file dialog for no reason the manager could see. Only a
    * call made on a press passes true.
+   *
+   * `remember` asks for the browser's remembering picker (`showOpenFilePicker`) instead of its standard
+   * file dialog. It is opt-in because Chrome and Edge refuse that picker anything under AppData, which is
+   * exactly where FC 25 and FC 26 write careers, so as the default it turned away most saves.
    */
   detectSaves(
     saveDirectory?: string,
-    options?: { allowPicker?: boolean }
+    options?: { allowPicker?: boolean; remember?: boolean }
   ): Promise<SaveCandidate[]>;
+  /**
+   * Whether this runtime has a picker that can remember a file between visits. OPTIONAL: absent means
+   * no, which is the desktop build (it scans folders) and every browser without the File System Access API.
+   */
+  canRememberSave?(): boolean;
   /**
    * Resolves a sync request into one concrete candidate.
    *

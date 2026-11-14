@@ -87,7 +87,10 @@ export async function readTargetBlocks(
     if (!careerId) {
       return at(400, { success: false, error: "careerId is required." });
     }
-    const seasonParam = Number(season);
+    // An absent season means every season. `Number(null)` is 0, and 0 is finite, so without the
+    // explicit check a call with no `season` asked for season 0 - which never exists - and every saved
+    // block vanished from Group Debrief, Review and the Season hub.
+    const seasonParam = season === null || season.trim() === "" ? NaN : Number(season);
     const seasonNumber = Number.isFinite(seasonParam) ? seasonParam : undefined;
 
     const service = new TargetBlockService();

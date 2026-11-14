@@ -108,6 +108,13 @@ interface OnboardingWizardProps {
   saveScanComplete?: boolean;
   onRescan?: () => void;
   /**
+   * Whether this browser has a picker that can remember the file between visits, and the press that
+   * opens it. Offered beside the standard dialog rather than instead of it: Chrome and Edge refuse that
+   * picker anything inside AppData, which is where FC 25 and FC 26 keep their careers.
+   */
+  canRememberSave?: boolean;
+  onChooseRemembered?: () => void;
+  /**
    * Whether this browser can still read the save it was given earlier.
    *
    * `needs-permission` is the one state a page cannot resolve by itself: a browser never re-grants
@@ -143,6 +150,8 @@ export function OnboardingWizard({
   onCompleteOnboarding,
   saveScanComplete = false,
   onRescan,
+  canRememberSave = false,
+  onChooseRemembered,
   saveSourceMode = "folders",
   rememberedSave = "none",
   onRegrant,
@@ -155,9 +164,15 @@ export function OnboardingWizard({
   savesUnavailableReason = null,
 }: OnboardingWizardProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [selectedSave, setSelectedSave] = useState<SaveCandidate | null>(
-    saveCandidates[0] || null
-  );
+  // The manager's explicit pick, if any. What is actually selected is derived from it below on every
+  // render, because candidates can arrive AFTER this screen mounts: the browser build has none until a
+  // file is chosen, and a selection seeded once from an empty list stayed empty, leaving Continue
+  // disabled beside the very save that had just been picked.
+  const [pickedSave, setSelectedSave] = useState<SaveCandidate | null>(null);
+  const selectedSave =
+    (pickedSave && saveCandidates.find((candidate) => candidate.id === pickedSave.id)) ??
+    saveCandidates[0] ??
+    null;
 
   //
   // NOT pre-filled with anybody's name. These used to default to one particular career's manager, club
@@ -382,6 +397,23 @@ export function OnboardingWizard({
                   </button>
                 )
               )}
+              {saveSourceMode === "picker" &&
+                canRememberSave &&
+                onChooseRemembered &&
+                rememberedSave !== "needs-permission" && (
+                  <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Want this browser to remember the file?{" "}
+                    <button
+                      type="button"
+                      onClick={onChooseRemembered}
+                      className="font-sub font-bold text-[#E11D48] dark:text-[#FF8C7A] hover:underline cursor-pointer"
+                    >
+                      Pick it this way instead
+                    </button>
+                    . It only works for saves outside AppData: Chrome and Edge won&rsquo;t open files
+                    there this way, and say the folder &ldquo;contains system files&rdquo;.
+                  </p>
+                )}
             </div>
           )}
 

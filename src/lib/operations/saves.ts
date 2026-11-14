@@ -26,11 +26,19 @@ export async function listSaveCandidates(): Promise<OperationResult<unknown>> {
  * that reason: a dialog is a side effect only a deliberate action should have, and folding it into the
  * scan made it happen on every incidental scan instead.
  */
-export async function chooseSave(): Promise<OperationResult<unknown>> {
-  return scan({ allowPicker: true });
+export async function chooseSave(payload?: unknown): Promise<OperationResult<unknown>> {
+  // `remember` picks the browser's remembering picker over its standard dialog - see `detectSaves`.
+  const remember = (payload as { remember?: unknown } | null | undefined)?.remember === true;
+  return scan({ allowPicker: true, remember });
 }
 
-async function scan({ allowPicker }: { allowPicker: boolean }): Promise<OperationResult<unknown>> {
+async function scan({
+  allowPicker,
+  remember = false,
+}: {
+  allowPicker: boolean;
+  remember?: boolean;
+}): Promise<OperationResult<unknown>> {
   try {
     // The manager's configured folder, so the setting actually constrains the scan.
     //
@@ -48,7 +56,7 @@ async function scan({ allowPicker }: { allowPicker: boolean }): Promise<Operatio
       saveDirectory = undefined;
     }
 
-    const detected = await saveSource.detectSaves(saveDirectory, { allowPicker });
+    const detected = await saveSource.detectSaves(saveDirectory, { allowPicker, remember });
 
     // The wizard only cares about career saves; `database` slots (storageInfo.bin, ...) cannot be
     // parsed into a squad and would only produce a broken onboarding step.
@@ -81,6 +89,8 @@ async function scan({ allowPicker }: { allowPicker: boolean }): Promise<Operatio
       // Whether the browser is still allowed to read a save it was given earlier, so the wizard can
       // offer one click to re-confirm access instead of the whole choose-a-file flow again.
       rememberedSave: await saveSource.rememberedSave(),
+      // Whether a remembering picker exists here at all, so the wizard only offers it where it can work.
+      canRememberSave: saveSource.canRememberSave?.() ?? false,
       // What the optional local bridge is doing. `unsupported` on the desktop build, which has no bridge
       // and needs none - it already scans this machine directly - so the UI hides the feature there
       // rather than offering a control that could never work.

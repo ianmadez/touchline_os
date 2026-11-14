@@ -246,6 +246,9 @@ export default function TouchlineApp() {
   const [rememberedSave, setRememberedSave] = useState<
     "none" | "granted" | "needs-permission"
   >("none");
+  // Whether this browser has a picker that can remember the file (Chrome and Edge on desktop). It is
+  // offered as an opt-in beside the standard dialog, never as the default - see `detectSaves`.
+  const [canRememberSave, setCanRememberSave] = useState(false);
   const [regranting, setRegranting] = useState(false);
   // What the optional local bridge is doing. Starts "unsupported" rather than "off" so the feature is
   // hidden until a scan has actually reported on it, instead of flashing an offer the desktop build
@@ -437,6 +440,7 @@ export default function TouchlineApp() {
           ? data.rememberedSave
           : "none"
       );
+      setCanRememberSave(data.canRememberSave === true);
       setBridgeState(
         data.bridge === "off" ||
           data.bridge === "paired" ||
@@ -464,6 +468,7 @@ export default function TouchlineApp() {
     setSavesUnavailableReason,
     setSaveSourceMode,
     setRememberedSave,
+    setCanRememberSave,
     setBridgeState,
     setAppError,
   ]);
@@ -479,12 +484,12 @@ export default function TouchlineApp() {
    * The scan is re-run afterwards either way, so a dismissed dialog leaves the screen saying nothing has
    * been chosen rather than looking like the click did nothing.
    */
-  const handleChooseSave = useCallback(async () => {
+  const handleChooseSave = useCallback(async (remember = false) => {
     try {
       const res = await apiFetch("/api/saves", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "choose" }),
+        body: JSON.stringify({ action: "choose", remember }),
       });
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -1773,6 +1778,8 @@ export default function TouchlineApp() {
             saveSourceMode={saveSourceMode}
             savesUnavailableReason={savesUnavailableReason}
             onRescan={() => void handleForgetSave()}
+            canRememberSave={canRememberSave}
+            onChooseRemembered={() => void handleChooseSave(true)}
             rememberedSave={rememberedSave}
             onRegrant={() => void handleRegrantSave()}
             regranting={regranting}

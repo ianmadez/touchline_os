@@ -122,7 +122,7 @@ async function dispatch(call: Call): Promise<OperationResult<unknown>> {
       if (parsed.failure) return parsed.failure;
       const action = (parsed.value as { action?: unknown } | null)?.action;
       if (action === "reconnect") return reconnectRememberedSave();
-      if (action === "choose") return chooseSave();
+      if (action === "choose") return chooseSave(parsed.value);
       if (action === "forget") return forgetRememberedSave();
       if (action === "bridge-pair") return pairLocalBridge(parsed.value);
       if (action === "bridge-forget") return forgetLocalBridge();

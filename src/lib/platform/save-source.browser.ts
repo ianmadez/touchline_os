@@ -2,10 +2,10 @@
  * Save source for the browser build.
  *
  * A page cannot enumerate a filesystem, so "detection" is a control the user drives. There are two
- * that can work and this uses both: `showOpenFilePicker` where it exists (Chrome and Edge on
- * desktop), and the browser's own `<input type="file">` everywhere else - Firefox, Safari and iOS
- * Safari. Firefox has never implemented the File System Access API, so the input is the only way a
- * Firefox user can open a save at all; without it the build would be honest but useless there.
+ * that can work and this uses both: the browser's own `<input type="file">` by default, in every
+ * browser, and `showOpenFilePicker` (Chrome and Edge on desktop) when the manager asks for the file
+ * to be remembered. The input is the default because Chrome and Edge block `showOpenFilePicker` from
+ * AppData, where FC 25 and FC 26 keep their careers, while the input opens any file the OS can.
  *
  * What differs between the two is persistence, not capability. The picker hands back a handle that
  * stays valid for the session; an input gives the file itself. Either way the bytes are read into
@@ -77,6 +77,15 @@ interface PickedSave {
 
 const picked = new Map<string, PickedSave>();
 let scan: SaveSearchLocation[] = [];
+
+/**
+ * What the standard file dialog last produced, offered again by every scan that follows it.
+ *
+ * The dialog hands back a `File`, not a handle, so nothing can be remembered across a reload. Within the
+ * page, though, the choice has to survive the re-scan that runs straight after it: without this, that
+ * scan found nothing and the save the manager had just picked vanished from the screen.
+ */
+let inputPicks: SaveCandidate[] = [];
 
 /**
  * Which source actually produced the last scan's candidates.
@@ -271,11 +280,19 @@ export const saveSource: SaveSource = {
   get mode() {
     return lastMode;
   },
-  detectSaves: async (_saveDirectory?: string, options?: { allowPicker?: boolean }) => {
+  detectSaves: async (
+    _saveDirectory?: string,
+    options?: { allowPicker?: boolean; remember?: boolean }
+  ) => {
     // Whether this call is allowed to open a dialog. A scan runs on load, on entering a tab and after
     // pairing a bridge, so the default has to be "no": a picker on any of those is a file dialog the
     // manager never asked for. Only the explicit choose-a-file action passes true.
     const allowPicker = options?.allowPicker === true;
+    // The remembering picker only on request. Chrome and Edge block it from AppData - "can't open files
+    // in this folder because it contains system files" - and FC 25 and FC 26 keep careers in AppData, so
+    // as the default it refused the very file most managers came to open. The standard dialog has no
+    // such block, in any browser.
+    const remember = options?.remember === true && hasPicker();
 
     // The bridge first, when the manager has set one up. It is the only path that needs no dialog and no
     // permission in any browser, so when it has something to offer nothing else is consulted.
@@ -304,42 +321,65 @@ export const saveSource: SaveSource = {
       return [remembered.candidate];
     }
 
-    if (!hasPicker()) {
+    if (!allowPicker) {
+      // A file chosen through the standard dialog earlier in this page is still the answer. This is the
+      // scan that runs straight after a pick, and returning nothing here is what made the pick vanish.
+      if (inputPicks.length > 0) {
+        scan = [{ path: "", label: "file picker", exists: true }];
+        return inputPicks;
+      }
+      // Chrome and Edge would happily open a picker here, and the call is inside the activation window
+      // that a nav-tab click leaves behind - which is exactly how a scan came to pop a file dialog on the
+      // way through the app. This is the boundary that stops it.
+      scan = [
+        { path: "", label: canUseFileInput() || hasPicker() ? "No save file chosen yet." : UNSUPPORTED, exists: false },
+      ];
+      return [];
+    }
+
+    if (!remember) {
       if (!canUseFileInput()) {
         scan = [{ path: "", label: UNSUPPORTED, exists: false }];
         return [];
       }
-      if (!allowPicker || !hasUserGesture()) {
-        // Either no press behind the call, or no press at all. Opening the dialog here would do nothing
-        // and never settle, so the honest answer is that nothing has been chosen yet and the button is
-        // the way in.
+      if (!hasUserGesture()) {
+        // No press behind the call. Opening the dialog here would do nothing in Firefox and never
+        // settle, so the honest answer is that nothing has been chosen yet and the button is the way in.
         scan = [{ path: "", label: "No save file chosen yet.", exists: false }];
         return [];
       }
 
-      const { candidates, filteredOut } = acceptFiles(await chooseFiles());
+      const chosen = await chooseFiles();
+      // A dismissed dialog keeps whatever was picked before, rather than wiping a working save.
+      if (chosen.length === 0) {
+        scan = [{ path: "", label: "file picker", exists: inputPicks.length > 0 }];
+        return inputPicks;
+      }
+
+      const { candidates, filteredOut } = acceptFiles(chosen);
+      // A standard pick replaces a remembered handle: the manager has just pointed the app at a file,
+      // and a stale handle would otherwise win the next scan and put the old save back on screen.
+      if (candidates.some((candidate) => candidate.slotKind !== "database")) {
+        await forgetSaveHandle();
+      }
+      inputPicks = candidates;
       scan = filteredOut
         ? [{ path: "", label: filteredOut, exists: false }]
         : [{ path: "", label: "file picker", exists: candidates.length > 0 }];
       return candidates;
     }
 
-    if (!allowPicker) {
-      // Chrome and Edge would happily open the picker here, and the call is inside the activation
-      // window that a nav-tab click leaves behind - which is exactly how a scan came to pop a file
-      // dialog on the way through the app. This is the boundary that stops it.
-      scan = [{ path: "", label: "No save file chosen yet.", exists: false }];
-      return [];
-    }
-
     let handles: FileSystemFileHandle[];
     try {
       handles = await window.showOpenFilePicker!(PICKER_OPTIONS);
     } catch {
-      // Dismissing the picker is a normal outcome, not a failure, and nothing was probed.
-      scan = [];
-      return [];
+      // Dismissing the picker is a normal outcome, not a failure, and nothing was probed. So is Chrome
+      // refusing a file in AppData, which reaches here looking exactly like a dismissal - the reason the
+      // standard dialog is the default and this picker is opt-in.
+      scan = inputPicks.length > 0 ? [{ path: "", label: "file picker", exists: true }] : [];
+      return inputPicks;
     }
+    inputPicks = [];
 
     const files = await Promise.all(handles.map((handle) => handle.getFile()));
     const { candidates, filteredOut } = acceptFiles(files);
@@ -417,8 +457,11 @@ export const saveSource: SaveSource = {
   },
 
   forgetRememberedSave: async () => {
+    inputPicks = [];
     await forgetSaveHandle();
   },
+
+  canRememberSave: () => hasPicker(),
 
   /**
    * Id only. The wizard sends the candidate's `filePath` as well, but a page cannot read a path -
