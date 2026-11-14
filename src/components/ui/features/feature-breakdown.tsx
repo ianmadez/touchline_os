@@ -95,6 +95,8 @@ const SECTIONS: Section[] = [
       {
         title: "Season Outlook",
         body: "Points per match, goal difference and your own objective sit beside the board's objective from the save, and the two are never merged. The save's league-position field can't be trusted, so you confirm your place a few times and after three readings it works it out on its own.",
+        shot: shot("outlook", "Season outlook with points per match, your objective beside the board's, and where you stand", 1212, 632),
+        wide: true,
       },
       {
         title: "Honours",
@@ -182,6 +184,8 @@ const SECTIONS: Section[] = [
       {
         title: "The Squad List",
         body: "Every senior player with position, overall, potential, age and fitness from the save, and faces for real players. Filter to the injured, the youngsters, the untouchables or the surplus, or switch to match stats to see what each player has done in the games you've logged.",
+        shot: shot("squad", "Squad list with position, overall, potential, age, fitness and your role and trust columns", 1216, 640),
+        wide: true,
       },
       {
         title: "Manager's Assessment",
@@ -222,10 +226,12 @@ const SECTIONS: Section[] = [
       {
         title: "Saved Formations",
         body: "Keep more than one shape: your first-choice XI, a cup side, a back three for when you're chasing a game. Name them, rename them, choose from 33 formations and fill each slot from a bench you can sort.",
+        shot: shot("formations", "Two saved formations, a first-choice XI and a 3-5-2 cup side", 803, 803),
       },
       {
         title: "Shape Changes Count",
         body: "Moving a player or changing a role is logged as an event. Your debriefs use the current shape by default, and the vault uses the shapes you recorded to show how your tactics changed across a season.",
+        shot: shot("tactics-board", "Starting XI on the pitch beside the sortable squad bench", 1216, 803),
       },
     ],
   },
@@ -274,6 +280,7 @@ const SECTIONS: Section[] = [
       {
         title: "Realism & Playstyle",
         body: "Realism runs from Chaos to Strict and decides how ambitious your targets can be and whether league rules are enforced. Playstyle sets the job you've given yourself: Moneyball, youth only, young signings, forgotten legends, veterans, or no limits beyond your own. Currency and weekly or annual wages are in here too.",
+        shot: shot("realism", "Realism level, manager playstyle, currency and wage display settings", 768, 425),
       },
       {
         title: "Your Data, Your Copy",
@@ -390,7 +397,7 @@ export function FeatureBreakdown() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
               {section.features.map((feature) => (
                 <article
                   key={feature.title}
@@ -412,7 +419,7 @@ export function FeatureBreakdown() {
                     )}
                   </div>
                   {feature.shot && (
-                    <div className="mt-auto rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center p-2 sm:p-3">
+                    <div className="rounded-2xl bg-slate-200/60 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden flex items-center justify-center p-2 sm:p-3">
                       <Image
                         src={feature.shot.src}
                         alt={feature.shot.alt}

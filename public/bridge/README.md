@@ -9,15 +9,23 @@ Both live in the same download now. There is no separate "core" to set up.
 
 ## What it needs
 
-Node.js. That is the only requirement. There is nothing to install, no `npm install`, nothing to build.
+Node.js 22 or newer. That is the only requirement. There is nothing to install, no `npm install`,
+nothing to build.
 
-If you don't have it, get the LTS version from <https://nodejs.org>, then run this again.
+If you don't have it, or yours is older, get the LTS version from <https://nodejs.org>, then run this
+again. The launcher checks the version and tells you if it is too old.
 
 ## How to run it
 
 Double-click **`TouchlineBridge.cmd`**.
 
 A window opens and stays open. Leave it open while you want the website to read your save by itself.
+
+**The first time**, it also opens TouchlineOS in your browser with your pairing code already in the link,
+and the website connects to it by itself. There is nothing to type. The same link is printed in the window
+as **Connect website**, so if you use another browser, or the tab got closed, open that link there. The
+code travels in the part of the link after `#`, which browsers never send to any server, and the page
+clears it from the address bar as soon as it has read it.
 
 **To use your phone as well**, run it with `share`:
 
@@ -33,8 +41,18 @@ Pairing is off unless you ask for it. A plain double-click never opens a port on
 
 To stop, close the window or press `Ctrl+C`. Your career is unaffected either way.
 
-If you want it available every time you turn the computer on, put a shortcut to `TouchlineBridge.cmd` in
-your Startup folder.
+## Start it with Windows
+
+```
+TouchlineBridge.cmd autostart          (your save only)
+TouchlineBridge.cmd autostart share    (your save and your phone)
+TouchlineBridge.cmd autostart off      (stop starting with Windows)
+```
+
+Run one of those once. It puts a shortcut in your Startup folder that opens the bridge minimised every
+time you sign in. It does not open a browser tab when it starts, and if a copy is already running it
+quietly does nothing. If you move this folder, run `autostart` again so the shortcut points at the new
+place.
 
 ## Where your career lives
 

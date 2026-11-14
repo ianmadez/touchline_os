@@ -274,6 +274,26 @@ async function resolveBridgeSave(): Promise<SaveCandidate[] | null> {
   return response.saves;
 }
 
+/**
+ * Takes save files dropped onto the page, exactly as if they had been chosen in the standard dialog.
+ *
+ * Dragging from Explorer is often quicker than any dialog, and it has no AppData block either: the
+ * browser hands over the file, not a handle. The next scan returns these, so the caller only has to re-run
+ * it. The reason a file was left out comes back so the screen can say it instead of looking unmoved.
+ */
+export async function acceptDroppedSaves(
+  files: File[]
+): Promise<{ accepted: number; filteredOut: string | null }> {
+  const { candidates, filteredOut } = acceptFiles(files);
+  const usable = candidates.filter((candidate) => candidate.slotKind !== "database");
+  if (usable.length > 0) {
+    // Same rule as a dialog pick: what the manager just handed over beats a stale remembered handle.
+    await forgetSaveHandle();
+    inputPicks = candidates;
+  }
+  return { accepted: usable.length, filteredOut };
+}
+
 export const saveSource: SaveSource = {
   // A getter rather than a literal, because the answer changes per scan: this build serves whichever of
   // the bridge and the picker actually produced the candidates.

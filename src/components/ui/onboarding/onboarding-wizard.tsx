@@ -28,6 +28,33 @@ const SAVE_FOLDERS = [
 ];
 
 /**
+ * A one-word button that copies a save folder, for pasting into the file dialog's File name box.
+ * Windows expands `%LOCALAPPDATA%` there, so it lands in the right folder even though AppData is hidden.
+ */
+function CopyFolderChip({ label, path }: { label: string; path: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(path);
+      setState("copied");
+    } catch {
+      setState("failed");
+    }
+    window.setTimeout(() => setState("idle"), 2500);
+  };
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      title={`Copy ${path}`}
+      className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 hover:border-[#E11D48] hover:text-[#E11D48] dark:hover:text-[#FF8C7A] transition-colors cursor-pointer"
+    >
+      {state === "copied" ? "Copied ✓" : state === "failed" ? "Copy blocked" : `Copy ${label} folder`}
+    </button>
+  );
+}
+
+/**
  * A folder path that copies itself when clicked.
  *
  * The point is that nobody should have to retype a path with two backslash-escaped folders in it into
@@ -115,6 +142,11 @@ interface OnboardingWizardProps {
   canRememberSave?: boolean;
   onChooseRemembered?: () => void;
   /**
+   * Save files dropped onto step 1. Only passed where a page has to be handed the file (the browser
+   * build); the desktop build scans its own folders and has nowhere to put a dropped file.
+   */
+  onDropSaves?: (files: File[]) => void;
+  /**
    * Whether this browser can still read the save it was given earlier.
    *
    * `needs-permission` is the one state a page cannot resolve by itself: a browser never re-grants
@@ -152,6 +184,7 @@ export function OnboardingWizard({
   onRescan,
   canRememberSave = false,
   onChooseRemembered,
+  onDropSaves,
   saveSourceMode = "folders",
   rememberedSave = "none",
   onRegrant,
@@ -164,6 +197,8 @@ export function OnboardingWizard({
   savesUnavailableReason = null,
 }: OnboardingWizardProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [saveDragActive, setSaveDragActive] = useState(false);
+  const acceptsDrop = saveSourceMode === "picker" && Boolean(onDropSaves);
   // The manager's explicit pick, if any. What is actually selected is derived from it below on every
   // render, because candidates can arrive AFTER this screen mounts: the browser build has none until a
   // file is chosen, and a selection seeded once from an empty list stayed empty, leaving Continue
@@ -285,7 +320,39 @@ export function OnboardingWizard({
 
       {/* STEP 1: SAVE FILE */}
       {step === 1 && (
-        <div className="space-y-6">
+        <div
+          className={`space-y-6 rounded-2xl transition-[box-shadow,background-color] ${
+            acceptsDrop ? "-m-3 p-3" : ""
+          } ${saveDragActive ? "ring-2 ring-[#E11D48] bg-rose-50/40 dark:bg-rose-950/10" : ""}`}
+          onDragOver={
+            acceptsDrop
+              ? (event) => {
+                  if (!event.dataTransfer.types.includes("Files")) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "copy";
+                  setSaveDragActive(true);
+                }
+              : undefined
+          }
+          onDragLeave={
+            acceptsDrop
+              ? (event) => {
+                  // Leaving for a child element is not leaving the zone.
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSaveDragActive(false);
+                }
+              : undefined
+          }
+          onDrop={
+            acceptsDrop
+              ? (event) => {
+                  event.preventDefault();
+                  setSaveDragActive(false);
+                  const files = Array.from(event.dataTransfer.files);
+                  if (files.length > 0) onDropSaves?.(files);
+                }
+              : undefined
+          }
+        >
           <div className="flex items-center gap-2 mb-2">
             <svg className="w-5 h-5 text-[#E11D48]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
@@ -396,6 +463,21 @@ export function OnboardingWizard({
                     {savesUnavailableReason ? "Try again" : saveRefreshLabel(saveSourceMode)}
                   </button>
                 )
+              )}
+              {acceptsDrop && rememberedSave !== "needs-permission" && (
+                <div className="pt-1 space-y-2">
+                  <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Or drag the save from File Explorer onto this box. Stuck in the dialog? Copy your
+                    game&rsquo;s folder, paste it into the dialog&rsquo;s{" "}
+                    <span className="font-semibold text-slate-700 dark:text-slate-200">File name</span> box and
+                    press Enter to jump straight there.
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {SAVE_FOLDERS.slice(0, 3).map((folder) => (
+                      <CopyFolderChip key={folder.game} label={folder.game.replace("EA SPORTS ", "")} path={folder.path} />
+                    ))}
+                  </div>
+                </div>
               )}
               {saveSourceMode === "picker" &&
                 canRememberSave &&

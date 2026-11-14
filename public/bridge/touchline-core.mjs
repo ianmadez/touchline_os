@@ -27695,10 +27695,14 @@ var init_settings_service = __esm({
 async function listSaveCandidates() {
   return scan({ allowPicker: false });
 }
-async function chooseSave() {
-  return scan({ allowPicker: true });
+async function chooseSave(payload) {
+  const remember = payload?.remember === true;
+  return scan({ allowPicker: true, remember });
 }
-async function scan({ allowPicker }) {
+async function scan({
+  allowPicker,
+  remember = false
+}) {
   try {
     let saveDirectory;
     try {
@@ -27706,7 +27710,7 @@ async function scan({ allowPicker }) {
     } catch {
       saveDirectory = void 0;
     }
-    const detected = await saveSource.detectSaves(saveDirectory, { allowPicker });
+    const detected = await saveSource.detectSaves(saveDirectory, { allowPicker, remember });
     const seen = /* @__PURE__ */ new Set();
     const saves = detected.filter((save) => save.slotKind !== "database").filter((save) => {
       const key = `${save.fileName}|${save.fileSizeBytes}|${save.lastModified.getTime()}`;
@@ -27732,6 +27736,8 @@ async function scan({ allowPicker }) {
       // Whether the browser is still allowed to read a save it was given earlier, so the wizard can
       // offer one click to re-confirm access instead of the whole choose-a-file flow again.
       rememberedSave: await saveSource.rememberedSave(),
+      // Whether a remembering picker exists here at all, so the wizard only offers it where it can work.
+      canRememberSave: saveSource.canRememberSave?.() ?? false,
       // What the optional local bridge is doing. `unsupported` on the desktop build, which has no bridge
       // and needs none - it already scans this machine directly - so the UI hides the feature there
       // rather than offering a control that could never work.
@@ -29567,7 +29573,7 @@ async function readTargetBlocks(careerId, season) {
     if (!careerId) {
       return at(400, { success: false, error: "careerId is required." });
     }
-    const seasonParam = Number(season);
+    const seasonParam = season === null || season.trim() === "" ? NaN : Number(season);
     const seasonNumber = Number.isFinite(seasonParam) ? seasonParam : void 0;
     const service = new TargetBlockService();
     const [blocks, targetPosition] = await Promise.all([
@@ -31255,7 +31261,8 @@ async function removeTrophyWin(params) {
   try {
     const careerId = params.get("careerId");
     const key = params.get("key");
-    const season = Number(params.get("season"));
+    const seasonRaw = params.get("season");
+    const season = seasonRaw === null || seasonRaw.trim() === "" ? NaN : Number(seasonRaw);
     if (!careerId || !key || !Number.isFinite(season)) {
       return at(400, { success: false, error: "careerId, key and season are required." });
     }
@@ -36652,7 +36659,7 @@ async function dispatch(call) {
       if (parsed.failure) return parsed.failure;
       const action = parsed.value?.action;
       if (action === "reconnect") return reconnectRememberedSave();
-      if (action === "choose") return chooseSave();
+      if (action === "choose") return chooseSave(parsed.value);
       if (action === "forget") return forgetRememberedSave();
       if (action === "bridge-pair") return pairLocalBridge(parsed.value);
       if (action === "bridge-forget") return forgetLocalBridge();
@@ -38561,6 +38568,7 @@ var init_save_watcher = __esm({
 // bridge/touchline-core.ts
 var import_qrcode2 = __toESM(require_lib());
 init_bridge_server();
+import { spawn } from "node:child_process";
 import fs11 from "node:fs";
 import os4 from "node:os";
 import path12 from "node:path";
@@ -38796,7 +38804,9 @@ function readOptions() {
       return raw === "" ? "" : path12.resolve(raw);
     })(),
     noLoopback: process.argv.includes("--no-loopback"),
-    noWatch: process.argv.includes("--no-watch") || process.env.TOUCHLINE_NO_WATCH === "1"
+    noWatch: process.argv.includes("--no-watch") || process.env.TOUCHLINE_NO_WATCH === "1",
+    // `TOUCHLINE_OPEN=0` for the launcher's Startup mode, since npm would swallow `--no-open` itself.
+    open: process.argv.includes("--open") ? true : process.argv.includes("--no-open") || process.env.TOUCHLINE_OPEN === "0" ? false : null
   };
 }
 function appLooksBuilt(appDir) {
@@ -38806,6 +38816,7 @@ async function main() {
   const options = readOptions();
   const boot = prepareCore();
   process.env.DATABASE_URL = boot.paths.dbPath;
+  const firstRun = !fs11.existsSync(configPath());
   const config2 = loadOrCreateConfig(options.loopbackPort);
   const store = DeviceStore.load(path12.join(boot.paths.dataDir, "remote.json"));
   if (options.share === true && !store.sharing()) store.setSharing(true);
@@ -38877,7 +38888,12 @@ async function main() {
   watcher?.start();
   startPeriodicRescan();
   const phoneUrl = pairingAddress2(options.lanPort) ?? `http://${hostName}:${options.lanPort}`;
-  printBanner({ config: config2, options, boot, store, loopbackUp, lanUp, phoneUrl });
+  const pairLink = loopbackUp ? `${(options.appUrl || DEFAULT_APP_URL).replace(/\/+$/, "")}/#bridge=${config2.code}${options.loopbackPort === DEFAULT_PORT ? "" : `:${options.loopbackPort}`}` : null;
+  printBanner({ config: config2, options, boot, store, loopbackUp, lanUp, phoneUrl, pairLink });
+  if (pairLink && (options.open ?? firstRun)) {
+    openInBrowser(pairLink);
+    console.log("  Opened TouchlineOS in your browser to connect it to this PC.\n");
+  }
   if (lanUp && !appLooksBuilt(options.appDir)) {
     console.log(
       `  Note: the app is not built on this PC, so a phone fetches it from ${options.appUrl || "(nowhere)"}`
@@ -38906,8 +38922,18 @@ async function main() {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 }
+function openInBrowser(url) {
+  try {
+    const [command, args] = process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", url]] : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
+    const child = spawn(command, args, { detached: true, stdio: "ignore" });
+    child.on("error", () => {
+    });
+    child.unref();
+  } catch {
+  }
+}
 function printBanner(input) {
-  const { boot, config: config2, options, store, loopbackUp, lanUp, phoneUrl } = input;
+  const { boot, config: config2, options, store, loopbackUp, lanUp, phoneUrl, pairLink } = input;
   console.log("");
   console.log("  TouchlineOS core is running.");
   console.log("");
@@ -38918,17 +38944,25 @@ function printBanner(input) {
   if (loopbackUp) {
     console.log(`    This PC only:     http://${HOST}:${options.loopbackPort}`);
   }
+  if (pairLink) {
+    console.log(`    Connect website:  ${pairLink}`);
+    console.log("                      (open it once on this PC and the website pairs itself)");
+  }
   if (lanUp) {
     console.log(`    Your phone:       ${phoneUrl}  (same Wi-Fi)`);
     console.log(`    Paired devices:   ${store.devices().length}`);
   } else {
-    console.log("    Your phone:       sharing is off");
+    console.log("    Your phone:       off");
     console.log("");
-    console.log("  To use this career on a phone, start it again with sharing on:");
-    console.log("    TouchlineBridge.cmd share          (the download)");
-    console.log("    npm run core                       (set TOUCHLINE_REMOTE=1 first)");
-    console.log("    npx tsx bridge/touchline-core.ts --share");
-    console.log("  That opens one port on your own network, and nothing else. It never leaves your Wi-Fi.");
+    console.log("  This PC can use the career. A phone cannot yet, because nothing is answering");
+    console.log("  on your network: the app is only reachable from this computer.");
+    console.log("");
+    console.log("  To let a phone open it, stop this and run:");
+    console.log("    npm run phone                      (from the project folder)");
+    console.log("    TouchlineBridge.cmd share          (from the download)");
+    console.log("");
+    console.log("  That opens one port on your own Wi-Fi so the phone can load the app, and");
+    console.log("  nothing else. It never leaves your network, and it stops when this closes.");
   }
   console.log("");
 }

@@ -2,6 +2,9 @@
   "name": "touchline-os",
   "version": "0.3.2",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "predev": "node scripts/stage-ocr-assets.mjs",
     "dev": "next dev",

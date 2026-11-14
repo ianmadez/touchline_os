@@ -59,6 +59,7 @@ import {
 import type { AppSettingsPatch, ClientAppSettings } from "@/lib/settings-vocabulary";
 
 import { apiFetch } from "@/lib/platform/api-client";
+import { acceptDroppedSaves, canDropSaves } from "@/lib/platform/save-drop";
 interface HydrationResponse extends Partial<CareerHydrationPayload> {
   success: boolean;
   error?: string;
@@ -500,6 +501,23 @@ export default function TouchlineApp() {
   }, [loadSaveCandidates, setAppError]);
 
   /**
+   * Takes save files dragged onto the wizard, then re-scans so they appear exactly like a dialog pick.
+   * A file that was left out (empty, or a storage file rather than a career) is named rather than ignored.
+   */
+  const handleDropSaves = useCallback(
+    async (files: File[]) => {
+      try {
+        const { accepted, filteredOut } = await acceptDroppedSaves(files);
+        if (accepted === 0) setAppError(filteredOut ?? "That file is not a career save.");
+      } catch (error) {
+        setAppError((error as Error).message);
+      }
+      await loadSaveCandidates();
+    },
+    [loadSaveCandidates, setAppError]
+  );
+
+  /**
    * Re-grants access to the save this browser remembers, from a click.
    *
    * The click is load-bearing rather than decorative: a browser refuses to grant access to a file
@@ -564,14 +582,14 @@ export default function TouchlineApp() {
    * the entire point of pairing it.
    */
   const handlePairBridge = useCallback(
-    async (code: string) => {
+    async (code: string, port?: number) => {
       setPairingBridge(true);
       setBridgeError(null);
       try {
         const res = await apiFetch("/api/saves", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "bridge-pair", code }),
+          body: JSON.stringify({ action: "bridge-pair", code, ...(port ? { port } : {}) }),
         });
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -604,6 +622,25 @@ export default function TouchlineApp() {
     setBridgeState("off");
     await loadSaveCandidates();
   }, [loadSaveCandidates, setPairingBridge, setBridgeError, setBridgeState]);
+
+  /**
+   * Pairs with the bridge from the link its window opens: `#bridge=CODE`, or `#bridge=CODE:PORT` when it
+   * runs on a non-default port. The code is in the fragment, so it never reaches the website's server,
+   * and it is wiped from the address bar before anything else runs so it does not linger in history or
+   * get copied along with the URL. A link with no valid code is ignored.
+   */
+  useEffect(() => {
+    const match = /^#bridge=([ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6})(?::(\d{2,5}))?$/i.exec(
+      window.location.hash
+    );
+    if (!match) return;
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    // Deferred out of the effect body, and deliberately not cancelled on cleanup: the code has already
+    // been wiped from the address bar, so a development double-mount that cancelled this would lose it.
+    const code = match[1].toUpperCase();
+    const port = match[2] ? Number(match[2]) : undefined;
+    window.setTimeout(() => void handlePairBridge(code, port), 0);
+  }, [handlePairBridge]);
 
   // Restore persisted session and prevent re-entering onboarding wizard if career exists
   useEffect(() => {
@@ -1780,6 +1817,7 @@ export default function TouchlineApp() {
             onRescan={() => void handleForgetSave()}
             canRememberSave={canRememberSave}
             onChooseRemembered={() => void handleChooseSave(true)}
+            onDropSaves={canDropSaves ? (files) => void handleDropSaves(files) : undefined}
             rememberedSave={rememberedSave}
             onRegrant={() => void handleRegrantSave()}
             regranting={regranting}

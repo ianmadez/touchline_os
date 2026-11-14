@@ -24,6 +24,7 @@
  * one-way read the app has always done. It never listens anywhere but this machine's own addresses, and
  * the LAN listener does not exist unless `--share` was asked for.
  */
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -31,6 +32,7 @@ import QRCode from "qrcode";
 import {
   DEFAULT_PORT,
   HOST,
+  configPath,
   loadOrCreateConfig,
   startPeriodicRescan,
   type BridgeConfig,
@@ -61,6 +63,12 @@ interface CliOptions {
   noLoopback: boolean;
   /** Skips the save watcher. Used by the end-to-end check, which wants a predictable empty career. */
   noWatch: boolean;
+  /**
+   * Whether to open the website's pairing link in the browser. `null` means "only on the first run",
+   * which is when there is a website still to connect. Startup-with-Windows passes `--no-open`, so a
+   * reboot never throws a browser tab at anybody.
+   */
+  open: boolean | null;
 }
 
 function flag(name: string): string | null {
@@ -99,6 +107,12 @@ function readOptions(): CliOptions {
     })(),
     noLoopback: process.argv.includes("--no-loopback"),
     noWatch: process.argv.includes("--no-watch") || process.env.TOUCHLINE_NO_WATCH === "1",
+    // `TOUCHLINE_OPEN=0` for the launcher's Startup mode, since npm would swallow `--no-open` itself.
+    open: process.argv.includes("--open")
+      ? true
+      : process.argv.includes("--no-open") || process.env.TOUCHLINE_OPEN === "0"
+        ? false
+        : null,
   };
 }
 
@@ -120,6 +134,8 @@ async function main(): Promise<void> {
   // Published before ANY import that reaches the storage port. See the header.
   process.env.DATABASE_URL = boot.paths.dbPath;
 
+  // Checked before the config is created, because creating it is what makes this the first run.
+  const firstRun = !fs.existsSync(configPath());
   const config: BridgeConfig = loadOrCreateConfig(options.loopbackPort);
   const store = DeviceStore.load(path.join(boot.paths.dataDir, "remote.json"));
 
@@ -216,7 +232,20 @@ async function main(): Promise<void> {
 
   const phoneUrl = pairingAddress(options.lanPort) ?? `http://${hostName}:${options.lanPort}`;
 
-  printBanner({ config, options, boot, store, loopbackUp, lanUp, phoneUrl });
+  // The website pairs itself from this link: the code rides in the fragment, which never leaves the
+  // browser, and the page wipes it from the address bar as soon as it has read it.
+  const pairLink = loopbackUp
+    ? `${(options.appUrl || DEFAULT_APP_URL).replace(/\/+$/, "")}/#bridge=${config.code}${
+        options.loopbackPort === DEFAULT_PORT ? "" : `:${options.loopbackPort}`
+      }`
+    : null;
+
+  printBanner({ config, options, boot, store, loopbackUp, lanUp, phoneUrl, pairLink });
+
+  if (pairLink && (options.open ?? firstRun)) {
+    openInBrowser(pairLink);
+    console.log("  Opened TouchlineOS in your browser to connect it to this PC.\n");
+  }
 
   if (lanUp && !appLooksBuilt(options.appDir)) {
     console.log(
@@ -255,7 +284,29 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 }
 
+/**
+ * Opens a URL in the default browser without going through a shell, so nothing in the URL is ever
+ * interpreted as a command. `url.dll` is used on Windows because it hands the URL over intact, fragment
+ * included, where `start` would need escaping. A failure only costs the convenience: the link is printed.
+ */
+function openInBrowser(url: string): void {
+  try {
+    const [command, args] =
+      process.platform === "win32"
+        ? ["rundll32", ["url.dll,FileProtocolHandler", url]]
+        : process.platform === "darwin"
+          ? ["open", [url]]
+          : ["xdg-open", [url]];
+    const child = spawn(command as string, args as string[], { detached: true, stdio: "ignore" });
+    child.on("error", () => {});
+    child.unref();
+  } catch {
+    // The banner already shows the link to click.
+  }
+}
+
 interface BannerInput {
+  pairLink: string | null;
   config: BridgeConfig;
   options: CliOptions;
   boot: ReturnType<typeof prepareCore>;
@@ -266,7 +317,7 @@ interface BannerInput {
 }
 
 function printBanner(input: BannerInput): void {
-  const { boot, config, options, store, loopbackUp, lanUp, phoneUrl } = input;
+  const { boot, config, options, store, loopbackUp, lanUp, phoneUrl, pairLink } = input;
 
   console.log("");
   console.log("  TouchlineOS core is running.");
@@ -278,6 +329,10 @@ function printBanner(input: BannerInput): void {
 
   if (loopbackUp) {
     console.log(`    This PC only:     http://${HOST}:${options.loopbackPort}`);
+  }
+  if (pairLink) {
+    console.log(`    Connect website:  ${pairLink}`);
+    console.log("                      (open it once on this PC and the website pairs itself)");
   }
   if (lanUp) {
     console.log(`    Your phone:       ${phoneUrl}  (same Wi-Fi)`);

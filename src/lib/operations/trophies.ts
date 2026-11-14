@@ -91,7 +91,10 @@ export async function removeTrophyWin(
   try {
     const careerId = params.get("careerId");
     const key = params.get("key");
-    const season = Number(params.get("season"));
+    // A missing season must fail the check below. `Number(null)` is 0, which is finite, so without this
+    // a request with no season was accepted as season 0 and quietly removed nothing.
+    const seasonRaw = params.get("season");
+    const season = seasonRaw === null || seasonRaw.trim() === "" ? NaN : Number(seasonRaw);
     if (!careerId || !key || !Number.isFinite(season)) {
       return at(400, { success: false, error: "careerId, key and season are required." });
     }

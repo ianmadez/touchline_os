@@ -175,15 +175,36 @@ The result is always shown as a **band**, with its basis and evidence count stat
 
 ## Setup
 
+You need **Node.js 22 or newer**. The LTS from [nodejs.org](https://nodejs.org) is fine, and if you use
+nvm, `nvm use` picks the right version from `.nvmrc`. An older Node is refused at `npm install` with a
+message saying so, rather than failing halfway through the database driver.
+
 ```bash
-git clone <repo>
-cd touchline-os
+git clone https://github.com/ianmadez/touchline_os.git
+cd touchline_os
 npm install
-npm run db:init
 npm run dev
 ```
 
-Point the app at your FC Career save when prompted on first launch. Nothing is uploaded anywhere — all parsing and storage happens locally.
+Open <http://localhost:3000> and press **Enter Portal**. That's it:
+
+- **The database creates itself** on first run, in `data/touchline.db`. There is no init step.
+- **Your save is found automatically.** The app looks in the folders EA writes careers to (the FC 25,
+  FC 26 and FC 27 `settings` folders under AppData and Documents, and the older FIFA folders) and lists
+  every career it finds. You can also drop a save into `data/saves/`.
+- **Nothing is uploaded anywhere.** All parsing and storage happens on your PC.
+
+To run the website version (the one hosted on Cloudflare) locally instead, use `npm run dev:browser`.
+It keeps the career in the browser, and you choose the save file yourself or connect the bridge.
+
+### Using the website with the bridge
+
+On the website, a browser cannot look in your save folders by itself, so you choose the save file, or
+drag it from File Explorer onto the page. To skip that for good, download the bridge from the website
+and double-click `TouchlineBridge.cmd` (it needs Node.js 22 or newer and nothing else). The first time
+it runs it opens TouchlineOS in your browser and pairs itself, so there is no code to type. To have it
+start with Windows, run `TouchlineBridge.cmd autostart` once. The details are in
+[bridge/README.md](bridge/README.md).
 
 ### On a phone
 
