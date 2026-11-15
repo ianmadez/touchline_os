@@ -141,8 +141,15 @@ function installBrowser(options: { picker?: boolean; active?: boolean }): Harnes
   };
 }
 
-async function detect(): Promise<Awaited<ReturnType<typeof saveSource.detectSaves>>> {
-  const pending = saveSource.detectSaves();
+/** Lets the module run up to the point where it waits on the dialog: it checks the bridge and any remembered file first. */
+async function settle(): Promise<void> {
+  for (let index = 0; index < 10; index += 1) await new Promise((resolve) => setImmediate(resolve));
+}
+
+async function detect(options: { remember?: boolean } = {}): Promise<Awaited<ReturnType<typeof saveSource.detectSaves>>> {
+  // The explicit choose-a-file action: a scan on load never opens a dialog, so the checks below ask as the
+  // button does.
+  const pending = saveSource.detectSaves(undefined, { allowPicker: true, ...options });
   // Let the module reach the point where it is waiting for the dialog, then answer it.
   await new Promise((resolve) => setImmediate(resolve));
   return pending;
@@ -160,6 +167,7 @@ async function main(): Promise<void> {
       check("still describes the action as a picker", saveSource.mode === "picker");
 
       const pending = detect();
+      await settle();
       check("opens the browser's own file control", browser.inputs.length === 1,
         `${browser.inputs.length} input(s)`);
 
@@ -206,7 +214,11 @@ async function main(): Promise<void> {
   {
     const browser = installBrowser({ picker: false, active: true });
     try {
+      // Nothing picked before this one: a dismissal keeps an earlier pick on purpose, which is not what is
+      // being checked here.
+      await saveSource.forgetRememberedSave?.();
       const pending = detect();
+      await settle();
       check("opens the dialog", browser.inputs.length === 1);
 
       // No `change`. This is the browser finding out the dialog closed by getting focus back.
@@ -233,6 +245,7 @@ async function main(): Promise<void> {
     const browser = installBrowser({ picker: false, active: true });
     try {
       const pending = detect();
+      await settle();
       browser.inputs[0].files = [makeFile("storageInfo.bin", "not a save")];
       browser.inputs[0].fire("change");
       await pending;
@@ -249,8 +262,10 @@ async function main(): Promise<void> {
   {
     const browser = installBrowser({ picker: true, active: true });
     try {
-      const candidates = await detect();
-      check("uses the picker rather than the input", browser.inputs.length === 0,
+      // The standard dialog is the default everywhere, because Chrome's picker refuses files in AppData.
+      // The remembering picker is what the "pick it this way instead" link asks for.
+      const candidates = await detect({ remember: true });
+      check("uses the picker rather than the input when asked to remember", browser.inputs.length === 0,
         `${browser.inputs.length} input(s)`);
       check("returns the picked file", candidates.length === 1, candidates[0]?.fileName);
       const bytes = await saveSource.readBytes(candidates[0]);

@@ -281,6 +281,35 @@ async function main() {
     (await db.select().from(newsPublished).where(eq(newsPublished.id, doomed))).length === 1
   );
 
+  // A story the desk CAN still write is rewritten where it stands: same place, same edition, still read.
+  const survivor = rewritten?.items.find((item) => !item.saved) ?? null;
+  if (survivor) {
+    await db
+      .update(newsItems)
+      .set({
+        headline: "Old Headline",
+        articleJson: JSON.stringify(["Old wording."]),
+        copyVersion: NEWS_COPY_VERSION - 1,
+        edition: 777,
+        readAt: "2026-11-08T00:00:00.000Z",
+      })
+      .where(eq(newsItems.id, survivor.id));
+    await archive.read(careerId);
+    const [row] = await db.select().from(newsItems).where(eq(newsItems.id, survivor.id));
+    check(
+      "a story the desk can still write is rewritten in place in the new voice",
+      Boolean(row) && row.headline !== "Old Headline" && row.copyVersion === NEWS_COPY_VERSION,
+      row?.headline
+    );
+    check(
+      "and keeps its edition and the fact it has been read",
+      row?.edition === 777 && row?.readAt === "2026-11-08T00:00:00.000Z",
+      `${row?.edition} ${row?.readAt}`
+    );
+  } else {
+    check("a story the desk can still write is rewritten in place in the new voice", false, "no unsaved story on the paper");
+  }
+
   // Leaving nothing behind for the checks that follow.
   await db.delete(newsItems).where(eq(newsItems.id, savedOldVoiceId));
 

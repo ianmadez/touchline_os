@@ -71,6 +71,70 @@ export class NewsService {
    * it does not exist, and the archive decides what to do with the list.
    */
   async buildStories(careerId: string): Promise<NewsEdition | null> {
+    const prepared = await this.prepare(careerId);
+    if (!prepared) return null;
+    const { career, input, idsFor, matches, seasonNumber } = prepared;
+    const items: PublishedNewsItem[] = buildNews(input).map((item) => ({ ...item, playerIds: idsFor(item.playerNames) }));
+    return {
+      careerId,
+      clubName: career.clubName,
+      managerName: career.managerName,
+      leagueName: input.leagueName,
+      seasonNumber,
+      inGameDate: career.inGameDate,
+      matchesConsidered: matches.length,
+      matchEventIds: matches.map((match) => match.eventId),
+      items,
+    };
+  }
+
+  /**
+   * The stories with these ids, written again in the desk's current voice.
+   *
+   * This is what lets a rewrite of the desk reach a paper that is already printed. A story about a match is
+   * rewritten as of THAT match - the desk is run on the debriefs up to and including it, with nobody injured
+   * and no rating movements, because those are today's facts and not that day's - so a report on a game in
+   * September does not pick up a closing line about a player who got injured in November. A standing story is
+   * rewritten from today's facts, which is what it was about when it ran.
+   *
+   * An id the desk can no longer produce from the evidence is simply absent from the result; the archive
+   * decides what to do about it.
+   */
+  async rewrite(careerId: string, ids: readonly string[]): Promise<Map<string, PublishedNewsItem>> {
+    const out = new Map<string, PublishedNewsItem>();
+    if (ids.length === 0) return out;
+    const prepared = await this.prepare(careerId);
+    if (!prepared) return out;
+    const { input, idsFor } = prepared;
+    const editions = new Map<string, ReturnType<typeof buildNews>>();
+    const editionFor = (eventId: string | null) => {
+      const key = eventId ?? "";
+      const cached = editions.get(key);
+      if (cached) return cached;
+      const from = eventId === null ? -1 : input.matches.findIndex((match) => match.eventId === eventId);
+      const asOf: NewsInput =
+        from <= 0
+          ? input
+          : {
+              ...input,
+              matches: input.matches.slice(from),
+              injuries: [],
+              developments: [],
+              inGameDate: input.matches[from].matchDate ?? input.inGameDate,
+            };
+      const written = buildNews({ ...asOf, recentTypes: [] }, { maxStories: 99 });
+      editions.set(key, written);
+      return written;
+    };
+    for (const id of ids) {
+      const match = input.matches.find((entry) => id.endsWith(entry.eventId)) ?? null;
+      const story = editionFor(match?.eventId ?? null).find((item) => item.id === id);
+      if (story) out.set(id, { ...story, playerIds: idsFor(story.playerNames) });
+    }
+    return out;
+  }
+
+  private async prepare(careerId: string) {
     const career = await db.select().from(careers).where(eq(careers.id, careerId)).get();
     if (!career) return null;
 
@@ -96,7 +160,7 @@ export class NewsService {
       .select()
       .from(careerEvents)
       .where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "MEDIA_COMMENT")));
-    const commentsByDebriefId = new Map<string, { comment: string | null; refused: boolean }>();
+    const commentsByDebriefId = new Map<string, MediaExchange>();
     for (const row of commentRows) {
       const payload = safeParse(row.payloadJson);
       const debriefEventId = asText(payload.debriefEventId);
@@ -104,6 +168,10 @@ export class NewsService {
       commentsByDebriefId.set(debriefEventId, {
         comment: asText(payload.comment),
         refused: payload.refused === true || asText(payload.comment) === null,
+        // Only comments recorded since the question was stored carry it; older ones print the answer alone.
+        question: asText(payload.question),
+        outlet: asText(payload.outlet),
+        writer: asText(payload.writer),
       });
     }
 
@@ -387,24 +455,12 @@ export class NewsService {
       if (name && eaPlayerId !== null) eaIdByName.set(foldName(name), eaPlayerId);
     }
 
-    const items: PublishedNewsItem[] = buildNews(input).map((item) => ({
-      ...item,
-      playerIds: item.playerNames
+    const idsFor = (names: string[]) =>
+      names
         .map((name) => eaIdByName.get(foldName(name)))
-        .filter((eaPlayerId): eaPlayerId is number => typeof eaPlayerId === "number"),
-    }));
+        .filter((eaPlayerId): eaPlayerId is number => typeof eaPlayerId === "number");
 
-    return {
-      careerId,
-      clubName: career.clubName,
-      managerName: career.managerName,
-      leagueName: input.leagueName,
-      seasonNumber,
-      inGameDate: career.inGameDate,
-      matchesConsidered: matches.length,
-      matchEventIds: matches.map((match) => match.eventId),
-      items,
-    };
+    return { career, input, idsFor, matches, seasonNumber };
   }
 }
 
@@ -452,7 +508,7 @@ function asMinutes(value: unknown): number[] {
 function toMatch(
   eventId: string,
   payload: Record<string, unknown>,
-  comments: Map<string, { comment: string | null; refused: boolean }>
+  comments: Map<string, MediaExchange>
 ): NewsMatch | null {
   const scoreline = asText(payload.scoreline);
   const numbers = scoreline ? (scoreline.match(/\d+/g) ?? []).map(Number) : [];
@@ -514,5 +570,21 @@ function toMatch(
     expectedGoalsReported: stats ? asNumber(stats.expectedGoalsReported) : null,
     comment: comments.get(eventId)?.comment ?? null,
     commentRefused: comments.get(eventId)?.refused ?? false,
+    press: comments.get(eventId)?.question
+      ? {
+          question: comments.get(eventId)?.question as string,
+          outlet: comments.get(eventId)?.outlet ?? null,
+          writer: comments.get(eventId)?.writer ?? null,
+        }
+      : null,
   };
+}
+
+/** What was said to the press after one match, and what was asked, as the MEDIA_COMMENT event stored it. */
+interface MediaExchange {
+  comment: string | null;
+  refused: boolean;
+  question: string | null;
+  outlet: string | null;
+  writer: string | null;
 }

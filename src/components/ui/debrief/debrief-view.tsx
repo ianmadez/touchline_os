@@ -473,6 +473,9 @@ export function DebriefView({
     prompt: string;
     subject: string;
     opponent: string;
+    question: string;
+    outlet: string | null;
+    writer: string | null;
   } | null>(null);
   const [mediaComment, setMediaComment] = useState("");
   const [mediaBusy, setMediaBusy] = useState(false);
@@ -1203,6 +1206,9 @@ export function DebriefView({
           prompt: data.media.prompt ?? "The media want a word.",
           subject: data.media.subject ?? "",
           opponent: opponentLabel,
+          question: data.media.question ?? "",
+          outlet: data.media.outlet ?? null,
+          writer: data.media.writer ?? null,
         });
         setMediaComment("");
       }
@@ -1270,6 +1276,9 @@ export function DebriefView({
           debriefEventId: mediaPrompt.eventId,
           opponent: mediaPrompt.opponent,
           subject: mediaPrompt.subject,
+          question: mediaPrompt.question,
+          outlet: mediaPrompt.outlet,
+          writer: mediaPrompt.writer,
           comment: refused ? "" : mediaComment.trim(),
           refused,
         }),

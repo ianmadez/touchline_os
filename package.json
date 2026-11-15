@@ -35,6 +35,7 @@
     "trophies:test": "tsx scripts/test-trophies.ts",
     "browser:schema:test": "tsx scripts/test-browser-schema.ts",
     "news:test": "tsx scripts/test-news.ts",
+    "news:sample": "tsx scripts/sample-news.ts",
     "injury:test": "tsx scripts/test-injury.ts",
     "meta:index": "tsx scripts/build-meta-index.ts",
     "games:test": "tsx scripts/test-game-versions.ts",

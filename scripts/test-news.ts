@@ -14,7 +14,9 @@
  *
  *   npm run news:test
  */
-import { buildNews as buildEdition, foldName, roleGroup, typeOf, relevanceOf, salienceOf, MAX_CONCERN_STORIES, MAX_EDITION_STORIES, type NewsAbsence, type NewsInput, type NewsMatch, type NewsPlayer } from "../src/lib/news/news-engine";
+import fs from "fs";
+import path from "path";
+import { NEWS_COPY_VERSION, buildNews as buildEdition, foldName, roleGroup, typeOf, relevanceOf, salienceOf, MAX_CONCERN_STORIES, MAX_EDITION_STORIES, type NewsAbsence, type NewsInput, type NewsMatch, type NewsPlayer } from "../src/lib/news/news-engine";
 import { mediaAskFor } from "../src/lib/news/media";
 import { allOutlets } from "../src/lib/news/outlets";
 import { momentOf, phasePhrase, seasonPhase } from "../src/lib/news/moment";
@@ -706,7 +708,14 @@ check(
   )
 );
 
-check("a trophy in the cabinet is reported", has(rich, "trophy-"));
+check(
+  "a trophy won last season is reported",
+  has(buildNews(input({ trophies: [{ name: "League One", season: 2 }] })), "trophy-")
+);
+check(
+  "but one from three seasons ago is history, not news",
+  !has(buildNews(input({ trophies: [{ name: "League One", season: 0 }] })), "trophy-")
+);
 check("no trophies, no silverware story", !has(buildNews(input({ trophies: [] })), "trophy-"));
 
 console.log("\nthe save's own player news");
@@ -1154,8 +1163,10 @@ check(
   rich.every((item) => item.article.every((paragraph) => paragraph.trim().length > 0))
 );
 check(
+  // Not every story: a piece ends when its point is made, and padding a card out to two paragraphs was what
+  // made the first versions read like a template. Most of them have a second fact to tell.
   "most stories get a piece of more than one paragraph",
-  rich.filter((item) => item.article.length >= 2).length >= Math.ceil(rich.length * 0.8),
+  rich.filter((item) => item.article.length >= 2).length >= Math.ceil(rich.length * 0.6),
   `${rich.filter((item) => item.article.length >= 2).length} of ${rich.length}`
 );
 check(
@@ -1409,7 +1420,7 @@ check(
 );
 check(
   "the piece explains it at length rather than restating the card",
-  Boolean(down && down.article.length >= 4) &&
+  Boolean(down && down.article.length >= 3) &&
     Boolean(down && down.article.slice(1).every((paragraph) => paragraph !== down.body))
 );
 
@@ -1597,7 +1608,7 @@ check(
 
 check(
   "the piece is longer than the card and explains itself",
-  treatment.every((item) => item.article.length >= 3 && item.article[0] === item.body)
+  treatment.every((item) => item.article.length >= 2 && item.article[0] === item.body)
 );
 
 check(
@@ -2236,7 +2247,7 @@ check(
         }),
       })
     ).find((item) => item.id.startsWith("record-fee-"));
-    return Boolean(record && /largest fee .*received/i.test(record.body) && /departure/i.test(record.body));
+    return Boolean(record && /largest fee .*received/i.test(record.body) && /sell|walk away|departure/i.test(record.body));
   })()
 );
 check(
@@ -2569,8 +2580,9 @@ const pronounLeads = (sentence: string) =>
   /^(?:it|its|this|that|these|those|they|them|their|he|his|him|she|her)\b/i.test(sentence.trim());
 
 /** Every sentence of the closing paragraph, with the sentence before it. */
-function closingSentences(item: { article: string[] }) {
-  const closing = item.article.at(-1) ?? "";
+function closingSentences(item: { article: string[]; closing?: string | null }) {
+  // Only the line the desk ADDED. A story's own last paragraph is written for it and is not a closing line.
+  const closing = item.closing ?? "";
   const parts = closing.split(/(?<=[.!?])\s+/).map((part) => part.trim()).filter(Boolean);
   return parts.map((sentence, index) => ({
     sentence,
@@ -2687,6 +2699,281 @@ check(
     .filter((item) => item.category === "FINANCE")
     .every((item) => item.kind === "FINANCE")
 );
+
+// ---------------------------------------------------------------------------------------------
+// The refurbishment: the paper reads like a paper
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nthe paper does not repeat itself or pad");
+
+/**
+ * Stock phrases the desk used to lean on. None of them said anything, and every one of them turned up under
+ * several stories at once. They are listed here so they cannot come back.
+ */
+const STOCK_PHRASES = [
+  /the clock that matters/i,
+  /a different thing to be judged on/i,
+  /the context these arguments sit inside/i,
+  /the number everything else is worked out from/i,
+  /have the room to change a side once/i,
+  /which is where the value is here/i,
+  /which is itself an answer/i,
+  /a fee becomes nothing/i,
+  /shows up in a match before it shows up on a list/i,
+  /counts the same as any other/i,
+  /the cabinet is in the Season tab/i,
+  /not for much longer on this form/i,
+  /is unfinished, and this is one of the things it is being made of/i,
+  /the part of this worth holding on to/i,
+  /moving in the right direction, and that changes what/i,
+];
+
+/** Every edition the checks can build: the rich one, a crisis, a cup night and a quiet squad-only career. */
+const crisisInput = input({
+  position: { value: 21, basis: "save", disputed: false },
+  block: { gamesPlayed: 5, points: 1 },
+  matches: [
+    match({ eventId: "c1", opponent: "Millbrook", result: "LOSS", goalsFor: 0, goalsAgainst: 4, concededMinutes: [3, 22, 58, 77], shots: 5, expectedGoalsReported: 0.3 }),
+    match({ eventId: "c2", matchDate: "2026-09-26", opponent: "Dunmore", venue: "Away", result: "LOSS", goalsFor: 2, goalsAgainst: 3, scorers: ["Jordan Pike", "Omar Haddad"], goalMinutes: [10, 34], concededMinutes: [60, 86, 90] }),
+    match({ eventId: "c3", matchDate: "2026-09-19", opponent: "Calder Vale", result: "DRAW", goalsFor: 1, goalsAgainst: 1, scorers: ["Omar Haddad"], goalMinutes: [30], concededMinutes: [88] }),
+    match({ eventId: "c4", matchDate: "2026-09-12", opponent: "Ashford Town", result: "LOSS", goalsFor: 0, goalsAgainst: 2, concededMinutes: [40, 70] }),
+    match({ eventId: "c5", matchDate: "2026-09-05", opponent: "Westerly", result: "LOSS", goalsFor: 0, goalsAgainst: 1, concededMinutes: [90] }),
+  ],
+});
+const cupInput = input({
+  matches: [
+    match({ eventId: "k1", opponent: "Arsenal", competition: "FA Cup", venue: "Away", result: "WIN", goalsFor: 2, goalsAgainst: 1, scorers: ["Danny Whitlock", "Danny Whitlock"], goalMinutes: [55, 88], concededMinutes: [8], standouts: ["Marcus Bell"] }),
+    ...MATCHES.slice(1),
+  ],
+});
+const refurbEditions = { rich: buildNews(input()), crisis: buildNews(crisisInput), cup: buildNews(cupInput) };
+const refurbStories = Object.values(refurbEditions).flat();
+
+const stockHits = refurbStories.flatMap((item) =>
+  STOCK_PHRASES.filter((pattern) => item.article.some((paragraph) => pattern.test(paragraph))).map(
+    (pattern) => `${item.id}: ${pattern.source}`
+  )
+);
+check("none of the old stockHits phrases is printed", stockHits.length === 0, stockHits.slice(0, 4).join(" | "));
+
+const crowdedParagraphs = refurbStories.flatMap((item) =>
+  item.article
+    .filter((paragraph) => (paragraph.match(/Kingsbridge Athletic/g) ?? []).length > 1)
+    .map((paragraph) => `${item.id}: ${paragraph.slice(0, 80)}`)
+);
+check("the club's full name is said at most once a paragraph", crowdedParagraphs.length === 0, crowdedParagraphs.slice(0, 3).join(" | "));
+
+const fullNameTwice = refurbStories.filter(
+  (item) => item.article.join(" ").split("Kingsbridge Athletic").length - 1 > 1
+);
+check(
+  "and once a piece has introduced the club it calls it Kingsbridge",
+  fullNameTwice.length === 0,
+  fullNameTwice.map((item) => item.id).slice(0, 4).join(", ")
+);
+
+for (const [label, edition] of Object.entries(refurbEditions)) {
+  const record = /(?:one|two|three|four|five) wins?(?:, | and )[^.]*?(?:draws?|defeats?)/i;
+  const carrying = edition.filter((item) => item.article.some((paragraph) => record.test(paragraph)));
+  check(
+    `the run of results is told by at most three stories in the ${label} edition`,
+    carrying.length <= 3,
+    carrying.map((item) => item.id).join(", ")
+  );
+  const closings = edition.map((item) => item.closing).filter((line): line is string => Boolean(line));
+  check(
+    `and closing lines are the exception in the ${label} edition, not the rule`,
+    closings.length <= Math.ceil(edition.length / 3),
+    `${closings.length} of ${edition.length}`
+  );
+}
+
+console.log("\nscorelines and the match report");
+
+const awayWinEdition = buildNews(
+  input({ matches: [match({ eventId: "aw", venue: "Away", opponent: "Rovers", result: "WIN", goalsFor: 2, goalsAgainst: 1, scorers: ["Jordan Pike", "Jordan Pike"], goalMinutes: [30, 80], concededMinutes: [10] }), ...MATCHES.slice(1)] })
+);
+check(
+  "an away win prints the home side's score first, so it does not read as a defeat",
+  !awayWinEdition.some((item) => item.headline.includes("Rovers 2-1 Kingsbridge")) &&
+    awayWinEdition.every((item) => !/Rovers 2-1 Kingsbridge/.test(item.article.join(" "))),
+  awayWinEdition.find((item) => item.id.startsWith("result-"))?.headline
+);
+const crisisReport = refurbEditions.crisis.find((item) => item.id === "result-c1");
+check(
+  "a defeat is told the way football says it: lost 4-0, never 0-4",
+  Boolean(crisisReport) && /4-0/.test(crisisReport?.body ?? "") && !/0-4/.test(crisisReport?.article.join(" ") ?? ""),
+  crisisReport?.body
+);
+check(
+  "a league called the Championship is not reported as a cup tie",
+  !/in the Championship/.test(refurbEditions.rich.find((item) => item.id === "result-evt-1")?.body ?? ""),
+  refurbEditions.rich.find((item) => item.id === "result-evt-1")?.body
+);
+const cupLead = refurbEditions.cup.find((item) => item.id === "result-k1");
+check(
+  "a cup tie says which cup",
+  Boolean(cupLead && /FA Cup/.test(cupLead.body)),
+  cupLead?.body
+);
+check(
+  "and when one player scored every goal, the winner is his by name and minute",
+  Boolean(cupLead && /Danny Whitlock/.test(cupLead.body) && /88/.test(cupLead.article.join(" "))),
+  cupLead?.article.join(" ")
+);
+check(
+  "the report tells how the match unfolded when every goal has a minute",
+  Boolean(crisisReport && /behind on 3 minutes/.test(crisisReport.article.join(" "))),
+  crisisReport?.article.join(" | ")
+);
+
+const pressedReport = buildNews(
+  input({
+    matches: [
+      {
+        ...MATCHES[0],
+        comment: "We were brilliant.",
+        press: { question: "Whether Jordan Pike has become undroppable?", outlet: "The Touchline", writer: "Owen Fairhurst" },
+      },
+      ...MATCHES.slice(1),
+    ],
+  })
+).find((item) => item.id === "result-evt-1");
+check(
+  "a stored press question is printed as the exchange, with the answer as the quote",
+  Boolean(pressedReport && /asked Alex Fenn whether Jordan Pike has become undroppable/.test(pressedReport.body) && pressedReport.quote === "We were brilliant."),
+  pressedReport?.body
+);
+
+const firstWinReport = buildNews(
+  input({
+    matches: [
+      match({ eventId: "fw0", matchDate: "2026-11-01", result: "WIN", goalsFor: 1, goalsAgainst: 0, scorers: ["Jordan Pike"], goalMinutes: [50] }),
+      ...[1, 2, 3, 4].map((index) => match({ eventId: `fw${index}`, matchDate: `2026-10-${String(20 - index).padStart(2, "0")}`, result: "LOSS", goalsFor: 0, goalsAgainst: 1, concededMinutes: [60] })),
+      match({ eventId: "fw5", matchDate: "2026-09-10", result: "WIN", goalsFor: 2, goalsAgainst: 0, scorers: ["Omar Haddad", "Omar Haddad"], goalMinutes: [10, 20] }),
+    ],
+  })
+).find((item) => item.id === "result-fw0");
+check(
+  "a first win in a while is noticed, measured from a win that is on the record",
+  Boolean(firstWinReport && /ends a run of four matches without a win/.test(firstWinReport.article.join(" ")) && /September/.test(firstWinReport.article.join(" "))),
+  firstWinReport?.article.join(" | ")
+);
+
+console.log("\nthe columns argue from the numbers");
+
+const managerColumnOf = (items: typeof rich) => items.find((item) => item.id.startsWith("opinion-manager-"));
+// A slump with the latest match drawn, so the column is not crowded off the page by the fairness cap, which
+// keeps the two strongest criticisms and the defeat report would otherwise be one of them.
+const slump = buildNews(
+  input({
+    matches: [
+      match({ eventId: "s1", result: "DRAW", goalsFor: 1, goalsAgainst: 1, scorers: ["Jordan Pike"], goalMinutes: [20], concededMinutes: [70] }),
+      match({ eventId: "s2", matchDate: "2026-09-26", result: "LOSS", goalsFor: 0, goalsAgainst: 2, concededMinutes: [10, 50] }),
+      match({ eventId: "s3", matchDate: "2026-09-19", result: "LOSS", goalsFor: 1, goalsAgainst: 3, scorers: ["Omar Haddad"], goalMinutes: [5], concededMinutes: [30, 60, 80] }),
+      match({ eventId: "s4", matchDate: "2026-09-12", result: "LOSS", goalsFor: 0, goalsAgainst: 1, concededMinutes: [44] }),
+      match({ eventId: "s5", matchDate: "2026-09-05", result: "DRAW", goalsFor: 0, goalsAgainst: 0 }),
+    ],
+  })
+);
+check(
+  "a side on a bad run does not get the benefit of the doubt",
+  Boolean(managerColumnOf(slump)) && !/Benefit of the Doubt/i.test(managerColumnOf(slump)?.headline ?? "") && managerColumnOf(slump)?.stance === "HOSTILE",
+  managerColumnOf(slump)?.headline ?? slump.map((item) => `${item.id}:${item.tone}`).join(" ")
+);
+check(
+  "and a side on a good one is not told it is going backwards",
+  managerColumnOf(refurbEditions.rich)?.tone !== "CONCERN",
+  managerColumnOf(refurbEditions.rich)?.headline
+);
+check(
+  "every column carries a number from the record",
+  refurbStories.filter((item) => item.kind === "OPINION").every((item) => /\d|\b(one|two|three|four|five|six|seven|eight|nine|ten)\b/i.test(item.body)),
+  refurbStories.filter((item) => item.kind === "OPINION" && !/\d/.test(item.body)).map((item) => item.id).join(", ")
+);
+check(
+  "the squad column only runs when the goals really are coming from everywhere",
+  !has(buildNews(crisisInput), "opinion-squad-")
+);
+
+console.log("\nthe new pieces only run when the facts are there");
+
+check(
+  "late goals conceded in two of the last three earn the watch joke",
+  has(refurbEditions.crisis, "late-leak-"),
+  refurbEditions.crisis.map((item) => item.id).join(" ")
+);
+check("and a clean run does not", !has(refurbEditions.rich, "late-leak-"));
+check(
+  "ratings are given only to players the debrief names",
+  (() => {
+    const ratings = buildNews(input({ matches: MATCHES.slice(1) })).find((item) => item.id.startsWith("ratings-"));
+    if (!ratings) return false;
+    const named = new Set([...MATCHES[1].scorers, ...MATCHES[1].assisters, ...MATCHES[1].standouts]);
+    const rated = ratings.body.match(/[A-Z][a-z]+ [A-Z][a-z]+(?= \d)/g) ?? [];
+    return rated.length >= 3 && rated.every((name) => named.has(name));
+  })(),
+  buildNews(input({ matches: MATCHES.slice(1) })).map((item) => item.id).join(" ")
+);
+check(
+  "a goalkeeper picked out in a defeat gets his own piece",
+  has(buildNews(input({ matches: [{ ...MATCHES[4], standouts: ["Marcus Bell"] }, ...MATCHES.slice(0, 4)] })), "keeper-heroics-"),
+  buildNews(input({ matches: [{ ...MATCHES[4], standouts: ["Marcus Bell"] }, ...MATCHES.slice(0, 4)] })).map((item) => item.id).join(" ")
+);
+check(
+  "an open January window lists what this squad actually needs",
+  (() => {
+    const story = buildNews(input({ inGameDate: "2027-01-10" })).find((item) => item.id.startsWith("window-"));
+    // A real need from this squad, and no player named twice in the one list.
+    const names = story ? SQUAD.filter((player) => story.body.includes(player.name)).map((player) => player.name) : [];
+    return Boolean(story) && names.length >= 1 && names.every((name) => story!.body.split(name).length === 2);
+  })()
+);
+check(
+  "and in November there is no window story at all",
+  !has(refurbEditions.rich, "window-") && !has(refurbEditions.rich, "deadline-")
+);
+check(
+  "the awards wait for the end of the season",
+  !has(refurbEditions.rich, "awards-")
+);
+
+// ---------------------------------------------------------------------------------------------
+// The copy revision: a change of wording has to reach the papers already printed
+// ---------------------------------------------------------------------------------------------
+
+console.log("\nthe copy revision moves with the copy");
+
+{
+  // A fingerprint of what the desk writes for three careers. When it changes, the wording changed, and
+  // NEWS_COPY_VERSION has to move with it - that number is what makes the archive rewrite the stories already
+  // on a manager's paper. The fingerprint is recorded beside the version it was taken at, and a new version
+  // records a new fingerprint.
+  const fingerprintPath = path.join(__dirname, "news-copy-fingerprint.json");
+  const text = JSON.stringify(
+    [buildNews(input()), buildNews(crisisInput), buildNews(cupInput)].map((edition) =>
+      edition.map((item) => [item.id, item.headline, item.article, item.byline?.writer ?? null])
+    )
+  );
+  let fingerprint = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    fingerprint ^= text.charCodeAt(index);
+    fingerprint = Math.imul(fingerprint, 0x01000193) >>> 0;
+  }
+  const recorded = fs.existsSync(fingerprintPath)
+    ? (JSON.parse(fs.readFileSync(fingerprintPath, "utf8")) as { version: number; fingerprint: number })
+    : null;
+  if (!recorded || recorded.version !== NEWS_COPY_VERSION) {
+    fs.writeFileSync(fingerprintPath, `${JSON.stringify({ version: NEWS_COPY_VERSION, fingerprint }, null, 2)}\n`);
+    check(`the fingerprint is recorded for copy revision ${NEWS_COPY_VERSION}`, true);
+  } else {
+    check(
+      "the copy has not changed without NEWS_COPY_VERSION moving",
+      recorded.fingerprint === fingerprint,
+      "the desk writes different words now: bump NEWS_COPY_VERSION in news-engine.ts so printed papers are rewritten"
+    );
+  }
+}
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 if (failures.length > 0) {

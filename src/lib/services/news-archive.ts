@@ -123,7 +123,7 @@ export class NewsArchiveService {
   async read(careerId: string): Promise<NewsPaper | null> {
     const edition = await new NewsService().buildStories(careerId);
     if (!edition) return null;
-    // Before publishing: anything on the paper written in an older voice is cleared so the desk rewrites it.
+    // Before publishing: anything on the paper written in an older voice is rewritten in the current one.
     await this.reprintOutdatedCopy(careerId);
     const published = await this.publish(edition);
     // Trimmed on EVERY read, not only when something was published: a career can cross the cap through
@@ -150,42 +150,83 @@ export class NewsArchiveService {
   }
 
   /**
-   * Clears what the desk itself has rewritten, so it can be written again in the current voice.
+   * Rewrites what the desk itself has rewritten, IN PLACE, so a paper already printed reads in the new voice.
    *
    * The rule the whole archive rests on is that a story is printed once and kept. This is the one exception
-   * and it is narrow: a row is only cleared when the DESK changed, not when the facts did, and only when it
-   * is still sitting on the paper. Three states are deliberately untouched:
+   * and it is narrow: a row is only rewritten when the DESK changed, not when the facts did. It keeps its
+   * place, its edition and whether it has been read - the manager opens the paper to the same stories,
+   * worded the way the desk words them now. A story about a match is rewritten as of that match (see
+   * `NewsService.rewrite`), so an older report does not pick up today's facts.
+   *
+   * A story the desk can no longer write from the evidence is cleared instead, with its tombstone, exactly as
+   * this used to clear every stale row. Two states are deliberately untouched:
    *
    *   - a SAVED story, because a bookmark is the manager's and rewording it under him would be worse than
    *     leaving one story in the old voice,
-   *   - a DISMISSED story, which has a tombstone and no row at all, so it cannot come back,
-   *   - and its tombstone is removed only alongside a row that exists, which is what keeps the two in step.
+   *   - a DISMISSED story, which has a tombstone and no row at all, so it cannot come back.
    *
-   * The clear is ONE statement carrying the staleness predicate, rather than a select followed by deletes by
-   * id. Two reads of the same career arrive together - the app fires a second one the moment the first lands
-   * - and a select-then-delete let the second read delete a row the first had already rewritten in the new
-   * voice, taking the tombstone with it. Scoping the delete to the version being retired means a row written
-   * at the current version is not a candidate for it, whatever else is running.
+   * Every write carries the staleness predicate. Two reads of the same career arrive together - the app fires
+   * a second one the moment the first lands - and a write scoped to the version being retired means a row the
+   * other read has already rewritten is not touched again.
    */
   private async reprintOutdatedCopy(careerId: string): Promise<number> {
-    const cleared = await db
-      .delete(newsItems)
+    const stale = await db
+      .select({ id: newsItems.id })
+      .from(newsItems)
       .where(
-        and(
-          eq(newsItems.careerId, careerId),
-          eq(newsItems.saved, false),
-          lt(newsItems.copyVersion, NEWS_COPY_VERSION)
-        )
-      )
-      .returning({ id: newsItems.id });
+        and(eq(newsItems.careerId, careerId), eq(newsItems.saved, false), lt(newsItems.copyVersion, NEWS_COPY_VERSION))
+      );
+    if (stale.length === 0) return 0;
 
-    for (const row of cleared) {
-      await db
-        .delete(newsPublished)
-        .where(and(eq(newsPublished.careerId, careerId), eq(newsPublished.id, row.id)));
+    const rewritten = await new NewsService().rewrite(
+      careerId,
+      stale.map((row) => row.id)
+    );
+    let changed = 0;
+    for (const row of stale) {
+      const stillStale = and(
+        eq(newsItems.careerId, careerId),
+        eq(newsItems.id, row.id),
+        eq(newsItems.saved, false),
+        lt(newsItems.copyVersion, NEWS_COPY_VERSION)
+      );
+      const item = rewritten.get(row.id);
+      if (item) {
+        const updated = await db
+          .update(newsItems)
+          .set({
+            category: item.category,
+            tone: item.tone,
+            headline: item.headline,
+            body: item.body,
+            kind: item.kind,
+            stance: item.byline?.stance ?? item.stance ?? "STRAIGHT",
+            articleJson: JSON.stringify(item.article),
+            outlet: item.byline?.outlet ?? null,
+            writer: item.byline?.writer ?? null,
+            writerRole: item.byline?.writerRole ?? null,
+            dateline: item.byline?.dateline ?? null,
+            evidenceJson: JSON.stringify(item.evidence),
+            playerNamesJson: JSON.stringify(item.playerNames),
+            playerIdsJson: JSON.stringify(item.playerIds),
+            quote: item.quote,
+            weight: item.weight,
+            copyVersion: NEWS_COPY_VERSION,
+          })
+          .where(stillStale)
+          .returning({ id: newsItems.id });
+        changed += updated.length;
+        continue;
+      }
+      const cleared = await db.delete(newsItems).where(stillStale).returning({ id: newsItems.id });
+      if (cleared.length > 0) {
+        await db
+          .delete(newsPublished)
+          .where(and(eq(newsPublished.careerId, careerId), eq(newsPublished.id, row.id)));
+        changed += 1;
+      }
     }
-
-    return cleared.length;
+    return changed;
   }
 
   /**

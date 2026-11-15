@@ -124,6 +124,9 @@ export async function recordMediaComment(rawBody: string): Promise<OperationResu
     debriefEventId?: string;
     opponent?: string;
     subject?: string;
+    question?: string;
+    outlet?: string | null;
+    writer?: string | null;
     comment?: string;
     refused?: boolean;
   };
@@ -154,6 +157,10 @@ export async function recordMediaComment(rawBody: string): Promise<OperationResu
         debriefEventId: body.debriefEventId,
         opponent: body.opponent ?? "",
         subject: body.subject ?? "",
+        // What was asked, and by whom, so the paper can print the exchange rather than only the answer.
+        question: typeof body.question === "string" ? body.question : "",
+        outlet: typeof body.outlet === "string" ? body.outlet : null,
+        writer: typeof body.writer === "string" ? body.writer : null,
         comment: refused ? null : comment,
         refused,
       }),
