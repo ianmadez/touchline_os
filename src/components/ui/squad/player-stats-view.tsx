@@ -349,10 +349,11 @@ function PlayerRecord({ player, onBack }: { player: PlayerHistory; onBack: () =>
         )}
 
         {tab === "SEASONS" && (
-          <div className="overflow-x-auto">
+          // About ten seasons show before the table scrolls inside itself, with the header pinned.
+          <div className="max-h-[26rem] overflow-auto overscroll-contain">
             <table className="w-full border-collapse text-left text-[13px]">
               <thead>
-                <tr className="border-b border-slate-200 font-sub text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:border-slate-800 dark:text-slate-300">
+                <tr className="sticky top-0 z-10 border-b border-slate-200 bg-white font-sub text-[11px] font-semibold uppercase tracking-wider text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                   <th className="py-2 pr-2">Season</th>
                   <th className="py-2 px-1.5 text-center">APP</th>
                   <th className="hidden py-2 px-1.5 text-center sm:table-cell">MINS</th>
@@ -416,7 +417,8 @@ function PlayerRecord({ player, onBack }: { player: PlayerHistory; onBack: () =>
               </select>
               <span className="font-normal text-slate-500 dark:text-slate-400">{shownMatches.length} matches</span>
             </label>
-            <ul className="divide-y divide-slate-200 dark:divide-slate-800/60">
+            {/* About ten matches show before the list scrolls inside itself. */}
+            <ul className="max-h-[33rem] divide-y divide-slate-200 overflow-y-auto overscroll-contain pr-1 dark:divide-slate-800/60">
               {shownMatches.map((match) => (
                 <MatchRow key={match.date} match={match} />
               ))}
@@ -498,7 +500,7 @@ function Development({ player }: { player: PlayerHistory }) {
         ))}
       </svg>
       {player.seasons.some((season) => season.overallStart !== null) && (
-        <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="grid max-h-[26rem] gap-2 overflow-y-auto overscroll-contain sm:grid-cols-2 lg:grid-cols-3">
           {player.seasons
             .filter((season) => season.overallStart !== null && season.overallEnd !== null)
             .map((season) => (
