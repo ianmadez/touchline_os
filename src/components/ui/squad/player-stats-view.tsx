@@ -450,11 +450,31 @@ function MatchRow({ match }: { match: HistoryMatch }) {
         </span>
       </span>
       <span className="flex shrink-0 items-center gap-2 font-sub text-xs font-bold tabular-nums text-slate-800 dark:text-slate-200">
-        {match.goals > 0 && <span title="Goals (logged)">{match.goals}G</span>}
-        {match.assists > 0 && <span title="Assists (logged)">{match.assists}A</span>}
+        {match.goals > 0 && <MatchTally icon="⚽" count={match.goals} label="goal" />}
+        {match.assists > 0 && <MatchTally icon="👟" count={match.assists} label="assist" />}
         {match.rating !== null ? <RatingBadge rating={match.rating} /> : <span className="min-w-[2.75rem] text-center text-slate-400">–</span>}
       </span>
     </li>
+  );
+}
+
+/**
+ * Goals (⚽) or assists (👟) in one match. Up to three are drawn one icon each, which reads at a glance;
+ * more than that becomes "icon ×n" so a hat-trick-plus never pushes the rating off the row.
+ */
+function MatchTally({ icon, count, label }: { icon: string; count: number; label: string }) {
+  const title = `${count} ${label}${count === 1 ? "" : "s"} (logged)`;
+  return (
+    <span title={title} aria-label={title} className="whitespace-nowrap text-sm leading-none">
+      {count <= 3 ? (
+        icon.repeat(count)
+      ) : (
+        <>
+          {icon}
+          <span className="ml-0.5 font-sub text-xs">×{count}</span>
+        </>
+      )}
+    </span>
   );
 }
 
