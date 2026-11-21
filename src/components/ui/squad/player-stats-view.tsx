@@ -12,6 +12,13 @@ import React, { useMemo, useState } from "react";
 import { SubTabs, type SubTabOption } from "@/components/ui/sub-tabs";
 import type { HistoryMatch, PlayerHistory, PlayerHistoryPayload } from "@/lib/squad/history";
 import { formatRating } from "@/lib/squad/performance";
+import {
+  compareSortValues,
+  naturalAscending,
+  positionSortKey,
+  tiebreak,
+  type SortValue,
+} from "@/lib/squad/sort";
 import { venueLabel } from "@/lib/ui/labels";
 import { PlayerFace } from "./player-face";
 import { RatingBadge } from "./rating-sparkline";
@@ -25,7 +32,16 @@ const INNER_TABS: ReadonlyArray<SubTabOption<InnerTab>> = [
   { id: "DEVELOPMENT", label: "Development" },
 ];
 
-type SortKey = "name" | "seasons" | "appearances" | "minutes" | "averageRating" | "goals" | "assists";
+type SortKey =
+  | "name"
+  | "position"
+  | "seasons"
+  | "appearances"
+  | "minutes"
+  | "averageRating"
+  | "goals"
+  | "assists"
+  | "overall";
 
 const HEAD = "py-2 px-1.5 text-center cursor-pointer select-none hover:text-amber-500";
 const CELL = "py-1.5 px-1.5 text-center tabular-nums";
@@ -87,17 +103,21 @@ export function PlayerStatsView({
           player.name.toLowerCase().includes(needle) ||
           (player.primaryPosition ?? "").toLowerCase().includes(needle))
     );
-    const value = (player: PlayerHistory): string | number => {
-      if (sortKey === "name") return player.name.toLowerCase();
-      const raw = player.totals[sortKey];
-      return raw ?? -1;
+    const value = (player: PlayerHistory): SortValue => {
+      if (sortKey === "name") return player.name;
+      if (sortKey === "position") return positionSortKey(player.primaryPosition);
+      if (sortKey === "overall") return player.growth[player.growth.length - 1]?.overallRating ?? null;
+      return player.totals[sortKey];
     };
-    return [...filtered].sort((left, right) => {
-      const a = value(left);
-      const b = value(right);
-      const order = a < b ? -1 : a > b ? 1 : 0;
-      return sortAsc ? order : -order;
+    const tie = (player: PlayerHistory) => ({
+      position: player.primaryPosition,
+      overall: player.growth[player.growth.length - 1]?.overallRating ?? null,
+      name: player.name,
     });
+    return [...filtered].sort(
+      (left, right) =>
+        compareSortValues(value(left), value(right), sortAsc) || tiebreak(tie(left), tie(right))
+    );
   }, [all, includeFormer, query, sortKey, sortAsc]);
 
   const selected = selectedKey ? all.find((player) => player.playerKey === selectedKey) ?? null : null;
@@ -107,7 +127,7 @@ export function PlayerStatsView({
     if (key === sortKey) setSortAsc((current) => !current);
     else {
       setSortKey(key);
-      setSortAsc(key === "name");
+      setSortAsc(naturalAscending(key));
     }
   };
   const arrow = (key: SortKey) => (sortKey === key ? (sortAsc ? " ▲" : " ▼") : "");
@@ -149,7 +169,9 @@ export function PlayerStatsView({
             <th className="cursor-pointer select-none py-2 pl-4 pr-2 hover:text-amber-500" onClick={() => sortBy("name")}>
               Player{arrow("name")}
             </th>
-            <th className="py-2 px-1.5 text-center">POS</th>
+            <th className={HEAD} onClick={() => sortBy("position")}>
+              POS{arrow("position")}
+            </th>
             <th className={`${HEAD} hidden lg:table-cell`} onClick={() => sortBy("seasons")} title="Seasons with a match at the club">
               SZN{arrow("seasons")}
             </th>
@@ -168,8 +190,12 @@ export function PlayerStatsView({
             <th className={HEAD} onClick={() => sortBy("assists")} title="Logged in your debriefs">
               A{arrow("assists")}
             </th>
-            <th className="hidden py-2 pl-1.5 pr-4 text-center xl:table-cell" title="OVR at the first and latest sync">
-              OVR
+            <th
+              className="hidden cursor-pointer select-none py-2 pl-1.5 pr-4 text-center hover:text-amber-500 xl:table-cell"
+              onClick={() => sortBy("overall")}
+              title="OVR at the first and latest sync. Sorts by the latest."
+            >
+              OVR{arrow("overall")}
             </th>
           </tr>
         </thead>

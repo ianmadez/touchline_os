@@ -3,6 +3,13 @@
 import React, { useMemo, useState } from "react";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import { UNKNOWN_POSITION, eaDaysToDate } from "@/lib/parser/interface";
+import {
+  compareSortValues,
+  naturalAscending,
+  positionSortKey,
+  tiebreak,
+  type SortValue,
+} from "@/lib/squad/sort";
 import { describeTimeOut, isInjured } from "@/lib/squad/injury";
 import type { PlayerPerformancePayload } from "@/lib/squad/performance";
 import { PlayerFace } from "./player-face";
@@ -75,6 +82,7 @@ interface SquadTableProps {
 }
 
 type SortableField =
+  | "jersey"
   | "name"
   | "primaryPosition"
   | "overallRating"
@@ -85,7 +93,14 @@ type SortableField =
   | "importanceMarker";
 
 /** What the match-stats table can be ordered by. All but the rating are counts of what happened. */
-type StatsSortField = "appearances" | "minutes" | "averageRating" | "goals" | "assists";
+type StatsSortField =
+  | "name"
+  | "primaryPosition"
+  | "appearances"
+  | "minutes"
+  | "averageRating"
+  | "goals"
+  | "assists";
 
 const TRUST_RANK: Record<string, number> = {
   HIGH: 3,
@@ -133,16 +148,42 @@ const POSITION_GROUP_RANK: Record<string, number> = {
   RST: 4,
 };
 
-function positionRank(position: string | null | undefined): number {
-  if (!position) return 0;
-  return POSITION_GROUP_RANK[position] ?? 0;
-}
-
-function roleRank(role: string | null | undefined): number {
-  if (!role) return 0;
+/** A tactical role sorts by the line it plays in (GK first), or null when none is assigned. */
+function roleRank(role: string | null | undefined): number | null {
+  if (!role) return null;
   const baseCode = role.split(" ")[0].toUpperCase();
   return POSITION_GROUP_RANK[role] ?? POSITION_GROUP_RANK[baseCode] ?? 5;
 }
+
+/** The value a squad column sorts by. Null is "no value", which always sorts last. */
+function squadSortValue(player: EnrichedPlayer, field: SortableField): SortValue {
+  switch (field) {
+    case "name":
+      return player.name;
+    case "primaryPosition":
+      return positionSortKey(player.primaryPosition);
+    case "jersey":
+      return player.jersey;
+    case "age":
+      return player.age;
+    case "overallRating":
+      return player.overallRating;
+    case "potentialRating":
+      return player.potentialRating;
+    case "trustLevel":
+      return TRUST_RANK[player.userProfile?.trustLevel || ""] ?? null;
+    case "importanceMarker":
+      return STATUS_RANK[player.userProfile?.importanceMarker || ""] ?? null;
+    case "assignedRole":
+      return roleRank(player.userProfile?.assignedRole);
+  }
+}
+
+const tiebreakOf = (player: EnrichedPlayer) => ({
+  position: player.primaryPosition,
+  overall: player.overallRating,
+  name: player.name,
+});
 
 export function SquadTable({
   players,
@@ -171,7 +212,7 @@ export function SquadTable({
       setSortAsc(!sortAsc);
     } else {
       setSortField(field);
-      setSortAsc(false);
+      setSortAsc(naturalAscending(field));
     }
   };
 
@@ -208,40 +249,14 @@ export function SquadTable({
   });
 
   const sortedPlayers = [...filteredPlayers].sort((a, b) => {
-    let valA: string | number = 0;
-    let valB: string | number = 0;
-
-    if (sortField === "trustLevel") {
-      valA = TRUST_RANK[a.userProfile?.trustLevel || ""] ?? 0;
-      valB = TRUST_RANK[b.userProfile?.trustLevel || ""] ?? 0;
-    } else if (sortField === "primaryPosition") {
-      valA = positionRank(a.primaryPosition);
-      valB = positionRank(b.primaryPosition);
-    } else if (sortField === "importanceMarker") {
-      valA = STATUS_RANK[a.userProfile?.importanceMarker || ""] ?? 0;
-      valB = STATUS_RANK[b.userProfile?.importanceMarker || ""] ?? 0;
-    } else if (sortField === "assignedRole") {
-      const roleA = a.userProfile?.assignedRole;
-      const roleB = b.userProfile?.assignedRole;
-      valA = roleRank(roleA);
-      valB = roleRank(roleB);
-
-      if (valA === valB) {
-        const strA = roleA || "";
-        const strB = roleB || "";
-        if (strA !== strB) {
-          return sortAsc ? strA.localeCompare(strB) : strB.localeCompare(strA);
-        }
-        return a.name.localeCompare(b.name);
-      }
-    } else {
-      valA = a[sortField] ?? 0;
-      valB = b[sortField] ?? 0;
+    const primary = compareSortValues(squadSortValue(a, sortField), squadSortValue(b, sortField), sortAsc);
+    if (primary !== 0) return primary;
+    // Two players in the same role line read in role-name order before the general tiebreak.
+    if (sortField === "assignedRole") {
+      const byRole = compareSortValues(a.userProfile?.assignedRole, b.userProfile?.assignedRole, true);
+      if (byRole !== 0) return byRole;
     }
-
-    if (valA < valB) return sortAsc ? -1 : 1;
-    if (valA > valB) return sortAsc ? 1 : -1;
-    return 0;
+    return tiebreak(tiebreakOf(a), tiebreakOf(b));
   });
 
   const renderSortIndicator = (field: SortableField) => {
@@ -258,7 +273,7 @@ export function SquadTable({
       setStatsSortAsc(!statsSortAsc);
     } else {
       setStatsSortField(field);
-      setStatsSortAsc(false);
+      setStatsSortAsc(naturalAscending(field));
     }
   };
 
@@ -272,21 +287,22 @@ export function SquadTable({
    * bottom of a list ranked by how badly they played.
    */
   const statsRows = useMemo(() => {
-    const valueOf = (record: { [key in StatsSortField]: number | null } | null): number => {
-      if (record === null) return -1;
-      const value = record[statsSortField];
-      return value === null ? -1 : value;
+    const valueOf = (
+      player: EnrichedPlayer,
+      record: { [key in Exclude<StatsSortField, "name" | "primaryPosition">]: number | null } | null
+    ): SortValue => {
+      if (statsSortField === "name") return player.name;
+      if (statsSortField === "primaryPosition") return positionSortKey(player.primaryPosition);
+      return record === null ? null : record[statsSortField];
     };
+    // Every player is listed, unnamed ones included, so the stats table never looks like it lost anyone.
     return players
-      .filter((player) => player.nameResolved)
       .map((player) => ({ player, record: playerPerformance?.byPlayer[player.id] ?? null }))
-      .sort((a, b) => {
-        const left = valueOf(a.record);
-        const right = valueOf(b.record);
-        if (left < right) return statsSortAsc ? -1 : 1;
-        if (left > right) return statsSortAsc ? 1 : -1;
-        return a.player.name.localeCompare(b.player.name);
-      });
+      .sort(
+        (a, b) =>
+          compareSortValues(valueOf(a.player, a.record), valueOf(b.player, b.record), statsSortAsc) ||
+          tiebreak(tiebreakOf(a.player), tiebreakOf(b.player))
+      );
   }, [players, playerPerformance, statsSortField, statsSortAsc]);
 
   const statsSortIndicator = (field: StatsSortField) => {
@@ -381,14 +397,22 @@ export function SquadTable({
           <select
             value={statsMode ? statsSortField : sortField}
             onChange={(event) => {
-              if (statsMode) setStatsSortField(event.target.value as StatsSortField);
-              else setSortField(event.target.value as SortableField);
+              const field = event.target.value;
+              if (statsMode) {
+                setStatsSortField(field as StatsSortField);
+                setStatsSortAsc(naturalAscending(field));
+              } else {
+                setSortField(field as SortableField);
+                setSortAsc(naturalAscending(field));
+              }
             }}
             className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-sub text-xs normal-case tracking-normal text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
           >
             {statsMode ? (
               <>
                 <option value="averageRating">Average rating</option>
+                <option value="name">Name</option>
+                <option value="primaryPosition">Position</option>
                 <option value="appearances">Appearances</option>
                 <option value="minutes">Minutes</option>
                 <option value="goals">Goals</option>
@@ -400,6 +424,7 @@ export function SquadTable({
                 <option value="potentialRating">Potential</option>
                 <option value="name">Name</option>
                 <option value="primaryPosition">Position</option>
+                <option value="jersey">Shirt number</option>
                 <option value="age">Age</option>
                 <option value="assignedRole">Assigned role</option>
                 <option value="trustLevel">Trust</option>
@@ -439,8 +464,18 @@ export function SquadTable({
           <table className="hidden w-full text-left border-collapse md:table">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/50 text-[11px] font-sub font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider select-none">
-                <th className="py-2 px-3">Player</th>
-                <th className="py-1.5 px-1.5 text-center">POS</th>
+                <th
+                  onClick={() => handleStatsSort("name")}
+                  className="py-2 px-3 cursor-pointer hover:text-amber-500 transition-colors group"
+                >
+                  Player {statsSortIndicator("name")}
+                </th>
+                <th
+                  onClick={() => handleStatsSort("primaryPosition")}
+                  className="py-1.5 px-1.5 text-center cursor-pointer hover:text-amber-500 transition-colors group"
+                >
+                  POS {statsSortIndicator("primaryPosition")}
+                </th>
                 <th
                   onClick={() => handleStatsSort("appearances")}
                   className="py-1.5 px-2 text-center cursor-pointer hover:text-amber-500 transition-colors group"
@@ -524,7 +559,13 @@ export function SquadTable({
         <table className="hidden w-full text-left border-collapse md:table">
           <thead>
             <tr className="border-b border-slate-200 dark:border-slate-800/80 bg-slate-50 dark:bg-slate-950/50 text-[11px] font-sub font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wider select-none">
-              <th className="w-10 py-2 pl-3 pr-1 text-center" title="Shirt number">#</th>
+              <th
+                onClick={() => handleSort("jersey")}
+                className="w-10 py-2 pl-3 pr-1 text-center cursor-pointer hover:text-amber-500 transition-colors group"
+                title="Shirt number"
+              >
+                #{renderSortIndicator("jersey")}
+              </th>
               <th
                 onClick={() => handleSort("name")}
                 className="py-2 px-2 cursor-pointer hover:text-amber-500 transition-colors group"
