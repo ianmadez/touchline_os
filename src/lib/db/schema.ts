@@ -290,8 +290,12 @@ export const playerUserProfiles = sqliteTable(
      * on each parse. A name typed into that table would last exactly one sync.
      */
     displayName: text("display_name"),
-    /** Shirt number the manager set while the player is out on loan. Only shown while he is away. */
-    loanJersey: integer("loan_jersey"),
+    /**
+     * The manager's shirt number for a player at the club: a loan signing, or anyone whose save number
+     * is missing or wrong. Not used while he is loaned out. The column keeps its first name, `loan_jersey`,
+     * because it has already shipped in a migration.
+     */
+    jerseyOverride: integer("loan_jersey"),
     provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
     updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   },

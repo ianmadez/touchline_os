@@ -112,8 +112,8 @@ export interface EnrichedPlayer {
      * so he can name him. Null means he has not.
      */
     displayName: string | null;
-    /** Shirt number the manager set for him while on loan. */
-    loanJersey: number | null;
+    /** The manager's shirt number for him, over the save's. */
+    jerseyOverride: number | null;
   };
 }
 
@@ -209,9 +209,9 @@ export class SquadService {
         ...player,
         // The manager's typed name wins over a placeholder, so it survives reloads and re-syncs.
         name: profile?.displayName || player.name,
-        // While he is away the save only knows his loan-club number, so the manager's number stands in.
-        // Once he is back the save's own number takes over again.
-        jersey: player.onLoanTeamId !== null ? profile?.loanJersey ?? null : player.jersey,
+        // A loanee who is away has no number here. Anyone at the club, loan signings included, can take
+        // the manager's number over the save's.
+        jersey: player.onLoanTeamId !== null ? null : profile?.jerseyOverride ?? player.jersey,
         form: player.form,
         // A placeholder name (`#12345`) is a string like any other, so "does he have a name" cannot be
         // answered by looking at `name`. The save's own flag decides it, and a name the manager typed
@@ -234,7 +234,7 @@ export class SquadService {
               userNotes: profile.userNotes,
               positionOverride: profile.primaryPosition,
               displayName: profile.displayName,
-              loanJersey: profile.loanJersey ?? null,
+              jerseyOverride: profile.jerseyOverride ?? null,
               injury,
             }
           : undefined,

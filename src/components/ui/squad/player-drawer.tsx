@@ -64,7 +64,7 @@ interface PlayerDrawerProps {
     /** The manager's own name for a player the save cannot name. Null clears it. */
     displayName: string | null;
     /** Shirt number for a loanee. Null clears it; omitted when he is not on loan. */
-    loanJersey?: number | null;
+    jerseyOverride?: number | null;
   }) => void;
 }
 
@@ -100,8 +100,8 @@ export function PlayerDrawer({
   );
   const [injuryNote, setInjuryNote] = useState<string>(player?.userProfile?.injury.note ?? "");
   const [displayName, setDisplayName] = useState<string>(player?.userProfile?.displayName ?? "");
-  const [loanJersey, setLoanJersey] = useState<string>(
-    player?.userProfile?.loanJersey != null ? String(player.userProfile.loanJersey) : ""
+  const [jerseyOverride, setJerseyOverride] = useState<string>(
+    player?.userProfile?.jerseyOverride != null ? String(player.userProfile.jerseyOverride) : ""
   );
 
   // This drawer is keyed by player id in `page.tsx`, so selecting a different player remounts the
@@ -148,8 +148,8 @@ export function PlayerDrawer({
       injuryUntil,
       injuryNote: injuryNote.trim() || null,
       displayName: displayName.trim() || null,
-      ...(player.onLoanTeamId !== null
-        ? { loanJersey: loanJersey.trim() === "" ? null : Number(loanJersey) }
+      ...(player.onLoanTeamId === null
+        ? { jerseyOverride: jerseyOverride.trim() === "" ? null : Number(jerseyOverride) }
         : {}),
     });
     onClose();
@@ -193,20 +193,6 @@ export function PlayerDrawer({
                   })}`
                 : ""}
               . He still belongs to your club.
-              <label className="mt-2 flex flex-wrap items-center gap-2 font-semibold">
-                Shirt number while away
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  max={99}
-                  placeholder="—"
-                  value={loanJersey}
-                  onChange={(e) => setLoanJersey(e.target.value.replace(/[^0-9]/g, "").slice(0, 2))}
-                  className="w-16 rounded-md border border-sky-300 bg-white px-2 py-1 text-center text-sm text-slate-900 focus:border-sky-500 focus:outline-none dark:border-sky-500/40 dark:bg-slate-900 dark:text-slate-100"
-                />
-                <span className="font-normal opacity-80">Used until he returns, then the save&apos;s number takes over.</span>
-              </label>
             </p>
           )}
 
@@ -658,6 +644,31 @@ export function PlayerDrawer({
                         <option value="SURPLUS">Surplus to Requirements</option>
                       </select>
                     </div>
+
+                    {player.onLoanTeamId === null && (
+                      <div>
+                        <label
+                          htmlFor="player-shirt-number"
+                          className="mb-1 flex items-center justify-between font-sub text-[11px] font-semibold text-slate-600 dark:text-slate-300"
+                        >
+                          Shirt number
+                          <span className="text-[10px] font-normal text-slate-400">
+                            {jerseyOverride.trim() ? "yours" : "from the save"}
+                          </span>
+                        </label>
+                        {/* For a loan signing or a number the save has wrong. Blank goes back to the save's. */}
+                        <input
+                          id="player-shirt-number"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={2}
+                          placeholder={player.jersey != null ? String(player.jersey) : "—"}
+                          value={jerseyOverride}
+                          onChange={(e) => setJerseyOverride(e.target.value.replace(/[^0-9]/g, "").slice(0, 2))}
+                          className="w-20 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700/80 rounded-lg p-2 text-center text-xs tabular-nums text-slate-900 dark:text-slate-100 focus:outline-none focus:border-amber-500 dark:focus:border-amber-400"
+                        />
+                      </div>
+                    )}
 
                     <div>
                       <div className="flex items-center justify-between mb-1">

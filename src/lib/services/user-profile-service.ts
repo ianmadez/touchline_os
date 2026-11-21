@@ -30,7 +30,7 @@ export interface SetPlayerProfileInput {
    */
   displayName?: string | null;
   /** Shirt number for a loanee. `undefined` leaves it, null clears it. */
-  loanJersey?: number | null;
+  jerseyOverride?: number | null;
 }
 
 /**
@@ -83,7 +83,7 @@ export class UserProfileService {
           injuryReportedOn:
             input.injuryReportedOn !== undefined ? input.injuryReportedOn : existing.injuryReportedOn,
           displayName: input.displayName !== undefined ? input.displayName : existing.displayName,
-          loanJersey: input.loanJersey !== undefined ? input.loanJersey : existing.loanJersey,
+          jerseyOverride: input.jerseyOverride !== undefined ? input.jerseyOverride : existing.jerseyOverride,
           updatedAt: new Date().toISOString(),
         })
         .where(eq(playerUserProfiles.id, existing.id));
@@ -102,7 +102,7 @@ export class UserProfileService {
         injuryNote: input.injuryNote ?? null,
         injuryReportedOn: input.injuryReportedOn ?? null,
         displayName: input.displayName ?? null,
-        loanJersey: input.loanJersey ?? null,
+        jerseyOverride: input.jerseyOverride ?? null,
         provenance: "USER",
       });
     }

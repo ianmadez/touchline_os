@@ -1220,7 +1220,7 @@ export default function TouchlineApp() {
     injuryNote?: string | null;
     /** The manager's own name for a player the save cannot name; null clears it. */
     displayName?: string | null;
-    loanJersey?: number | null;
+    jerseyOverride?: number | null;
   }) => {
     setSquad((prev) =>
       prev.map((p) => {
@@ -1236,8 +1236,8 @@ export default function TouchlineApp() {
              */
             name: profileData.displayName === undefined ? p.name : profileData.displayName || p.name,
             jersey:
-              p.onLoanTeamId !== null && profileData.loanJersey !== undefined
-                ? profileData.loanJersey
+              p.onLoanTeamId === null && profileData.jerseyOverride !== undefined
+                ? profileData.jerseyOverride ?? p.jersey
                 : p.jersey,
             // Mirrors the service: a typed name counts as a name, so the "name needed" marker clears now.
             nameResolved:
@@ -1250,10 +1250,10 @@ export default function TouchlineApp() {
               userNotes: profileData.userNotes,
               positionOverride: profileData.primaryPosition,
               displayName: profileData.displayName ?? p.userProfile?.displayName ?? null,
-              loanJersey:
-                profileData.loanJersey !== undefined
-                  ? profileData.loanJersey
-                  : p.userProfile?.loanJersey ?? null,
+              jerseyOverride:
+                profileData.jerseyOverride !== undefined
+                  ? profileData.jerseyOverride ?? p.jersey
+                  : p.userProfile?.jerseyOverride ?? null,
               injury: {
                 until:
                   profileData.injuryUntil !== undefined

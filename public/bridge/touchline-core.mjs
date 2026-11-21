@@ -12982,8 +12982,12 @@ var init_schema = __esm({
          * on each parse. A name typed into that table would last exactly one sync.
          */
         displayName: text("display_name"),
-        /** Shirt number the manager set while the player is out on loan. Only shown while he is away. */
-        loanJersey: integer("loan_jersey"),
+        /**
+         * The manager's shirt number for a player at the club: a loan signing, or anyone whose save number
+         * is missing or wrong. Not used while he is loaned out. The column keeps its first name, `loan_jersey`,
+         * because it has already shipped in a migration.
+         */
+        jerseyOverride: integer("loan_jersey"),
         provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
         updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
       },
@@ -15243,9 +15247,9 @@ var init_squad_service = __esm({
             ...player,
             // The manager's typed name wins over a placeholder, so it survives reloads and re-syncs.
             name: profile?.displayName || player.name,
-            // While he is away the save only knows his loan-club number, so the manager's number stands in.
-            // Once he is back the save's own number takes over again.
-            jersey: player.onLoanTeamId !== null ? profile?.loanJersey ?? null : player.jersey,
+            // A loanee who is away has no number here. Anyone at the club, loan signings included, can take
+            // the manager's number over the save's.
+            jersey: player.onLoanTeamId !== null ? null : profile?.jerseyOverride ?? player.jersey,
             form: player.form,
             // A placeholder name (`#12345`) is a string like any other, so "does he have a name" cannot be
             // answered by looking at `name`. The save's own flag decides it, and a name the manager typed
@@ -15267,7 +15271,7 @@ var init_squad_service = __esm({
               userNotes: profile.userNotes,
               positionOverride: profile.primaryPosition,
               displayName: profile.displayName,
-              loanJersey: profile.loanJersey ?? null,
+              jerseyOverride: profile.jerseyOverride ?? null,
               injury
             } : void 0
           };
@@ -16875,7 +16879,7 @@ var init_user_profile_service = __esm({
             injuryNote: input.injuryNote !== void 0 ? input.injuryNote : existing.injuryNote,
             injuryReportedOn: input.injuryReportedOn !== void 0 ? input.injuryReportedOn : existing.injuryReportedOn,
             displayName: input.displayName !== void 0 ? input.displayName : existing.displayName,
-            loanJersey: input.loanJersey !== void 0 ? input.loanJersey : existing.loanJersey,
+            jerseyOverride: input.jerseyOverride !== void 0 ? input.jerseyOverride : existing.jerseyOverride,
             updatedAt: (/* @__PURE__ */ new Date()).toISOString()
           }).where(eq(playerUserProfiles.id, existing.id));
         } else {
@@ -16893,7 +16897,7 @@ var init_user_profile_service = __esm({
             injuryNote: input.injuryNote ?? null,
             injuryReportedOn: input.injuryReportedOn ?? null,
             displayName: input.displayName ?? null,
-            loanJersey: input.loanJersey ?? null,
+            jerseyOverride: input.jerseyOverride ?? null,
             provenance: "USER"
           });
         }
@@ -19190,7 +19194,7 @@ async function patchCareer(body2) {
         injuryUntil: validInjuryUntil,
         injuryNote: request.playerProfile.injuryNote,
         displayName: request.playerProfile.displayName === void 0 ? void 0 : (request.playerProfile.displayName ?? "").trim().slice(0, 60) || null,
-        loanJersey: request.playerProfile.loanJersey === void 0 ? void 0 : Number.isInteger(request.playerProfile.loanJersey) && request.playerProfile.loanJersey >= 1 && request.playerProfile.loanJersey <= 99 ? request.playerProfile.loanJersey : null,
+        jerseyOverride: request.playerProfile.jerseyOverride === void 0 ? void 0 : Number.isInteger(request.playerProfile.jerseyOverride) && request.playerProfile.jerseyOverride >= 1 && request.playerProfile.jerseyOverride <= 99 ? request.playerProfile.jerseyOverride : null,
         // The save's own date is the dateline, so a report written today is dated the day the manager is in,
         // not the day the machine is. Filed once and then left alone, which is what makes it a report.
         injuryReportedOn: validInjuryUntil !== void 0 && validInjuryUntil !== null ? career.inGameDate : void 0
