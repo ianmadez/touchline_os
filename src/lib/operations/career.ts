@@ -43,6 +43,8 @@ interface PatchCareerRequest {
      * a paragraph pasted into it would push every screen it touches out of shape. An empty string clears it.
      */
     displayName?: string | null;
+    /** Shirt number for a player out on loan. Null clears it. */
+    loanJersey?: number | null;
   };
 }
 
@@ -156,6 +158,14 @@ export async function patchCareer(body: unknown): Promise<OperationResult<unknow
           request.playerProfile.displayName === undefined
             ? undefined
             : (request.playerProfile.displayName ?? "").trim().slice(0, 60) || null,
+        loanJersey:
+          request.playerProfile.loanJersey === undefined
+            ? undefined
+            : Number.isInteger(request.playerProfile.loanJersey) &&
+                (request.playerProfile.loanJersey as number) >= 1 &&
+                (request.playerProfile.loanJersey as number) <= 99
+              ? request.playerProfile.loanJersey
+              : null,
         // The save's own date is the dateline, so a report written today is dated the day the manager is in,
         // not the day the machine is. Filed once and then left alone, which is what makes it a report.
         injuryReportedOn:

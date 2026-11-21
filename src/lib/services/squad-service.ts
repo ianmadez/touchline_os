@@ -80,6 +80,8 @@ export interface EnrichedPlayer {
    */
   attributes: Record<string, unknown> | null;
   isYouthProspect: boolean;
+  /** Shirt number: the save's, or the manager's own while the player is out on loan. */
+  jersey: number | null;
   /** Set while the player is out on loan from the manager's club; null otherwise. */
   onLoanTeamId: number | null;
   onLoanTeamName: string | null;
@@ -110,6 +112,8 @@ export interface EnrichedPlayer {
      * so he can name him. Null means he has not.
      */
     displayName: string | null;
+    /** Shirt number the manager set for him while on loan. */
+    loanJersey: number | null;
   };
 }
 
@@ -205,6 +209,9 @@ export class SquadService {
         ...player,
         // The manager's typed name wins over a placeholder, so it survives reloads and re-syncs.
         name: profile?.displayName || player.name,
+        // While he is away the save only knows his loan-club number, so the manager's number stands in.
+        // Once he is back the save's own number takes over again.
+        jersey: player.onLoanTeamId !== null ? profile?.loanJersey ?? null : player.jersey,
         form: player.form,
         // A placeholder name (`#12345`) is a string like any other, so "does he have a name" cannot be
         // answered by looking at `name`. The save's own flag decides it, and a name the manager typed
@@ -227,6 +234,7 @@ export class SquadService {
               userNotes: profile.userNotes,
               positionOverride: profile.primaryPosition,
               displayName: profile.displayName,
+              loanJersey: profile.loanJersey ?? null,
               injury,
             }
           : undefined,
@@ -296,6 +304,7 @@ export class SquadService {
       // past snapshot to it would quietly show today's numbers under a historical heading. Null.
       attributes: null,
       isYouthProspect: p.isYouthProspect,
+      jersey: p.jersey ?? null,
       // Snapshots do not record loans; a historical view shows the squad as it was linked.
       onLoanTeamId: null,
       onLoanTeamName: null,

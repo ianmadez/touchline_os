@@ -239,6 +239,13 @@ export class SyncService {
       ?.clubteamid;
 
     if (typeof clubId !== "number" || clubId <= 0) {
+      if (Object.keys(rawData.extractedTables).length === 0) {
+        throw new Error(
+          "No table in this save could be read, so the parser's reference files were not found. " +
+            "If this is the downloaded bridge, re-download it: the parse-resources folder must sit " +
+            "beside touchline-core.mjs."
+        );
+      }
       // This used to fall back to 0, producing the id `career_club_0` and silently merging every
       // save missing a clubteamid into one shared career. Refuse rather than invent an identity.
       throw new Error(

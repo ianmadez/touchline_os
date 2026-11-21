@@ -56,7 +56,24 @@ function resolve(candidates: (string | null)[], accept: (content: string) => boo
 }
 
 /** The committed folder both runtimes read from. The browser build fetches the same files by URL. */
-const REFERENCE_DATA_DIR = path.join(process.cwd(), "public", "parse-resources");
+/**
+ * Where the committed reference files are, decided per call.
+ *
+ * A checkout keeps them in `public/parse-resources`. The downloaded bridge has no `public` folder: the
+ * launcher runs from the unzipped folder, and the zip carries `parse-resources` beside the core. Without
+ * that second candidate the bridge decoded no table at all, which surfaced as "no clubteamid".
+ */
+function referenceDataDir(): string {
+  const candidates = [
+    process.env.TOUCHLINE_PARSE_RESOURCES ?? null,
+    path.join(process.cwd(), "public", "parse-resources"),
+    path.join(process.cwd(), "parse-resources"),
+  ];
+  for (const dir of candidates) {
+    if (dir && fs.existsSync(path.join(dir, "fifa_ng_db-meta.xml"))) return dir;
+  }
+  return path.join(process.cwd(), "public", "parse-resources");
+}
 
 /** Reads every resource, or returns nulls for whichever is unavailable. */
 export function loadParseResources(paths: ParseResourcePaths = {}) {
@@ -64,7 +81,7 @@ export function loadParseResources(paths: ParseResourcePaths = {}) {
     [
       paths.metaPath ?? null,
       process.env.FC_META_XML ?? null,
-      path.join(REFERENCE_DATA_DIR, "fifa_ng_db-meta.xml"),
+      path.join(referenceDataDir(), "fifa_ng_db-meta.xml"),
     ],
     () => true
   );
@@ -73,7 +90,7 @@ export function loadParseResources(paths: ParseResourcePaths = {}) {
     [
       paths.nameTablePath ?? null,
       process.env.FC_NAME_TABLE ?? null,
-      path.join(REFERENCE_DATA_DIR, "playernames_fc26.csv"),
+      path.join(referenceDataDir(), "playernames_fc26.csv"),
     ],
     // A candidate that parses to nothing is skipped, which is what the parser used to do.
     (content) => parseNameTable(content).size > 0
@@ -83,7 +100,7 @@ export function loadParseResources(paths: ParseResourcePaths = {}) {
     [
       paths.nationTablePath ?? null,
       process.env.FC_NATION_TABLE ?? null,
-      path.join(REFERENCE_DATA_DIR, "nations_fc26.csv"),
+      path.join(referenceDataDir(), "nations_fc26.csv"),
     ],
     // Same rule as the name table: a file that yields no mapping is treated as absent, so a corrupt
     // copy degrades to "nationality not named" rather than to a table of wrong names.
@@ -129,7 +146,7 @@ export function createSaveParser(
  */
 export const nodeMetaSource: MetaSource = {
   index(): MetaIndex | null {
-    const file = path.join(REFERENCE_DATA_DIR, META_INDEX_FILE);
+    const file = path.join(referenceDataDir(), META_INDEX_FILE);
     try {
       if (!fs.existsSync(file)) return null;
       return JSON.parse(fs.readFileSync(file, "utf8")) as MetaIndex;
@@ -138,7 +155,7 @@ export const nodeMetaSource: MetaSource = {
     }
   },
   meta(id: GameVersion): string | null {
-    const file = path.join(REFERENCE_DATA_DIR, gameMetaFor(id).metaFile);
+    const file = path.join(referenceDataDir(), gameMetaFor(id).metaFile);
     try {
       if (!fs.existsSync(file)) return null;
       return fs.readFileSync(file, "utf8");

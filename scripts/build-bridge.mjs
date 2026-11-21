@@ -146,6 +146,16 @@ const SHIPPED = [
   "TouchlineBridge.vbs",
   "README.md",
 ];
+
+// The parser's reference files (datasheets, name and nation tables). Without them the core cannot name
+// a single table, and every sync fails with "no clubteamid". Staged outside `public/bridge` so the
+// deployed site does not carry a second 4.6 MB copy, and zipped as a `parse-resources` folder beside
+// the core, which is where `referenceDataDir()` looks when there is no `public` folder.
+const resourcesStage = path.join(os.tmpdir(), `touchline-bridge-res-${process.pid}`);
+fs.rmSync(resourcesStage, { recursive: true, force: true });
+fs.cpSync(path.join(root, "public", "parse-resources"), path.join(resourcesStage, "parse-resources"), {
+  recursive: true,
+});
 for (const name of ["TouchlineBridge.cmd", "TouchlineBridge.vbs", "README.md"]) {
   const from = path.join(root, "bridge", name);
   if (fs.existsSync(from)) fs.copyFileSync(from, path.join(outdir, name));
@@ -164,7 +174,10 @@ const zipTmp = path.join(os.tmpdir(), `touchline-bridge-${process.pid}.zip`);
 
 try {
   fs.rmSync(zipTmp, { force: true });
-  const parts = SHIPPED.map((name) => path.join(outdir, name))
+  const parts = [
+    ...SHIPPED.map((name) => path.join(outdir, name)),
+    path.join(resourcesStage, "parse-resources"),
+  ]
     .filter((file) => fs.existsSync(file))
     .map((file) => `'${file.replace(/'/g, "''")}'`)
     .join(",");
@@ -188,6 +201,7 @@ try {
   console.log("bridge zip not created; the individual files were still written.");
 } finally {
   fs.rmSync(zipTmp, { force: true });
+  fs.rmSync(resourcesStage, { recursive: true, force: true });
 }
 
 const sizeKb = (fs.statSync(outfile).size / 1024).toFixed(0);

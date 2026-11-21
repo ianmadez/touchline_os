@@ -63,6 +63,8 @@ interface PlayerDrawerProps {
     injuryNote: string | null;
     /** The manager's own name for a player the save cannot name. Null clears it. */
     displayName: string | null;
+    /** Shirt number for a loanee. Null clears it; omitted when he is not on loan. */
+    loanJersey?: number | null;
   }) => void;
 }
 
@@ -98,6 +100,9 @@ export function PlayerDrawer({
   );
   const [injuryNote, setInjuryNote] = useState<string>(player?.userProfile?.injury.note ?? "");
   const [displayName, setDisplayName] = useState<string>(player?.userProfile?.displayName ?? "");
+  const [loanJersey, setLoanJersey] = useState<string>(
+    player?.userProfile?.loanJersey != null ? String(player.userProfile.loanJersey) : ""
+  );
 
   // This drawer is keyed by player id in `page.tsx`, so selecting a different player remounts the
   // component and every field below re-initialises from props. A sync effect here would be
@@ -143,6 +148,9 @@ export function PlayerDrawer({
       injuryUntil,
       injuryNote: injuryNote.trim() || null,
       displayName: displayName.trim() || null,
+      ...(player.onLoanTeamId !== null
+        ? { loanJersey: loanJersey.trim() === "" ? null : Number(loanJersey) }
+        : {}),
     });
     onClose();
   };
@@ -185,6 +193,20 @@ export function PlayerDrawer({
                   })}`
                 : ""}
               . He still belongs to your club.
+              <label className="mt-2 flex flex-wrap items-center gap-2 font-semibold">
+                Shirt number while away
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={99}
+                  placeholder="—"
+                  value={loanJersey}
+                  onChange={(e) => setLoanJersey(e.target.value.replace(/[^0-9]/g, "").slice(0, 2))}
+                  className="w-16 rounded-md border border-sky-300 bg-white px-2 py-1 text-center text-sm text-slate-900 focus:border-sky-500 focus:outline-none dark:border-sky-500/40 dark:bg-slate-900 dark:text-slate-100"
+                />
+                <span className="font-normal opacity-80">Used until he returns, then the save&apos;s number takes over.</span>
+              </label>
             </p>
           )}
 

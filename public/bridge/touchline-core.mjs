@@ -6206,7 +6206,14 @@ var init_schema_sql = __esm({
       "CREATE INDEX IF NOT EXISTS idx_assignments_career_id ON assignments(career_id);",
       "CREATE INDEX IF NOT EXISTS idx_assignments_career_status ON assignments(career_id, status);",
       "CREATE TABLE IF NOT EXISTS rules_profile (id TEXT PRIMARY KEY, career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE, toggles_json TEXT NOT NULL DEFAULT '{}', notes TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
-      "CREATE UNIQUE INDEX IF NOT EXISTS uq_rules_profile_career ON rules_profile(career_id);"
+      "CREATE UNIQUE INDEX IF NOT EXISTS uq_rules_profile_career ON rules_profile(career_id);",
+      // Players loaned OUT are linked to the borrowing club, so they were missing from the squad. The
+      // parser now finds them through `playerloans`; these columns say where they are and until when.
+      "ALTER TABLE players ADD COLUMN on_loan_team_id INTEGER;",
+      "ALTER TABLE players ADD COLUMN on_loan_team_name TEXT;",
+      "ALTER TABLE players ADD COLUMN loan_end_date INTEGER;",
+      // A shirt number the manager gives a loanee. The save only has his number at the loan club.
+      "ALTER TABLE player_user_profiles ADD COLUMN loan_jersey INTEGER;"
     ];
   }
 });
@@ -12880,6 +12887,10 @@ var init_schema = __esm({
         hasHighQualityHead: integer("has_high_quality_head", { mode: "boolean" }),
         headAssetId: integer("head_asset_id"),
         avatarPomId: integer("avatar_pom_id"),
+        // Set while the player is out on loan from the manager's club (`playerloans`); null otherwise.
+        onLoanTeamId: integer("on_loan_team_id"),
+        onLoanTeamName: text("on_loan_team_name"),
+        loanEndDate: integer("loan_end_date"),
         wage: integer("wage").notNull().default(0),
         wageProvenance: text("wage_provenance", { enum: provenanceEnum }).notNull().default("DERIVED"),
         isYouthProspect: integer("is_youth_prospect", { mode: "boolean" }).notNull().default(false),
@@ -12971,6 +12982,8 @@ var init_schema = __esm({
          * on each parse. A name typed into that table would last exactly one sync.
          */
         displayName: text("display_name"),
+        /** Shirt number the manager set while the player is out on loan. Only shown while he is away. */
+        loanJersey: integer("loan_jersey"),
         provenance: text("provenance", { enum: provenanceEnum }).notNull().default("USER"),
         updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
       },
@@ -15228,6 +15241,11 @@ var init_squad_service = __esm({
           };
           return {
             ...player,
+            // The manager's typed name wins over a placeholder, so it survives reloads and re-syncs.
+            name: profile?.displayName || player.name,
+            // While he is away the save only knows his loan-club number, so the manager's number stands in.
+            // Once he is back the save's own number takes over again.
+            jersey: player.onLoanTeamId !== null ? profile?.loanJersey ?? null : player.jersey,
             form: player.form,
             // A placeholder name (`#12345`) is a string like any other, so "does he have a name" cannot be
             // answered by looking at `name`. The save's own flag decides it, and a name the manager typed
@@ -15249,6 +15267,7 @@ var init_squad_service = __esm({
               userNotes: profile.userNotes,
               positionOverride: profile.primaryPosition,
               displayName: profile.displayName,
+              loanJersey: profile.loanJersey ?? null,
               injury
             } : void 0
           };
@@ -15302,6 +15321,11 @@ var init_squad_service = __esm({
           // past snapshot to it would quietly show today's numbers under a historical heading. Null.
           attributes: null,
           isYouthProspect: p.isYouthProspect,
+          jersey: p.jersey ?? null,
+          // Snapshots do not record loans; a historical view shows the squad as it was linked.
+          onLoanTeamId: null,
+          onLoanTeamName: null,
+          loanEndDate: null,
           provenance: p.provenance
         }));
       }
@@ -16851,6 +16875,7 @@ var init_user_profile_service = __esm({
             injuryNote: input.injuryNote !== void 0 ? input.injuryNote : existing.injuryNote,
             injuryReportedOn: input.injuryReportedOn !== void 0 ? input.injuryReportedOn : existing.injuryReportedOn,
             displayName: input.displayName !== void 0 ? input.displayName : existing.displayName,
+            loanJersey: input.loanJersey !== void 0 ? input.loanJersey : existing.loanJersey,
             updatedAt: (/* @__PURE__ */ new Date()).toISOString()
           }).where(eq(playerUserProfiles.id, existing.id));
         } else {
@@ -16868,6 +16893,7 @@ var init_user_profile_service = __esm({
             injuryNote: input.injuryNote ?? null,
             injuryReportedOn: input.injuryReportedOn ?? null,
             displayName: input.displayName ?? null,
+            loanJersey: input.loanJersey ?? null,
             provenance: "USER"
           });
         }
@@ -19164,6 +19190,7 @@ async function patchCareer(body2) {
         injuryUntil: validInjuryUntil,
         injuryNote: request.playerProfile.injuryNote,
         displayName: request.playerProfile.displayName === void 0 ? void 0 : (request.playerProfile.displayName ?? "").trim().slice(0, 60) || null,
+        loanJersey: request.playerProfile.loanJersey === void 0 ? void 0 : Number.isInteger(request.playerProfile.loanJersey) && request.playerProfile.loanJersey >= 1 && request.playerProfile.loanJersey <= 99 ? request.playerProfile.loanJersey : null,
         // The save's own date is the dateline, so a report written today is dated the day the manager is in,
         // not the day the machine is. Filed once and then left alone, which is what makes it a report.
         injuryReportedOn: validInjuryUntil !== void 0 && validInjuryUntil !== null ? career.inGameDate : void 0
@@ -25112,6 +25139,10 @@ var init_feasibility_parser = __esm({
     WORLD_POOL_LIMIT = 3e4;
     WORLD_PLAYER_FIELDS = [
       "playerid",
+      // Name ids into `dcplayernames`, the in-save name table that names DLC, live-update and modded players.
+      "firstnameid",
+      "lastnameid",
+      "commonnameid",
       /**
        * Read so the pool can be restricted to men's football AT DECODE TIME.
        *
@@ -25645,6 +25676,34 @@ var init_feasibility_parser = __esm({
           const id = num3(link, "playerid");
           if (id !== null) squadPlayerIds.add(id);
         }
+        const loanedOut = /* @__PURE__ */ new Map();
+        if (clubId !== null) {
+          for (const row of decodeTable("playerloans", {
+            filter: (row2) => num3(row2, "teamidloanedfrom") === clubId
+          })) {
+            const id = num3(row, "playerid");
+            if (id !== null && !squadPlayerIds.has(id) && !loanedOut.has(id)) loanedOut.set(id, row);
+          }
+        }
+        const loanLinkByPlayer = /* @__PURE__ */ new Map();
+        if (loanedOut.size > 0) {
+          for (const link of decodeTable("teamplayerlinks", {
+            unregistered: true,
+            filter: (row) => {
+              const id = num3(row, "playerid");
+              return id !== null && loanedOut.has(id) && num3(row, "teamid") !== clubId;
+            }
+          })) {
+            const id = num3(link, "playerid");
+            if (id !== null && !loanLinkByPlayer.has(id)) loanLinkByPlayer.set(id, link);
+          }
+        }
+        const loanTeamNames = /* @__PURE__ */ new Map();
+        for (const team of extractedTables.teams ?? []) {
+          const id = num3(team, "teamid");
+          const name = str(team, "teamname");
+          if (id !== null && name && !loanTeamNames.has(id)) loanTeamNames.set(id, name);
+        }
         const youthRows = decodeTable("career_youthplayers", {
           limit: Math.max(this.options.rowLimit, 300)
         });
@@ -25665,7 +25724,7 @@ var init_feasibility_parser = __esm({
           limit: Math.max(this.options.rowLimit * 2, 120),
           filter: (row) => {
             const playerId = num3(row, "playerid");
-            if (playerId !== null && squadPlayerIds.has(playerId)) return true;
+            if (playerId !== null && (squadPlayerIds.has(playerId) || loanedOut.has(playerId))) return true;
             return clubId !== null && num3(row, "teamid") === clubId;
           }
         });
@@ -25684,11 +25743,11 @@ var init_feasibility_parser = __esm({
           }
         });
         const players2 = decodeTable("players", {
-          limit: Math.max(squadPlayerIds.size * 10, 500),
+          limit: Math.max((squadPlayerIds.size + loanedOut.size) * 10, 500),
           filter: (row) => {
             const id = num3(row, "playerid");
             if (id === null) return false;
-            return squadPlayerIds.has(id) || youthIds.has(id);
+            return squadPlayerIds.has(id) || loanedOut.has(id) || youthIds.has(id);
           }
         });
         const playerById = /* @__PURE__ */ new Map();
@@ -25701,7 +25760,7 @@ var init_feasibility_parser = __esm({
           const id = num3(contract, "playerid");
           if (id !== null && !contractByPlayer.has(id)) contractByPlayer.set(id, contract);
         }
-        const editedNames = decodeTable("editedplayernames", { limit: 2e3 });
+        const editedNames = decodeTable("editedplayernames");
         const editedByPlayer = /* @__PURE__ */ new Map();
         for (const row of editedNames) {
           const id = num3(row, "playerid");
@@ -25709,6 +25768,31 @@ var init_feasibility_parser = __esm({
           const name = str(row, "commonname") ?? [str(row, "firstname"), str(row, "surname")].filter(Boolean).join(" ").trim();
           if (name) editedByPlayer.set(id, name);
         }
+        const dcNames = /* @__PURE__ */ new Map();
+        for (const row of decodeTable("dcplayernames", { unregistered: true })) {
+          const id = num3(row, "nameid");
+          const text4 = str(row, "name");
+          if (id !== null && id > 0 && text4) dcNames.set(id, text4);
+        }
+        const resolveName = (playerId, player) => {
+          if (playerId === null) return { name: null, nameSource: "unresolved" };
+          const edited = editedByPlayer.get(playerId);
+          if (edited) return { name: edited, nameSource: "edited-in-save" };
+          if (player !== void 0) {
+            const dc = (field) => {
+              const id = num3(player, field);
+              return id !== null && id > 0 ? dcNames.get(id) : void 0;
+            };
+            const common = dc("commonnameid");
+            const last = dc("lastnameid");
+            const first = dc("firstnameid");
+            const fromDc = common ?? (last ? [first, last].filter(Boolean).join(" ") : void 0);
+            if (fromDc) return { name: fromDc, nameSource: "save-name-table" };
+          }
+          const imported = this.names.get(playerId);
+          if (imported) return { name: imported, nameSource: "imported-name-table" };
+          return { name: null, nameSource: "unresolved" };
+        };
         const ratings = decodeTable("career_playermatchratinghistory", {
           limit: Math.max(this.options.rowLimit * 4, 600)
         });
@@ -25726,19 +25810,19 @@ var init_feasibility_parser = __esm({
           }
         }
         const ageReferenceDate = (latestDate > 0 ? yyyymmddToDate(latestDate) : null) ?? new Date(Date.UTC(2025 + (seasonCount ?? 0), 11, 31));
-        const squadSample = squadLinks.map((link) => {
+        const squadRows = [
+          ...squadLinks.map((link) => ({ link, loan: null })),
+          ...[...loanedOut.entries()].map(([id, loan]) => ({
+            link: loanLinkByPlayer.get(id) ?? { playerid: id },
+            loan
+          }))
+        ];
+        const squadSample = squadRows.map(({ link, loan }) => {
           const playerId = num3(link, "playerid");
+          const loanTeamId = loan === null ? null : num3(link, "teamid");
           const player = playerId !== null ? playerById.get(playerId) : void 0;
           const contract = playerId !== null ? contractByPlayer.get(playerId) : void 0;
-          let name = playerId !== null ? editedByPlayer.get(playerId) ?? null : null;
-          let nameSource = name ? "edited-in-save" : "unresolved";
-          if (!name && playerId !== null) {
-            const imported = this.names.get(playerId);
-            if (imported) {
-              name = imported;
-              nameSource = "imported-name-table";
-            }
-          }
+          const { name, nameSource } = resolveName(playerId, player);
           const rawPosCode = [num3(player, "preferredposition1"), num3(link, "position")].find(
             (candidate) => candidate !== null && candidate >= 0
           ) ?? null;
@@ -25753,7 +25837,8 @@ var init_feasibility_parser = __esm({
             nameSource,
             position: rawPosCode,
             primaryPosition: positionCodeToRole(rawPosCode),
-            jersey: num3(link, "jerseynumber"),
+            // The shirt number at the loan club is not his number here.
+            jersey: loan === null ? num3(link, "jerseynumber") : null,
             overall: num3(player, "overallrating") ?? num3(link, "overallrating"),
             potential: num3(player, "potential"),
             age: computedAge,
@@ -25766,7 +25851,12 @@ var init_feasibility_parser = __esm({
             injury: num3(link, "injury"),
             hasHighQualityHead: headQuality === null ? null : headQuality > 0,
             headAssetId: num3(player, "headassetid"),
-            avatarPomId: num3(player, "avatarpomid")
+            avatarPomId: num3(player, "avatarpomid"),
+            onLoan: loan === null ? null : {
+              teamId: loanTeamId,
+              teamName: loanTeamId === null ? null : loanTeamNames.get(loanTeamId) ?? null,
+              endDate: num3(loan, "loandateend")
+            }
           };
         });
         const youthRowsByPlayer = /* @__PURE__ */ new Map();
@@ -25786,15 +25876,7 @@ var init_feasibility_parser = __esm({
           ([playerId, rows]) => {
             const player = playerById.get(playerId);
             const history = youthHistoryByPlayer.get(playerId);
-            let name = editedByPlayer.get(playerId) ?? null;
-            let nameSource = name ? "edited-in-save" : "unresolved";
-            if (!name) {
-              const imported = this.names.get(playerId);
-              if (imported) {
-                name = imported;
-                nameSource = "imported-name-table";
-              }
-            }
+            const { name, nameSource } = resolveName(playerId, player);
             const preferred = num3(player, "preferredposition1");
             const rawPosCode = preferred !== null && preferred >= 0 ? preferred : null;
             const birthdate = num3(player, "birthdate");
@@ -25865,15 +25947,7 @@ var init_feasibility_parser = __esm({
           const birthdate = num3(row, "birthdate");
           const rawPosCode = num3(row, "preferredposition1");
           const position = rawPosCode !== null && rawPosCode >= 0 ? rawPosCode : null;
-          let name = editedByPlayer.get(playerId) ?? null;
-          let nameSource = name ? "edited-in-save" : "unresolved";
-          if (!name) {
-            const imported = this.names.get(playerId);
-            if (imported) {
-              name = imported;
-              nameSource = "imported-name-table";
-            }
-          }
+          const { name, nameSource } = resolveName(playerId, row);
           const clubId2 = clubByPlayer.get(playerId) ?? null;
           const nationalityId = nationalityCodeOf(row);
           worldPlayers2.push({
@@ -26208,12 +26282,23 @@ function resolve(candidates, accept) {
   }
   return null;
 }
+function referenceDataDir() {
+  const candidates = [
+    process.env.TOUCHLINE_PARSE_RESOURCES ?? null,
+    path9.join(process.cwd(), "public", "parse-resources"),
+    path9.join(process.cwd(), "parse-resources")
+  ];
+  for (const dir of candidates) {
+    if (dir && fs8.existsSync(path9.join(dir, "fifa_ng_db-meta.xml"))) return dir;
+  }
+  return path9.join(process.cwd(), "public", "parse-resources");
+}
 function loadParseResources(paths = {}) {
   const meta = resolve(
     [
       paths.metaPath ?? null,
       process.env.FC_META_XML ?? null,
-      path9.join(REFERENCE_DATA_DIR, "fifa_ng_db-meta.xml")
+      path9.join(referenceDataDir(), "fifa_ng_db-meta.xml")
     ],
     () => true
   );
@@ -26221,7 +26306,7 @@ function loadParseResources(paths = {}) {
     [
       paths.nameTablePath ?? null,
       process.env.FC_NAME_TABLE ?? null,
-      path9.join(REFERENCE_DATA_DIR, "playernames_fc26.csv")
+      path9.join(referenceDataDir(), "playernames_fc26.csv")
     ],
     // A candidate that parses to nothing is skipped, which is what the parser used to do.
     (content) => parseNameTable(content).size > 0
@@ -26230,7 +26315,7 @@ function loadParseResources(paths = {}) {
     [
       paths.nationTablePath ?? null,
       process.env.FC_NATION_TABLE ?? null,
-      path9.join(REFERENCE_DATA_DIR, "nations_fc26.csv")
+      path9.join(referenceDataDir(), "nations_fc26.csv")
     ],
     // Same rule as the name table: a file that yields no mapping is treated as absent, so a corrupt
     // copy degrades to "nationality not named" rather than to a table of wrong names.
@@ -26258,16 +26343,15 @@ async function createSaveParserForSave(bytes, options = {}) {
     identification
   };
 }
-var REFERENCE_DATA_DIR, nodeMetaSource;
+var nodeMetaSource;
 var init_parse_resources = __esm({
   "src/lib/platform/parse-resources.ts"() {
     "use strict";
     init_feasibility_parser();
     init_game_versions();
-    REFERENCE_DATA_DIR = path9.join(process.cwd(), "public", "parse-resources");
     nodeMetaSource = {
       index() {
-        const file = path9.join(REFERENCE_DATA_DIR, META_INDEX_FILE);
+        const file = path9.join(referenceDataDir(), META_INDEX_FILE);
         try {
           if (!fs8.existsSync(file)) return null;
           return JSON.parse(fs8.readFileSync(file, "utf8"));
@@ -26276,7 +26360,7 @@ var init_parse_resources = __esm({
         }
       },
       meta(id) {
-        const file = path9.join(REFERENCE_DATA_DIR, gameMetaFor(id).metaFile);
+        const file = path9.join(referenceDataDir(), gameMetaFor(id).metaFile);
         try {
           if (!fs8.existsSync(file)) return null;
           return fs8.readFileSync(file, "utf8");
@@ -26751,6 +26835,11 @@ var init_sync_service = __esm({
         const clubName = rawData.saveMetadata.clubName || "Unknown Club";
         const clubId = rawData.extractedTables.career_managerinfo?.[0]?.clubteamid;
         if (typeof clubId !== "number" || clubId <= 0) {
+          if (Object.keys(rawData.extractedTables).length === 0) {
+            throw new Error(
+              "No table in this save could be read, so the parser's reference files were not found. If this is the downloaded bridge, re-download it: the parse-resources folder must sit beside touchline-core.mjs."
+            );
+          }
           throw new Error(
             "This save has no career_managerinfo.clubteamid, so it has no stable career identity. Sync aborted instead of writing to a shared 'career_club_0'."
           );
@@ -26950,6 +27039,7 @@ var init_sync_service = __esm({
             hasHighQualityHead: entry.hasHighQualityHead,
             headAssetId: entry.headAssetId,
             avatarPomId: entry.avatarPomId,
+            onLoan: entry.onLoan ?? null,
             wage: entry.wage ?? 0,
             isYouthProspect: entry.age !== null && entry.age <= 21
           })) : rawPlayers.filter((p) => clubPlayerIds.has(Number(p.playerid))).map((p) => ({
@@ -26977,6 +27067,7 @@ var init_sync_service = __esm({
             hasHighQualityHead: null,
             headAssetId: null,
             avatarPomId: null,
+            onLoan: null,
             wage: Number(p.wage) || 0,
             isYouthProspect: Boolean(p.is_youth)
           }));
@@ -27103,6 +27194,9 @@ var init_sync_service = __esm({
               hasHighQualityHead: player.hasHighQualityHead,
               headAssetId: player.headAssetId,
               avatarPomId: player.avatarPomId,
+              onLoanTeamId: player.onLoan?.teamId ?? null,
+              onLoanTeamName: player.onLoan?.teamName ?? null,
+              loanEndDate: player.onLoan?.endDate ?? null,
               wage: player.wage,
               wageProvenance: "DERIVED",
               isYouthProspect: player.isYouthProspect,
@@ -27131,6 +27225,9 @@ var init_sync_service = __esm({
                 hasHighQualityHead: player.hasHighQualityHead,
                 headAssetId: player.headAssetId,
                 avatarPomId: player.avatarPomId,
+                onLoanTeamId: player.onLoan?.teamId ?? null,
+                onLoanTeamName: player.onLoan?.teamName ?? null,
+                loanEndDate: player.onLoan?.endDate ?? null,
                 // Previously omitted from the conflict set, so a re-derivation could not correct a
                 // stale youth flag on an existing row.
                 isYouthProspect: player.isYouthProspect,
@@ -31454,6 +31551,15 @@ function pick3(options, seed, slot) {
 function source(seed, slot = "source") {
   return pick3(SOURCES, seed, slot);
 }
+function transferWindowOn(date) {
+  if (!date) return null;
+  const month = Number(date.slice(5, 7));
+  const day = Number(date.slice(8, 10));
+  if (!Number.isFinite(month) || !Number.isFinite(day)) return null;
+  if (month === 7 || month === 8 || month === 9 && day === 1) return "SUMMER";
+  if (month === 1) return "WINTER";
+  return null;
+}
 function scoreOf2(match) {
   return `${match.goalsFor}-${match.goalsAgainst}`;
 }
@@ -31511,7 +31617,9 @@ function lateGoals2(minutes) {
   return minutes.filter((minute) => minute >= 75).length;
 }
 function aOrAn(word) {
-  return /^[aeiou]/i.test(word.trim()) ? "an" : "a";
+  const text4 = word.trim();
+  if (/^(8|11|18)(\D|$)/.test(text4) || /^8\d/.test(text4)) return "an";
+  return /^[aeiou]/i.test(text4) ? "an" : "a";
 }
 function countWord(count) {
   const words = [
@@ -31602,7 +31710,79 @@ function fixtureLine(match, clubName) {
   const elsewhere = venueOf(match) === "AWAY";
   const left = elsewhere ? opponentWord(match) : clubName;
   const right = elsewhere ? clubName : opponentWord(match);
-  return `${capitalise(left)} ${scoreOf2(match)} ${right}`;
+  const score = elsewhere ? `${match.goalsAgainst}-${match.goalsFor}` : scoreOf2(match);
+  return `${capitalise(left)} ${score} ${right}`;
+}
+function proseScore(match) {
+  return `${Math.max(match.goalsFor, match.goalsAgainst)}-${Math.min(match.goalsFor, match.goalsAgainst)}`;
+}
+function resultPhrase2(match) {
+  const against = opponentWord(match);
+  const score = proseScore(match);
+  if (match.result === "WIN") return `${aOrAn(score)} ${score} win over ${against}`;
+  if (match.result === "LOSS") return `${aOrAn(score)} ${score} defeat to ${against}`;
+  return `${aOrAn(score)} ${score} draw with ${against}`;
+}
+function resultsLine(matches) {
+  return namesList([...matches].reverse().map(resultPhrase2));
+}
+function isCupCompetition(competition) {
+  return typeof competition === "string" && /\b(cup|trophy|shield|pokal|coppa|beker|ta[cç]a|coupe|copa|supercopa|libertadores|champions league|europa league|conference league|super ?cup)\b/i.test(
+    competition
+  );
+}
+function titleCase(text4) {
+  const small = /* @__PURE__ */ new Set(["a", "an", "and", "the", "of", "in", "on", "for", "to", "at", "or"]);
+  return text4.split(" ").map((word) => small.has(word) ? word : capitalise(word)).join(" ");
+}
+function clubShortName(clubName) {
+  const words = clubName.trim().split(/\s+/).filter((word) => !/^(A?FC|CF|SC|AC|FK|SK|IF|BK)$/i.test(word));
+  if (words.length < 2) return words.length === 1 && words[0] !== clubName.trim() ? words[0] : null;
+  const last = words[words.length - 1];
+  if (/^(Athletic|Wanderers|Hotspur|Albion|Argyle|Alexandra|Rovers|Athletico)$/i.test(last)) {
+    return words.slice(0, -1).join(" ");
+  }
+  return words.join(" ") === clubName.trim() ? null : words.join(" ");
+}
+function surnameOf(name) {
+  return name.trim().split(/\s+/).slice(-1)[0] ?? name;
+}
+function seasonStartIso(inGameDate) {
+  const moment = momentOf(inGameDate);
+  if (!moment || !inGameDate) return null;
+  const year = Number(inGameDate.slice(0, 4));
+  const month = Number(inGameDate.slice(5, 7));
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+  return `${month >= 7 ? year : year - 1}-07-01`;
+}
+function soleScorer(match) {
+  const names = scorerTally(match.scorers);
+  return names.length === 1 && names[0].goals === match.goalsFor ? names[0].name : null;
+}
+function unfoldingLine(match, club) {
+  const total = match.goalsFor + match.goalsAgainst;
+  if (total < 2 || total > 6) return null;
+  if (match.goalMinutes.length !== match.goalsFor || match.concededMinutes.length !== match.goalsAgainst) return null;
+  let ours = 0;
+  let theirs = 0;
+  const clauses = [];
+  let wasAhead = false;
+  let wasBehind = false;
+  for (const event of runningScore(match)) {
+    if (event.ours) ours += 1;
+    else theirs += 1;
+    const minute = event.minute;
+    const diff = Math.abs(ours - theirs);
+    let clause;
+    if (ours === theirs) clause = `level on ${minute}`;
+    else if (ours > theirs) clause = diff >= 2 ? `${countWord(diff)} up on ${minute}` : wasAhead ? `ahead again on ${minute}` : `ahead on ${minute}`;
+    else clause = diff >= 2 ? `${countWord(diff)} down on ${minute}` : wasBehind ? `behind again on ${minute}` : `behind on ${minute}`;
+    if (ours > theirs) wasAhead = true;
+    if (theirs > ours) wasBehind = true;
+    clauses.push(clauses.length === 0 ? `${club} were ${clause} minutes` : clause);
+  }
+  if (clauses.length < 2) return null;
+  return `${clauses.slice(0, -1).join(", ")} and ${clauses[clauses.length - 1]}.`;
 }
 function decidingGoalMinute(match) {
   if (match.goalMinutes.length === 0) return null;
@@ -31634,22 +31814,6 @@ function trailedAtAnyPoint(match) {
     if (theirs > ours) return true;
   }
   return false;
-}
-function leadChanges(match) {
-  let ours = 0;
-  let theirs = 0;
-  let leader = null;
-  let changes = 0;
-  for (const event of runningScore(match)) {
-    if (event.ours) ours += 1;
-    else theirs += 1;
-    const now3 = ours > theirs ? "US" : theirs > ours ? "THEM" : null;
-    if (now3 !== null) {
-      if (leader !== null && now3 !== leader) changes += 1;
-      leader = now3;
-    }
-  }
-  return changes;
 }
 function tidy2(text4) {
   return text4.replace(/\s+/g, " ").replace(/\s+([.,;:!?])/g, "$1").replace(/([.,;:!?])\1+/g, "$1").replace(/,\s*,/g, ",").trim();
@@ -31685,20 +31849,6 @@ function positionWords(role) {
     SUB: "substitute"
   };
   return words[code] ?? "player";
-}
-function positionGroupWords(role) {
-  switch (roleGroup(role ?? null)) {
-    case "GK":
-      return "goal";
-    case "DEF":
-      return "defence";
-    case "MID":
-      return "midfield";
-    case "ATT":
-      return "attack";
-    default:
-      return "team";
-  }
 }
 function positionPhrase(role) {
   const words = positionWords(role);
@@ -31806,7 +31956,13 @@ function playerColourStories(input, recent) {
         `${scorerDefender.name}-defender-${latest.eventId}`,
         "headline"
       ),
-      body: `${tally2} ${plural(tally2, "goal")} in the last ${recent.length} ${plural(recent.length, "match", "matches")} from a ${role}. ${source(latest.eventId, "defender-source")} have noticed that nobody has asked him to stop.`,
+      body: (() => {
+        const forwards = sum(
+          input.squad.filter((player) => roleGroup(player.role) === "ATT").map((player) => goalsOf(player.name))
+        );
+        const versus = forwards < tally2 ? ` That is more than the forwards have managed between them, which is a sentence the forwards will not enjoy.` : ` ${source(latest.eventId, "defender-source")} have noticed that nobody has asked him to stop.`;
+        return `${tally2} ${plural(tally2, "goal")} in the last ${recent.length} ${plural(recent.length, "match", "matches")} from ${aOrAn(role)} ${role}.${versus}`;
+      })(),
       evidence: [
         `${role} by position`,
         `${tally2} ${plural(tally2, "goal")} in ${recent.length} matches`
@@ -31840,7 +31996,7 @@ function playerColourStories(input, recent) {
         `${kid.name}-kid-${latest.eventId}`,
         "headline"
       ),
-      body: `${kid.name} is ${kid.age}. He has ${tally2} ${plural(tally2, "goal")} in the last ${recent.length} ${plural(recent.length, "match", "matches")}, and the coaching staff have spent the week telling anyone who will listen not to make a fuss of him.`,
+      body: `${kid.name} is ${kid.age}. He has ${countWord(tally2)} ${plural(tally2, "goal")} in the last ${recent.length} ${plural(recent.length, "match", "matches")}, and the coaching staff have spent the week telling anyone who will listen not to make a fuss of him.`,
       evidence: [
         `Age ${kid.age}`,
         `${tally2} ${plural(tally2, "goal")} in ${recent.length} matches`
@@ -32000,11 +32156,96 @@ function buildNews(input, options = {}) {
   const items = [];
   const used = /* @__PURE__ */ new Set();
   const recent = input.matches.slice(0, WINDOW);
+  const windowOpen = transferWindowOn(input.inGameDate) !== null;
   const last = input.matches[0] ?? null;
   const keeper = input.squad.find((player) => player.isKeeper) ?? null;
   const at2 = input.inGameDate;
   const roleOf = (name) => input.squad.find((player) => sameName(player.name, name))?.role ?? null;
+  const firstSinceLine = (match) => {
+    const index2 = input.matches.indexOf(match);
+    if (index2 < 0) return null;
+    const earlier = input.matches.slice(index2 + 1);
+    const thisMonth = momentOf(match.matchDate)?.month ?? null;
+    const since = (found) => {
+      const month = momentOf(found.matchDate)?.month ?? null;
+      return month && month !== thisMonth ? `since ${month}` : null;
+    };
+    const club2 = input.clubName;
+    if (match.result === "WIN") {
+      const previous = earlier.findIndex((entry) => entry.result === "WIN");
+      if (previous >= 4) {
+        const when = since(earlier[previous]);
+        return `It ends a run of ${countWord(previous)} matches without a win${when ? `, and it is ${club2}'s first ${when}` : ""}.`;
+      }
+      if (venueOf(match) === "AWAY") {
+        const away = earlier.filter((entry) => venueOf(entry) === "AWAY");
+        const previousAway = away.findIndex((entry) => entry.result === "WIN");
+        if (previousAway >= 3) {
+          const when = since(away[previousAway]);
+          return `It is the first away win in ${countWord(previousAway + 1)} trips${when ? `, and the first ${when}` : ""}.`;
+        }
+      }
+    }
+    if (match.goalsAgainst === 0) {
+      const previous = earlier.findIndex((entry) => entry.goalsAgainst === 0);
+      if (previous >= 5) {
+        const when = since(earlier[previous]);
+        return `It is the first clean sheet in ${countWord(previous + 1)} matches${when ? `, and the first ${when}` : ""}.`;
+      }
+    }
+    if (match.result === "LOSS") {
+      const previous = earlier.findIndex((entry) => entry.result === "LOSS");
+      if (previous >= 6) {
+        const when = since(earlier[previous]);
+        return when ? `It is the first defeat ${when}, and it ends a run of ${countWord(previous)} matches without one.` : `It ends a run of ${countWord(previous)} matches without a defeat.`;
+      }
+    }
+    if (match.goalsFor > 0) {
+      let blanks = 0;
+      for (const entry of earlier) {
+        if (entry.goalsFor === 0) blanks += 1;
+        else break;
+      }
+      if (blanks >= 3 && blanks < earlier.length) {
+        return `It is ${club2}'s first goal in ${countWord(blanks + 1)} matches.`;
+      }
+    }
+    return null;
+  };
   const aftermath = (match, seed) => {
+    const press = match.press ?? null;
+    if (press && press.question.trim().length > 1) {
+      const asked = press.question.trim().replace(/\?+$/, "");
+      const indirect = `${asked.charAt(0).toLowerCase()}${asked.slice(1)}`;
+      const who = press.writer && press.outlet ? `${press.writer} of ${press.outlet}` : press.outlet ?? "One reporter";
+      if (match.comment !== null && match.comment.trim().length > 0) {
+        return {
+          line: pick3(
+            [
+              `${who} asked ${input.managerName} ${indirect}.`,
+              `Afterwards ${who} asked ${input.managerName} ${indirect}, and got an answer.`
+            ],
+            seed,
+            "aftermath-asked"
+          ),
+          quote: match.comment.trim()
+        };
+      }
+      if (match.commentRefused) {
+        return {
+          line: pick3(
+            [
+              `${who} asked ${input.managerName} ${indirect}. There was no answer.`,
+              `Asked by ${who} ${indirect}, ${input.managerName} declined to say.`,
+              `${who} wanted to know ${indirect}. ${input.managerName} walked past without stopping.`
+            ],
+            seed,
+            "aftermath-refused"
+          ),
+          quote: null
+        };
+      }
+    }
     if (match.comment !== null && match.comment.trim().length > 0) {
       return {
         line: pick3(
@@ -32040,199 +32281,160 @@ function buildNews(input, options = {}) {
   };
   function matchReportBody(input2, last2, scorers, saidLine) {
     const seed = last2.eventId;
+    const club2 = input2.clubName;
     const against = opponentWord(last2);
     const margin = last2.goalsFor - last2.goalsAgainst;
     const cleanSheet = last2.goalsAgainst === 0;
+    const score = proseScore(last2);
+    const cup = isCupCompetition(last2.competition) ? last2.competition : null;
+    const inCup = cup ? ` in the ${cup}` : "";
     const scorerNames = scorers.map((entry) => entry.name);
     const named = new Set(scorerNames.map(foldName));
     const others = last2.standouts.filter((name) => !named.has(foldName(name)));
-    const everyone = last2.standouts;
     const at3 = venueWord(last2);
     const where = at3.length > 0 ? ` ${at3}` : "";
-    const totalGoals = last2.goalsFor + last2.goalsAgainst;
-    const thriller = last2.result === "WIN" && margin === 1 && totalGoals >= 4;
-    const scare = last2.result === "WIN" && margin <= 2 && last2.goalsAgainst >= 2;
-    const late = margin <= 2 && lateGoals2(last2.goalMinutes) > 0;
-    const early = margin <= 2 && earlyGoals(last2.goalMinutes) > 0;
     const decided = decidingGoalMinute(last2);
-    const goalless = last2.goalsFor === 0 && last2.goalsAgainst === 0;
+    const sole = soleScorer(last2);
+    const ageOf = (name) => input2.squad.find((player) => sameName(player.name, name))?.age ?? null;
+    const tag = (name) => {
+      const age = ageOf(name);
+      return age !== null && age <= 19 ? `${age}-year-old ${name}` : name;
+    };
     const scorerClause = (() => {
       if (scorers.length === 0) return null;
       if (scorers.length === 1) {
         const only = scorers[0];
-        return only.goals === 1 ? `${only.name} got it` : `${only.name} scored ${goalTallyWord(only.goals)}`;
+        return only.goals === 1 ? `${tag(only.name)} scored` : `${tag(only.name)} scored ${goalTallyWord(only.goals)}`;
       }
-      return `${namesList(scorerNames)} shared them`;
+      const lead = scorers[0];
+      if (lead.goals >= 2) {
+        const rest = scorers.slice(1);
+        const restGoals = sum(rest.map((entry) => entry.goals));
+        return `${tag(lead.name)} scored ${goalTallyWord(lead.goals)} and ${namesList(rest.map((entry) => tag(entry.name)))} ${restGoals === 1 ? "added the other" : "added the rest"}`;
+      }
+      return `the goals came from ${namesList(scorerNames.map(tag))}`;
     })();
-    const goalsClause = scorerClause ?? (last2.goalsFor === 0 ? `${input2.clubName} drew a blank` : `${input2.clubName} scored ${countWord(last2.goalsFor)}`);
-    const defenceClause = cleanSheet ? [
-      `and nothing came back the other way`,
-      `with a clean sheet to go with it`,
-      `and the defence kept ${against} out entirely`,
-      `without conceding once`
-    ] : last2.goalsAgainst === 1 ? [
-      `though ${against} did get one back`,
-      `with a goal against to think about`,
-      `and ${against} found one reply`
-    ] : [`and ${last2.goalsAgainst} conceded`];
     const openings = [];
-    if (goalless) {
+    if (last2.goalsFor === 0 && last2.goalsAgainst === 0) {
       openings.push(
-        `A goalless draw against ${against}, and neither side did enough to change it.`,
-        `Nothing at either end${where}: ${input2.clubName} and ${against} played out a goalless draw.`,
-        `${input2.clubName} and ${against} cancelled each other out. No goals, and a point each.`,
-        `A point apiece and no goals to show for it, which against ${against} was about right.`
+        `${club2} and ${against} drew 0-0${where}${inCup}, and neither side did enough to change it.`,
+        `Nothing at either end${where}${inCup}: ${club2} and ${against} finished goalless.`,
+        `A goalless draw with ${against}${inCup}, and a point each.`
       );
     } else if (last2.result === "WIN") {
+      const winner = decided !== null && sole !== null ? `${tag(sole)} got the winner on ${decided} minutes` : decided !== null ? `the winner came on ${decided} minutes` : null;
       if (margin >= 3) {
         openings.push(
-          `${input2.clubName} did not leave this one in doubt: ${goalsClause}, ${pick3(defenceClause, seed, "bigwin-def")}.`,
-          `A comfortable win${where} for ${input2.clubName}, who took it ${scoreOf2(last2)} with ${goalsClause}.`,
-          `${fixtureLine(last2, input2.clubName)} flatters nobody, and ${input2.clubName} earned every bit of it: ${goalsClause} ${pick3(defenceClause, seed, "bigwin-def2")}.`
+          `${club2} beat ${against} ${score}${where}${inCup}${cleanSheet ? " without conceding" : ""}.${scorerClause ? ` ${capitalise(scorerClause)}.` : ""}`,
+          `A ${score} win${where} over ${against}${inCup}, and it was never in doubt.${scorerClause ? ` ${capitalise(scorerClause)}.` : ""}`,
+          `${capitalise(against)} were beaten ${score}${venueOf(last2) === "AWAY" ? " on their own ground" : ""}${inCup}.${scorerClause ? ` ${capitalise(scorerClause)}.` : ""}`
         );
       } else if (margin === 2) {
         openings.push(
-          `Two goals were enough for ${input2.clubName}, who beat ${against} ${scoreOf2(last2)}: ${goalsClause}, ${pick3(defenceClause, seed, "win2-def")}.`,
-          `${input2.clubName} always had a little too much here, ${goalsClause}, ${pick3(defenceClause, seed, "win2-def2")}.`,
-          `A two-goal margin${where} for ${input2.clubName}, and it was built on ${goalsClause}.`
+          `${club2} beat ${against} ${score}${where}${inCup}${scorerClause ? `, and ${scorerClause}` : ""}.`,
+          `A two-goal win${where} over ${against}${inCup}${cleanSheet ? ", with a clean sheet to go with it" : ""}.${scorerClause ? ` ${capitalise(scorerClause)}.` : ""}`
         );
       } else {
         openings.push(
-          `One goal was enough. ${capitalise(goalsClause)}, and ${input2.clubName} held on to it against ${against}.`,
-          `${input2.clubName} won it by the narrowest of margins: ${goalsClause}, and from there the job was to keep ${against} at arm's length.`,
-          `It was decided by a single moment, ${goalsClause}, and ${input2.clubName} did the rest.`
+          `${club2} beat ${against} ${score}${where}${inCup}${winner ? `, and ${winner}` : scorerClause ? `, and ${scorerClause}` : ""}.`,
+          `One goal in it${where}${inCup}, and it went ${club2}'s way against ${against}.${winner ? ` ${capitalise(winner)}.` : scorerClause ? ` ${capitalise(scorerClause)}.` : ""}`
         );
-        if (decided !== null) {
+        if (decided !== null && decided >= 80) {
           openings.push(
-            `${input2.clubName} won it ${scoreOf2(last2)} with a goal on ${decided} minutes, and then had to hold what they had.`,
-            `The goal came on ${decided} minutes, and ${input2.clubName} spent the rest of it defending it.`
+            `${club2} left it late against ${against}${inCup}. ${capitalise(winner ?? `the winner came on ${decided} minutes`)}, and it finished ${score}.${!winner || !sole ? scorerClause ? ` ${capitalise(scorerClause)}.` : "" : ""}`
           );
         }
       }
-      if (thriller) {
+      if (trailedAtAnyPoint(last2)) {
         openings.push(
-          `A thriller against ${against}, and ${input2.clubName} came out of it with the points: ${goalsClause}, ${pick3(defenceClause, seed, "thriller-def")}.`,
-          `${last2.goalsAgainst} conceded and still a win: ${goalsClause}, and ${input2.clubName} had just enough to see off ${against}.`
+          `${club2} came from behind to beat ${against} ${score}${where}${inCup}${scorerClause ? `, and ${scorerClause}` : ""}.`
         );
       }
-      if (trailedAtAnyPoint(last2) && ledAtAnyPoint(last2)) {
-        openings.push(
-          `${input2.clubName} had to come from behind to win this one, and ${goalsClause} did it: ${scoreOf2(last2)} against ${against}.`,
-          `Behind at one stage and ahead by the end: ${goalsClause}, and a win that says something about the side's nerve.`
-        );
-      }
-      if (leadChanges(last2) >= 2) {
-        openings.push(
-          `The lead changed hands more than once, and ${input2.clubName} had the last word: ${goalsClause}, and ${scoreOf2(last2)} on the board.`
-        );
-      }
-      if (scare) {
-        openings.push(
-          `${input2.clubName} had this won and then let ${against} back into it: ${goalsClause}, and a finish that was tighter than it needed to be.`,
-          `Comfortable enough in the end, though ${input2.clubName} made harder work of it than the scoreline suggests: ${goalsClause}.`
-        );
-      }
-      if (late) {
-        openings.push(
-          `${input2.clubName} left it late against ${against}, but ${goalsClause} and the points stayed${where || " with them"}.`,
-          `The goals came when they came, and that was late enough to make it feel earned: ${goalsClause} ${pick3(defenceClause, seed, "late-def")}.`
-        );
-      }
-      if (early) {
-        openings.push(
-          `${input2.clubName} did the damage early: ${goalsClause}, ${pick3(defenceClause, seed, "early-def")}, and the rest was management.`,
-          `An early goal changed what this match was going to be: ${goalsClause}, and ${against} spent the rest of it chasing.`
-        );
+      if (cup && venueOf(last2) === "AWAY") {
+        openings.push(`${club2} went to ${against}${inCup} and won ${score}.${scorerClause ? ` ${capitalise(scorerClause)}.` : ""}`);
       }
     } else if (last2.result === "DRAW") {
       openings.push(
-        `Honours even at ${scoreOf2(last2)}. ${capitalise(goalsClause)}, and neither side did enough to change that.`,
-        `${input2.clubName} and ${against} could not be separated: ${goalsClause}, and a point each.`,
-        `A point apiece, and ${goalsClause} was the sum of it. ${capitalise(against)} will feel as much like it was theirs as ${input2.clubName} will.`
+        `${club2} drew ${score} with ${against}${where}${inCup}${scorerClause ? `, and ${scorerClause}` : ""}.`,
+        `${capitalise(against)} and ${club2} could not be separated${inCup}: ${score}${scorerClause ? `, and ${scorerClause}` : ""}.`
       );
-      if (trailedAtAnyPoint(last2)) {
+      if (trailedAtAnyPoint(last2) && !ledAtAnyPoint(last2)) {
         openings.push(
-          `${input2.clubName} had to come from behind against ${against} and settled for a point: ${goalsClause}.`,
-          `Behind at one stage and level by the end: ${goalsClause}, and on the balance of it a point was fair.`
+          `${club2} were behind against ${against} and came back to draw ${score}${inCup}.${scorerClause ? ` ${capitalise(scorerClause)}.` : ""}`
+        );
+      }
+      if (ledAtAnyPoint(last2) && !trailedAtAnyPoint(last2)) {
+        openings.push(
+          `${club2} were ahead against ${against} and had to settle for ${score}${inCup}.${scorerClause ? ` ${capitalise(scorerClause)}.` : ""}`
         );
       }
     } else if (last2.result === "LOSS") {
       if (last2.goalsFor === 0) {
         openings.push(
-          `${input2.clubName} lost this one ${scoreOf2(last2)} without scoring.`,
-          `${capitalise(against)} kept ${input2.clubName} out entirely, and that was the match: ${scoreOf2(last2)}.`,
-          `Nothing at the other end for ${input2.clubName}, and defeat by ${scoreOf2(last2)}.`
+          `${club2} lost ${score} to ${against}${where}${inCup} and did not score.`,
+          `${capitalise(against)} beat ${club2} ${score}${inCup}, and there was nothing at the other end.`,
+          `A ${score} defeat${where} against ${against}${inCup}, without a goal to show for it.`
         );
       } else if (last2.goalsFor === 1 && scorers.length === 1) {
-        const only = scorers[0].name;
         openings.push(
-          `Defeat for ${input2.clubName} against ${against}, and ${only} scored the consolation.`,
-          `${capitalise(against)} had too much for ${input2.clubName}, for whom ${only} got the only reply.`,
-          `A losing ${scoreOf2(last2)}, and ${only}'s goal was all ${input2.clubName} had to show for it.`
-        );
-      } else if (last2.goalsFor === 1) {
-        openings.push(
-          `Defeat against ${against}, and the single reply was not enough: ${scoreOf2(last2)}.`,
-          `One goal back, and no more than that for ${input2.clubName} against ${against}.`
+          `${club2} lost ${score} to ${against}${where}${inCup}, and ${tag(scorers[0].name)} scored the consolation.`,
+          `${capitalise(against)} had too much for ${club2}${inCup}. It finished ${score}, and ${tag(scorers[0].name)} got the only reply.`
         );
       } else {
         openings.push(
-          `${input2.clubName} lost this one ${scoreOf2(last2)}, and ${goalsClause} was as much as they managed.`,
-          `Defeat against ${against}, and the shape of it will bother the manager more than the scoreline: ${goalsClause}, and ${last2.goalsAgainst} at the other end.`,
-          `${input2.clubName} never got a grip on it. ${capitalise(goalsClause)}, and ${against} had the rest.`
+          `${club2} lost ${score} to ${against}${where}${inCup}${scorerClause ? `, though ${scorerClause}` : ""}.`,
+          `A ${score} defeat${where} against ${against}${inCup}.${scorerClause ? ` ${capitalise(scorerClause)}, and it was not enough.` : ""}`
+        );
+      }
+      if (ledAtAnyPoint(last2)) {
+        openings.push(
+          `${club2} were ahead against ${against} and still lost ${score}${inCup}.${scorerClause ? ` ${capitalise(scorerClause)}.` : ""}`
         );
       }
     } else {
-      openings.push(`${fixtureLine(last2, input2.clubName)}. ${capitalise(goalsClause)}.`);
+      openings.push(`${fixtureLine(last2, club2)}.${scorerClause ? ` ${capitalise(scorerClause)}.` : ""}`);
     }
     const opening = pick3(openings, seed, "opening");
     const addition = others.length > 0 ? pick3(
-      [
-        `${namesList(others)} did the work that does not show up in the scoreline and got the manager's eye for it.`,
-        `Away from the goals, ${namesList(others)} ${isAre(others.length)} the ${plural(others.length, "name")} the manager came back to.`,
-        `${namesList(others)} will have done ${hisTheir(others.length)} case no harm at all.`,
-        `It was ${namesList(others)} the manager picked out afterwards, and that usually means something.`
+      last2.result === "LOSS" ? [
+        `${namesList(others)} came out of it with more credit than anybody else in the side.`,
+        `The manager picked out ${namesList(others)} afterwards, which in a defeat says something.`
+      ] : [
+        `${namesList(others)} ${isAre(others.length)} the ${plural(others.length, "name")} the manager came back to afterwards.`,
+        `Away from the goals, it was ${namesList(others)} the manager picked out.`,
+        `${namesList(others)} did ${hisTheir(others.length)} case no harm at all.`
       ],
       seed,
       "addition-others"
-    ) : cleanSheet && scorerNames.length > 0 ? pick3(
-      [
-        `A clean sheet and ${plural(last2.goalsFor, "goal")} at the other end is the sort of match a manager files away as the standard.`,
-        `Keeping them out mattered as much as scoring, and that is usually the harder half.`
-      ],
-      seed,
-      "addition-clean"
-    ) : everyone.length > 0 ? pick3(
-      [
-        `${namesList(everyone)} drew the eye in a match that needed somebody to.`,
-        `There was enough in it for ${namesList(everyone)} to come away with some credit.`
-      ],
-      seed,
-      "addition-eye"
     ) : "";
     return tidy2([opening, addition, saidLine].filter(Boolean).join(" "));
   }
   if (last) {
     const scorers = scorerTally(last.scorers);
     const against = opponentWord(last);
+    const club2 = input.clubName;
+    const cup = isCupCompetition(last.competition) ? last.competition : null;
+    const sole = soleScorer(last);
+    const topScorer = scorers[0] ?? null;
+    const surnameOfScorer = topScorer && (sole !== null || topScorer.goals >= 2) ? surnameOf(topScorer.name) : null;
     const headline = pick3(
       last.result === "WIN" ? [
-        fixtureLine(last, input.clubName),
-        `${input.clubName} Take the Points Against ${against}`,
-        `Won It ${scoreOf2(last)}: ${input.clubName} See Off ${against}`,
-        // The opponent phrase is "the visitors" when the save holds no name, so it has to be capitalised
-        // where it opens the line: "the visitors Beaten as ..." was printing as a lowercase headline.
-        `${capitalise(against)} Beaten as ${input.clubName} Find a Way`
+        fixtureLine(last, club2),
+        `${club2} Beat ${capitalise(against)} ${proseScore(last)}`,
+        `${capitalise(against)} Beaten as ${club2} Find a Way`,
+        ...cup ? [`${cup}: ${club2} See Off ${capitalise(against)}`] : [],
+        ...topScorer && topScorer.goals >= 2 ? [`${topScorer.name} ${topScorer.goals >= 3 ? "Hat-Trick" : "Double"} Sinks ${capitalise(against)}`] : [],
+        ...sole && last.goalsFor === 1 ? [`${sole} the Difference Against ${capitalise(against)}`] : []
       ] : last.result === "LOSS" ? [
-        fixtureLine(last, input.clubName),
-        `Defeat for ${input.clubName} Against ${against}`,
-        `${input.clubName} Beaten ${scoreOf2(last)}`,
-        `Beaten ${scoreOf2(last)}: ${input.clubName} Lose to ${against}`
+        fixtureLine(last, club2),
+        `Defeat for ${club2} Against ${capitalise(against)}`,
+        `${club2} Beaten ${proseScore(last)} by ${capitalise(against)}`,
+        ...cup ? [`${cup} Defeat for ${club2}`] : []
       ] : [
-        `Honours Shared: ${fixtureLine(last, input.clubName)}`,
-        `${input.clubName} Held to ${scoreOf2(last)}`,
-        `All Square Against ${against}`,
-        `Nothing Between Them: ${scoreOf2(last)}`
+        `Honours Even: ${fixtureLine(last, club2)}`,
+        `${club2} Held by ${capitalise(against)}`,
+        `All Square Against ${capitalise(against)}`,
+        ...last.goalsFor + last.goalsAgainst >= 4 ? [`${proseScore(last)} and a Point Each`] : []
       ],
       last.eventId,
       "headline"
@@ -32240,43 +32442,36 @@ function buildNews(input, options = {}) {
     const said = aftermath(last, last.eventId);
     const body2 = matchReportBody(input, last, scorers, said.line);
     const earned = [];
-    if (last.shots !== null && last.shotsInsideBox !== null) {
-      const shots = `${last.shots} shots, ${last.shotsInsideBox} of them inside the box`;
-      earned.push(
-        `The shape of it is in the numbers: ${shots}. A side that gets into those positions is not living on one moment, whatever the scoreline says.`,
-        `${shots}. That is the part of this a manager takes away from a result like it, because it is the part that repeats.`
-      );
+    const unfolding = unfoldingLine(last, club2);
+    if (unfolding && last.goalsFor + last.goalsAgainst >= 2) earned.push(unfolding);
+    const since = firstSinceLine(last);
+    if (since) earned.push(since);
+    const expectedHere = effectiveExpectedGoals(last);
+    const finishingRuns = last.shots !== null && expectedHere !== null && Math.abs(last.goalsFor - expectedHere) >= FINISHING_STORY_EDGE;
+    if (!finishingRuns && last.shots !== null) {
+      const reported = last.expectedGoalsReported;
+      const inside = last.shotsInsideBox !== null ? `, ${last.shotsInsideBox} of them from inside the box` : "";
+      const xg = reported !== null ? ` The game's own expected-goals figure for them was ${formatExpectedGoals(reported)}.` : "";
+      const read = last.shots <= 6 && last.result === "WIN" ? " It was not a match they dominated, and they did not need to." : last.shots >= 15 && last.result !== "WIN" ? " That is a lot of shooting for a side that did not win." : last.shots <= 6 && last.result === "LOSS" ? " It was not a match they ever really got into." : "";
+      earned.push(`${club2} had ${last.shots} ${plural(last.shots, "shot")}${inside}.${xg}${read}`);
     }
-    if (last.goalMinutes.length >= 2) {
-      const first = Math.min(...last.goalMinutes);
-      const final = Math.max(...last.goalMinutes);
-      earned.push(
-        `The goals came on ${first} and ${final} minutes. Spread out like that, this was a match that was managed rather than one that got away.`,
-        `There was nothing lucky about the timing of them: ${first} minutes for the first and ${final} for the last is a long way from a side that scored and then held on.`
-      );
-    }
-    if (last.concededMinutes.length > 0) {
-      earned.push(
-        `The reply came on ${Math.max(...last.concededMinutes)} minutes, and that is the part of it the manager will look at twice.`,
-        // Same reason as the headline: this opens a sentence, and the fallback phrase is lowercase.
-        `${capitalise(against)} found their moment on ${Math.max(...last.concededMinutes)} minutes, which is the detail that stops this being a clean sheet of a performance.`
-      );
-    }
-    if (last.competition) {
-      earned.push(
-        `The ${last.competition} points count the same as any others, and these read better than most.`,
-        `However the season is filed, this counts the same as any other ${last.competition} result.`
-      );
-    }
-    const earnedParagraph = earned.length > 0 ? pick3(earned, last.eventId, "article-earned") : null;
     items.push({
       id: `result-${last.eventId}`,
       kind: "MATCH",
       category: last.result === "LOSS" ? "MATCH REPORT" : "TOP STORY",
       tone: last.result === "WIN" ? "GOOD" : last.result === "LOSS" ? "CONCERN" : "NEUTRAL",
       headline,
+      tabloidHeadlines: last.result === "WIN" ? [
+        ...surnameOfScorer ? [`${surnameOfScorer} Does the Damage`, `Take a Bow, ${surnameOfScorer}`] : [],
+        ...last.goalsFor - last.goalsAgainst >= 3 ? [`${capitalise(against)} Torn Apart`, `Rampant ${club2}`] : [],
+        ...cup && venueOf(last) === "AWAY" ? [`Cup Shock at ${capitalise(against)}`] : []
+      ] : last.result === "LOSS" ? [
+        ...last.goalsAgainst - last.goalsFor >= 3 ? [`Humiliation for ${club2}`, `${club2} Taken Apart`] : [],
+        `Misery for ${club2}`
+      ] : [`Stalemate`, `Stuck at ${proseScore(last)}`],
       body: body2,
-      ...earnedParagraph ? { article: [earnedParagraph] } : {},
+      ...earned.length > 0 ? { article: earned.slice(0, 2) } : {},
+      states: ["match:" + last.eventId],
       evidence: [
         `Scoreline ${scoreOf2(last)}`,
         last.competition ? `Competition ${last.competition}` : "",
@@ -32342,6 +32537,11 @@ function buildNews(input, options = {}) {
       };
       items.push({
         id: `clean-sheet-${last.eventId}`,
+        ...recent.filter((match) => match.goalsAgainst === 0).length >= 2 ? {
+          article: [
+            `The clean sheets in the run came in ${resultsLine(recent.filter((match) => match.goalsAgainst === 0))}.`
+          ]
+        } : {},
         kind: "MATCH",
         category: "THIS JUST IN",
         tone: "GOOD",
@@ -32369,6 +32569,11 @@ function buildNews(input, options = {}) {
         const afterTheResult = last.result === "WIN" ? "" : last.result === "LOSS" ? " It was not enough to save the match." : " A point was all it bought them.";
         items.push({
           id: `finishing-${last.eventId}`,
+          ...fromTheGame ? {
+            article: [
+              `The game's own expected-goals figure was ${formatExpectedGoals(expected)}. ${clinical ? `Scoring ${last.goalsFor} from that is finishing above the chances, and it does not happen every week.` : `Scoring ${last.goalsFor} from that is finishing below the chances, and over a season that is the difference between places in the table.`}`
+            ]
+          } : {},
           kind: "MATCH",
           category: "ANALYSIS",
           tone: clinical ? "GOOD" : "CONCERN",
@@ -32381,7 +32586,7 @@ function buildNews(input, options = {}) {
             ] : [
               `${input.clubName} Waste the Openings`,
               `${last.shots} Shots, ${last.goalsFor} ${goalsWord}`,
-              `A Question of Finishing After ${scoreOf2(last)}`,
+              `A Question of Finishing After ${proseScore(last)}`,
               `All Those Chances and Nothing to Show`
             ],
             last.eventId,
@@ -32418,6 +32623,15 @@ function buildNews(input, options = {}) {
         const earlyStory = early >= late;
         items.push({
           id: `timing-${last.eventId}`,
+          article: [
+            `${capitalise(
+              namesList(
+                recent.filter((match) => (earlyStory ? earlyGoals(match.goalMinutes) : lateGoals2(match.goalMinutes)) > 0).slice(0, 3).map(
+                  (match) => `${match.goalMinutes.filter((minute) => earlyStory ? minute <= 25 : minute >= 75).join(" and ")} minutes against ${opponentWord(match)}`
+                )
+              )
+            )}.`
+          ],
           kind: "MATCH",
           category: "ANALYSIS",
           tone: "NEUTRAL",
@@ -32463,6 +32677,8 @@ function buildNews(input, options = {}) {
       const tallyWords = wins > 0 && draws > 0 ? `${countWord(wins)} ${plural(wins, "win")} and ${countWord(draws)} ${plural(draws, "draw")}` : wins > 0 ? `${countWord(wins)} ${plural(wins, "win")} and no defeat` : `${countWord(draws)} ${plural(draws, "draw")} and no defeat`;
       items.push({
         id: `form-unbeaten-${recent[0].eventId}`,
+        states: ["run"],
+        article: [`In order: ${resultsLine(slice)}.`],
         kind: "FORM",
         category: "FORM WATCH",
         tone: "GOOD",
@@ -32476,7 +32692,7 @@ function buildNews(input, options = {}) {
           recent[0].eventId,
           "headline"
         ),
-        body: `${source(recent[0].eventId)} say the last ${run} ${plural(run, "match", "matches")} have brought ${tallyWords}. ${input.managerName} has a side nobody is enjoying playing against.${began ? ` The run goes back to ${began.month}.` : ""}`,
+        body: `${input.clubName} have gone ${countWord(run)} ${plural(run, "match", "matches")} without defeat: ${tallyWords}.${began ? ` The run goes back to ${began.month}.` : ""}`,
         evidence: [`Run ${formString(slice)}`, tallyWords],
         playerNames: [],
         publishedOn: recent[0].matchDate,
@@ -32486,6 +32702,8 @@ function buildNews(input, options = {}) {
     } else if (winless === -1 && losses >= 3) {
       items.push({
         id: `form-winless-${recent[0].eventId}`,
+        states: ["run"],
+        article: [`In order: ${resultsLine(recent)}.`],
         kind: "FORM",
         category: "FORM WATCH",
         tone: "CONCERN",
@@ -32514,6 +32732,7 @@ function buildNews(input, options = {}) {
     if (home.length >= 3 && home.every((match) => match.result !== "LOSS")) {
       items.push({
         id: `home-form-${recent[0].eventId}`,
+        article: [`At home, in order: ${resultsLine(home)}.`],
         kind: "FORM",
         category: "FORM WATCH",
         tone: "GOOD",
@@ -32526,7 +32745,7 @@ function buildNews(input, options = {}) {
           `home${recent[0].eventId}`,
           "headline"
         ),
-        body: `${home.length} home ${plural(home.length, "match", "matches")} and no defeat: ${formWords(home)}. On their own ground ${input.clubName} have become awkward opponents.`,
+        body: `${capitalise(countWord(home.length))} home ${plural(home.length, "match", "matches")} and no defeat: ${formWords(home)}. On their own ground ${input.clubName} have become awkward opponents.`,
         evidence: [`Home run ${formString(home)}`, `${home.length} home matches in the window`],
         playerNames: [],
         publishedOn: recent[0].matchDate,
@@ -32538,6 +32757,7 @@ function buildNews(input, options = {}) {
     if (away.length >= 3 && awayWins === 0) {
       items.push({
         id: `away-form-${recent[0].eventId}`,
+        article: [`On the road, in order: ${resultsLine(away)}.`],
         kind: "FORM",
         category: "FORM WATCH",
         tone: "CONCERN",
@@ -32568,6 +32788,16 @@ function buildNews(input, options = {}) {
       ).length;
       items.push({
         id: `scorer-${topScorer.player.name}-${recent[0].eventId}`,
+        article: [
+          `${capitalise(
+            namesList(
+              [...recent].reverse().map((match) => ({ match, goals: match.scorers.filter((name) => sameName(name, topScorer.player.name)).length })).filter((entry) => entry.goals > 0).map((entry) => `${entry.goals === 1 ? "one" : countWord(entry.goals)} against ${opponentWord(entry.match)}`)
+            )
+          )}.${(() => {
+            const team = sum(recent.map((match) => match.goalsFor));
+            return team > 0 ? ` That is ${topScorer.goals} of the ${team} ${input.clubName} have scored in the run.` : "";
+          })()}`
+        ],
         kind: "PLAYER",
         category: "PLAYER FOCUS",
         tone: "GOOD",
@@ -32599,6 +32829,20 @@ function buildNews(input, options = {}) {
     if (best && best.assists >= 3) {
       items.push({
         id: `assists-${best.player.name}-${recent[0].eventId}`,
+        article: [
+          `${capitalise(
+            namesList(
+              [...recent].reverse().map((match) => ({ match, made: match.assisters.filter((name) => sameName(name, best.player.name)).length })).filter((entry) => entry.made > 0).map((entry) => `${entry.made === 1 ? "one" : countWord(entry.made)} against ${opponentWord(entry.match)}`)
+            )
+          )}. ${(() => {
+            const fed = scorerTally(
+              recent.flatMap(
+                (match) => match.assisters.some((name) => sameName(name, best.player.name)) ? match.scorers : []
+              )
+            ).filter((entry) => !sameName(entry.name, best.player.name))[0];
+            return fed ? `${fed.name} has been the main beneficiary, scoring in the same matches.` : "";
+          })()}`
+        ],
         kind: "PLAYER",
         category: "PLAYER FOCUS",
         tone: "GOOD",
@@ -32635,6 +32879,9 @@ function buildNews(input, options = {}) {
     if (praised && praised.count >= 2) {
       items.push({
         id: `standout-${praised.name}-${recent[0].eventId}`,
+        article: [
+          `The matches: ${resultsLine(recent.filter((match) => match.standouts.some((name) => sameName(name, praised.name))))}.`
+        ],
         kind: "PLAYER",
         category: "PLAYER FOCUS",
         tone: "GOOD",
@@ -32683,6 +32930,9 @@ function buildNews(input, options = {}) {
       const theme = recurring.theme ?? "the same shortcoming";
       items.push({
         id: `weakness-${weaknessFamily(recurring.text)?.key ?? "recurring"}-${recent[0].eventId}`,
+        article: [
+          `It came up after ${resultsLine(recent.filter((match) => match.weakness && normaliseNote(match.weakness) === recurring.text))}.`
+        ],
         kind: "FORM",
         category: "THE VERDICT",
         tone: "CONCERN",
@@ -32715,6 +32965,13 @@ function buildNews(input, options = {}) {
     if (scored2 >= recent.length * 2) {
       items.push({
         id: `goals-${recent[0].eventId}`,
+        states: ["run"],
+        article: [
+          (() => {
+            const best = [...recent].sort((left, right) => right.goalsFor - left.goalsFor)[0];
+            return `The most came in ${resultPhrase2(best)}. That is ${(scored2 / recent.length).toFixed(1)} a game across the run.`;
+          })()
+        ],
         kind: "FORM",
         category: "FORM WATCH",
         tone: "GOOD",
@@ -32737,6 +32994,13 @@ function buildNews(input, options = {}) {
       });
     } else if (conceded >= recent.length * 2) {
       items.push({
+        article: [
+          (() => {
+            const worst = [...recent].sort((left, right) => right.goalsAgainst - left.goalsAgainst)[0];
+            const shutouts = recent.filter((match) => match.goalsAgainst === 0).length;
+            return `The worst of it was ${resultPhrase2(worst)}. ${shutouts === 0 ? "There has not been a clean sheet in the run." : `There ${shutouts === 1 ? "has been one clean sheet" : `have been ${countWord(shutouts)} clean sheets`} in it, which makes the rest look worse.`}`;
+          })()
+        ],
         id: `leak-${recent[0].eventId}`,
         kind: "FORM",
         category: "THE VERDICT",
@@ -32775,7 +33039,7 @@ function buildNews(input, options = {}) {
         [
           `Rout: ${fixtureLine(heavy, input.clubName)}`,
           `No Contest: ${input.clubName} See Off ${heavyAgainst}`,
-          `A Statement: ${input.clubName} ${scoreOf2(heavy)}`
+          `A Statement: ${fixtureLine(heavy, input.clubName)}`
         ],
         heavy.eventId,
         "headline-margin"
@@ -32783,12 +33047,20 @@ function buildNews(input, options = {}) {
         [
           `Heavy Defeat: ${fixtureLine(heavy, input.clubName)}`,
           `${input.clubName} Beaten Heavily by ${heavyAgainst}`,
-          `${scoreOf2(heavy)}: a Scoreline That Will Be Remembered`
+          `${proseScore(heavy)}: a Scoreline That Will Be Remembered`
         ],
         heavy.eventId,
         "headline-margin"
       ),
-      body: `A ${Math.abs(heavy.goalsFor - heavy.goalsAgainst)}-goal margin is not a detail. ${won ? `Nobody at ${input.clubName} will pretend that was anything other than comfortable.` : `The questions after a result like that do not answer themselves.`}${aftermath(heavy, `margin-${heavy.eventId}`).line ? ` ${aftermath(heavy, `margin-${heavy.eventId}`).line}` : ""}`,
+      body: (() => {
+        const after = input.matches.slice(0, input.matches.indexOf(heavy));
+        const heavyMargin = Math.abs(heavy.goalsFor - heavy.goalsAgainst);
+        const day = momentOf(heavy.matchDate);
+        const when = day ? ` in ${day.month}` : "";
+        const lead = won ? `The ${proseScore(heavy)} win over ${heavyAgainst}${when} is still the result of the run.` : `The ${proseScore(heavy)} defeat against ${heavyAgainst}${when} is still the one that stings.`;
+        const sinceLine = after.length > 0 ? won ? after.every((match) => match.goalsFor - match.goalsAgainst < heavyMargin) ? ` Nothing since has come close to it: ${formWords(after)} in the ${countWord(after.length)} ${plural(after.length, "match", "matches")} after.` : "" : ` The response since has been ${formWords(after)}.` : "";
+        return `${lead}${sinceLine}`;
+      })(),
       evidence: [
         `Scoreline ${scoreOf2(heavy)}`,
         `Margin ${Math.abs(heavy.goalsFor - heavy.goalsAgainst)}`,
@@ -32811,23 +33083,37 @@ function buildNews(input, options = {}) {
       const expired = soonest.contractValidUntil !== null && soonest.contractValidUntil <= year;
       items.push({
         id: `contract-${soonest.name}-${soonest.contractValidUntil}`,
+        states: ["contracts"],
+        ...(() => {
+          const best = [...expiring].sort((left, right) => (right.overall ?? 0) - (left.overall ?? 0))[0];
+          const later = expiring.filter((player) => player.contractValidUntil !== soonest.contractValidUntil);
+          const lines = [
+            sameYear > 1 && best ? `The one the club will least want to lose is ${best.name}.` : "",
+            later.length > 0 ? `After that, ${namesList(later.slice(0, 4).map((player) => player.name))} ${later.length === 1 ? "is" : "are"} out of contract in ${later[0].contractValidUntil}.` : ""
+          ].filter(Boolean);
+          return lines.length > 0 ? { article: [lines.join(" ")] } : {};
+        })(),
         kind: "CONTRACT",
         category: "TRANSFER DESK",
         tone: expired ? "CONCERN" : "NEUTRAL",
         headline: pick3(
-          [
+          sameYear === 1 ? [
             `${soonest.name} Out of Contract in ${soonest.contractValidUntil}`,
             `Talks Needed: ${soonest.name} Free in ${soonest.contractValidUntil}`,
             `Decision Looming on ${soonest.name}`,
             `The Clock Is Running on ${soonest.name}`
+          ] : [
+            `${capitalise(countWord(sameYear))} Contracts to Sort at ${input.clubName}`,
+            `${capitalise(countWord(sameYear))} Deals End in ${soonest.contractValidUntil}`,
+            `Talks Needed Before ${soonest.contractValidUntil}`
           ],
           `${soonest.name}${soonest.contractValidUntil}`,
           "headline"
         ),
         body: pick3(
           [
-            `${sameYear === 1 ? `One deal expires in ${soonest.contractValidUntil}` : `${sameYear} deals expire in ${soonest.contractValidUntil}`}, ${soonest.name} first. ${expired ? "That year is already under way, so the clock is not a figure of speech." : "Either talks open or a fee becomes nothing."}`,
-            `${source(`${soonest.name}${soonest.contractValidUntil}`, "contract-source")} have ${soonest.name} down as the next paperwork job: his deal runs to ${soonest.contractValidUntil}, along with ${sameYear === 1 ? "one other" : `${sameYear - 1} other`} in the same year.`
+            sameYear === 1 ? `${soonest.name}'s deal runs out in ${soonest.contractValidUntil}. ${expired ? "That year is already under way, so the clock is not a figure of speech." : "If no new deal is agreed, he can leave for nothing."}` : `${capitalise(countWord(sameYear))} deals run out in ${soonest.contractValidUntil}: ${namesList(expiring.filter((player) => player.contractValidUntil === soonest.contractValidUntil).map((player) => player.name))}. ${expired ? "That year is already under way." : "Any of them not renewed by then can leave for nothing."}`,
+            sameYear === 1 ? `${source(`${soonest.name}${soonest.contractValidUntil}`, "contract-source")} have ${soonest.name} down as the next contract to sort: his deal runs to ${soonest.contractValidUntil}.` : `${source(`${soonest.name}${soonest.contractValidUntil}`, "contract-source")} have ${countWord(sameYear)} contracts to sort before ${soonest.contractValidUntil} is out: ${namesList(expiring.filter((player) => player.contractValidUntil === soonest.contractValidUntil).map((player) => player.name))}.`
           ],
           `${soonest.name}${soonest.contractValidUntil}`,
           "body"
@@ -32900,6 +33186,7 @@ function buildNews(input, options = {}) {
       quote: null
     });
   }
+  const depthGap = thinnest && thinnest[1].length === 1 && input.squad.length >= 11 && positionWords(thinnest[0]) !== "player" ? { words: positionWords(thinnest[0]), name: thinnest[1][0].name } : null;
   if (input.academy) {
     const prospect = input.academy;
     const prospectName = prospect.name;
@@ -32949,7 +33236,7 @@ function buildNews(input, options = {}) {
     }
   }
   const latestTrophy = input.trophies[0];
-  if (latestTrophy) {
+  if (latestTrophy && latestTrophy.season >= input.seasonNumber - 1) {
     items.push({
       id: `trophy-${latestTrophy.name}-${latestTrophy.season}`,
       kind: "TROPHY",
@@ -32957,15 +33244,17 @@ function buildNews(input, options = {}) {
       tone: "GOOD",
       headline: pick3(
         [
-          `${latestTrophy.name} in the Cabinet`,
-          `${input.clubName} Lift the ${latestTrophy.name}`,
-          `Honours: the ${latestTrophy.name}`,
-          `Silverware: ${latestTrophy.name}`
+          ...isCupCompetition(latestTrophy.name) ? [`${latestTrophy.name} in the Cabinet`, `${input.clubName} Lift the ${latestTrophy.name}`, `Silverware: the ${latestTrophy.name}`] : [`${input.clubName} Crowned ${latestTrophy.name} Champions`, `${latestTrophy.name} Champions: ${input.clubName}`, `The ${latestTrophy.name} Title`]
         ],
         `${latestTrophy.name}${latestTrophy.season}`,
         "headline"
       ),
-      body: `The ${latestTrophy.name} arrived in season ${latestTrophy.season}. ${input.managerName} has ${input.trophies.length} ${plural(input.trophies.length, "honour", "honours")} on the shelf, and the cabinet is in the Season tab.`,
+      body: (() => {
+        const won = isCupCompetition(latestTrophy.name) ? `${input.clubName} won the ${latestTrophy.name}` : `${input.clubName} won the ${latestTrophy.name} title`;
+        const when = latestTrophy.season === input.seasonNumber ? "this season" : "last season";
+        const count = input.trophies.length;
+        return `${won} ${when}. ${count === 1 ? `It is the first honour of ${input.managerName}'s time at the club.` : `That makes ${countWord(count)} honours under ${input.managerName}.`}`;
+      })(),
       evidence: [
         `Won in season ${latestTrophy.season}`,
         `${input.trophies.length} ${plural(input.trophies.length, "trophy", "trophies")} in the cabinet`
@@ -32983,15 +33272,23 @@ function buildNews(input, options = {}) {
     const disputed = input.position.disputed;
     items.push({
       id: `position-${position}-${input.seasonNumber}`,
+      states: ["table"],
       kind: "TABLE",
       category: "TABLE WATCH",
       tone: position <= 6 ? "GOOD" : position >= 18 ? "CONCERN" : "NEUTRAL",
       headline: pick3(
-        position <= 3 ? [`${input.clubName} ${ordinal2(position)} and Climbing`, `Up to ${ordinal2(position)} in the ${input.leagueName ?? "table"}`, `${ordinal2(position)}: the Table Takes Shape`] : position <= 6 ? [`${ordinal2(position)} in the ${input.leagueName ?? "table"}`, `${input.clubName} in the Top Six`, `European Places Within Reach at ${ordinal2(position)}`] : position >= 18 ? [`${ordinal2(position)} and Looking Down`, `${input.clubName} in Trouble at ${ordinal2(position)}`, `The Table Is Not Kind at ${ordinal2(position)}`] : [`${ordinal2(position)} in the Table`, `${input.clubName} Mid-Table at ${ordinal2(position)}`, `Nothing Settled at ${ordinal2(position)}`],
+        position <= 3 ? [`${input.clubName} ${ordinal2(position)} and Climbing`, `Up to ${ordinal2(position)} in the ${input.leagueName ?? "table"}`, `${ordinal2(position)}: the Table Takes Shape`] : position <= 6 ? [`${ordinal2(position)} in the ${input.leagueName ?? "table"}`, `${input.clubName} in the Top Six`, `${ordinal2(position)} and in the Mix`] : position >= 18 ? [`${ordinal2(position)} and Looking Down`, `${input.clubName} in Trouble at ${ordinal2(position)}`, `The Table Is Not Kind at ${ordinal2(position)}`] : [`${ordinal2(position)} in the Table`, `${input.clubName} Mid-Table at ${ordinal2(position)}`, `Nothing Settled at ${ordinal2(position)}`],
         `position${position}${input.seasonNumber}`,
         "headline"
       ),
-      body: `The final table had ${input.clubName} ${ordinal2(position)}${input.leagueName ? ` in the ${input.leagueName}` : ""}. ${disputed ? "The logged position and the final table disagree, so treat it with care." : "That is where the season finished."}${previousSeason && previousSeason.tablePosition !== null ? ` The season before, ${ordinal2(previousSeason.tablePosition)}.` : ""}`,
+      body: (() => {
+        const closed = input.seasons.some((season) => season.season === input.seasonNumber && season.complete);
+        const league = input.leagueName ? ` in the ${input.leagueName}` : "";
+        const before2 = previousSeason && previousSeason.tablePosition !== null ? previousSeason.tablePosition : null;
+        const lead = closed ? `${input.clubName} finished ${ordinal2(position)}${league}.` : `${input.clubName} are ${ordinal2(position)}${league}.`;
+        const compare = before2 === null ? "" : before2 > position ? ` That is ${countWord(before2 - position)} ${plural(before2 - position, "place")} better than the ${ordinal2(before2)} of the season before.` : before2 < position ? ` The season before ended ${ordinal2(before2)}, so this is a step back.` : ` That is exactly where the season before ended.`;
+        return `${lead}${disputed ? " The logged position and the save disagree, so treat it with care." : ""}${compare}`;
+      })(),
       evidence: [
         `Position ${position}`,
         input.position.basis ? `Basis ${input.position.basis}` : "",
@@ -33009,6 +33306,12 @@ function buildNews(input, options = {}) {
     const atPhase = phasePhrase(seasonPhase(input.progress ?? null));
     items.push({
       id: `block-${input.seasonNumber}-${input.block.gamesPlayed}`,
+      states: ["block"],
+      ...input.progress && input.progress.expectedGames > 0 ? {
+        article: [
+          `${atPhase ? `${capitalise(atPhase)}, ` : ""}${atPhase ? "over" : "Over"} a full ${input.progress.expectedGames}-game league season that is a ${Math.round(perGame * input.progress.expectedGames)}-point pace.`
+        ]
+      } : {},
       kind: "FORM",
       category: "THE PLAN",
       tone: perGame >= 1.6 ? "GOOD" : perGame < 1 ? "CONCERN" : "NEUTRAL",
@@ -33029,7 +33332,7 @@ function buildNews(input, options = {}) {
         `block${input.seasonNumber}${input.block.gamesPlayed}`,
         "headline"
       ),
-      body: `${points} points from the last ${input.block.gamesPlayed} ${plural(input.block.gamesPlayed, "match", "matches")}, at ${perGame.toFixed(1)} a game. ${perGame >= 1.6 ? "Do that for a season and nobody finishes above you." : perGame < 1 ? "Do that for a season and the table says what it says." : "That is the sort of return that keeps a season moving without moving it much."}${atPhase ? ` It is a return worth weighing ${atPhase} rather than in isolation.` : ""}`,
+      body: `${points} points from the last ${input.block.gamesPlayed} ${plural(input.block.gamesPlayed, "match", "matches")}, at ${perGame.toFixed(1)} a game. ${perGame >= 1.6 ? "Do that for a season and nobody finishes above you." : perGame < 1 ? "Do that for a season and the table says what it says." : "That is the sort of return that keeps a season moving without moving it much."}`,
       evidence: [
         `${points} points from ${input.block.gamesPlayed} logged matches`,
         `${perGame.toFixed(2)} points per match`
@@ -33118,7 +33421,12 @@ function buildNews(input, options = {}) {
           `budget${input.seasonNumber}${finance.transferBudget}`,
           "headline"
         ),
-        body: `The money available is understood to be ${budget}. At this level of the game that is a starting player and very little besides, which is the sort of budget that has to be spent well or not at all. Whether it is spent is a different question from whether it is there, and the answer to the second one is now on the record.`,
+        body: (() => {
+          const share = finance.estimatedTierRevenue > 0 ? finance.transferBudget / finance.estimatedTierRevenue : null;
+          const size = share === null ? "It is the figure the window will be judged against." : share >= 0.5 ? "For a club at this level that is serious money, and it will be expected to buy serious players." : share >= 0.15 ? "That is one proper signing at this level, or two if the manager is clever about it." : "That does not buy much at this level. A loan, a free transfer and a lot of phone calls.";
+          const gap = depthGap ? ` The obvious place to spend it is on ${aOrAn(depthGap.words)} ${depthGap.words}: ${depthGap.name} is the only senior one at the club.` : "";
+          return `The money available is understood to be ${budget}. ${size}${gap}`;
+        })(),
         evidence: [
           `Transfer budget ${budget} (${finance.transferBudgetSource === "USER" ? "stated by the manager" : "from the save"})`,
           `Wage budget ${finance.wageBudget !== null ? moneyBand(finance.wageBudget, finance.currency) : "not recorded"}`,
@@ -33168,7 +33476,7 @@ function buildNews(input, options = {}) {
     const shortDeals = input.squad.filter(
       (player) => player.contractValidUntil !== null && input.inGameYear !== null && player.contractValidUntil <= input.inGameYear + 1
     ).length;
-    const shortDealsLine = shortDeals === 1 ? "One player is inside the last year of his deal, so the next marquee arrival is most plausibly funded by a departure." : shortDeals > 1 ? `${capitalise(countWord(shortDeals))} players are inside the last year of their deals, so the next marquee arrival is most plausibly funded by a departure.` : "On this record, a significant arrival would most plausibly be funded by a departure.";
+    const shortDealsLine = shortDeals === 1 ? "One player is in the last year of his deal, and selling him now is the one way to get a fee for him before he can walk away." : shortDeals > 1 ? `${capitalise(countWord(shortDeals))} players are in the last year of their deals, and selling one now is the only way to get a fee before they can walk away.` : "A club that has sold for more than it has spent tends to keep doing it.";
     const bought = finance.recordBuy;
     const sold = finance.recordSale;
     if (financePeg !== null && (bought !== null || sold !== null)) {
@@ -33178,6 +33486,7 @@ function buildNews(input, options = {}) {
       const buyIsLarger = bought !== null && (sold === null || bought > sold);
       items.push({
         id: `record-fee-${input.seasonNumber}-${bought ?? 0}-${sold ?? 0}`,
+        states: shortDeals > 0 ? ["contracts"] : [],
         kind: "FINANCE",
         category: "FINANCE",
         tone: "NEUTRAL",
@@ -33211,6 +33520,7 @@ function buildNews(input, options = {}) {
     if (finance.transferBudget === null && (finance.recordBuy !== null || finance.recordSale !== null)) {
       items.push({
         id: `sell-to-buy-${input.seasonNumber}`,
+        states: [],
         kind: "FINANCE",
         category: "FINANCE",
         tone: "NEUTRAL",
@@ -33224,7 +33534,7 @@ function buildNews(input, options = {}) {
           `sellbuy${input.seasonNumber}`,
           "headline"
         ),
-        body: `No transfer budget is recorded for this club, which usually means one of two things: the board has not set one, or there is nothing to set. History on the record suggests the money would come from a sale, and that is the version of the window a manager does not control. The manager has not said either way, which is itself an answer.`,
+        body: `No transfer budget has been set, and until one is the only money ${input.clubName} can count on is what they raise themselves.${finance.recordSale !== null ? ` The biggest fee of ${surnameOf(input.managerName)}'s time came in, not out: ${moneyBand(finance.recordSale, finance.currency)}.` : ""} A club in that position sells before it buys.`,
         evidence: [
           `No transfer budget recorded (a save of 0 reads as unknown, not as zero)`,
           finance.recordSale !== null ? `Record received ${moneyBand(finance.recordSale, finance.currency)} (from the save)` : "",
@@ -33246,6 +33556,7 @@ function buildNews(input, options = {}) {
     const seed = `${best.name}${best.newOverall}`;
     items.push({
       id: `progress-${best.id}`,
+      states: [`development:${foldName(best.name)}`],
       kind: "PLAYER",
       category: best.isProspect ? "SCOUTING" : "PLAYER FOCUS",
       tone: "GOOD",
@@ -33274,7 +33585,7 @@ function buildNews(input, options = {}) {
           `Nobody was surprised to see ${best.name} improve. They were surprised by how much, and how soon. At ${positionWords(where)} that changes what the rest of his season is about.`
         ] : [
           `${source(seed, "progress-source")} say ${best.name} has kicked on again. One small step is not news on its own; the direction is, and this is a player going the right way.`,
-          `${best.name} is better than he was recently, and the club have noticed. He is ${positionPhrase(where)}, and improvement in ${positionGroupWords(where)} tends to show up in a match before it shows up on a list.`,
+          `${best.name} has got better, and the people who work with him every day have seen it. For ${positionPhrase(where)} that shows up in the small things first: the extra yard, the right pass, the duel that used to be lost.`,
           `A quiet improvement from ${best.name}, and the kind that matters more than it reads: the people who work with him every day say the level has gone up. ${capitalise(positionPhrase(where))} who is still getting better is a useful thing to have.`
         ],
         seed,
@@ -33286,7 +33597,7 @@ function buildNews(input, options = {}) {
             `At ${age}, this is the stretch where a career is either built or postponed. The club have been careful with him, and there is no appetite to rush a good thing.`,
             `At ${age} the temptation is to demand it all at once. The club's own view is calmer than that: the improvement is real, and the job now is to make it the floor rather than the ceiling.`
           ] : [
-            `Improvement ${age !== null ? `at ${age} ` : ""}is worth more than it looks. Nobody is going to hand him a new contract on the back of it, and nobody needed to be told he could play.`,
+            `${age !== null && age >= 27 ? `Improving at ${age} is rarer than improving at 20, and it` : "It"} usually means a player has found a role that suits him. The manager's job now is to keep him in it.`,
             `He is not a young player being talked up. He is ${positionPhrase(where)} who has got better, which at this point in a career is the hardest kind of progress to make.`
           ],
           seed,
@@ -33397,7 +33708,13 @@ function buildNews(input, options = {}) {
         `${star.name}${starOverall}`,
         "headline"
       ),
-      body: `${star.name}${star.age !== null ? `, ${star.age},` : ""} is the player opponents set up to stop. ${source(`${star.name}${starOverall}`, "star-source")} are in no doubt that the best player at the club is in the building, and not for much longer on this form.`,
+      body: (() => {
+        const group = roleGroup(star.role);
+        const role = positionWords(star.role);
+        const lead = group === "ATT" || group === "MID" ? `${star.name} is the player opponents set up to stop.` : group === "GK" ? `${star.name} is the best player at the club, and he is the goalkeeper.` : `${star.name} is the best player at the club, and he does it as ${aOrAn(role)} ${role}.`;
+        const contract = star.contractValidUntil !== null && input.inGameYear !== null && star.contractValidUntil <= input.inGameYear + 1 ? ` His deal runs to ${star.contractValidUntil}, which is the part of this the club will be thinking about.` : ` ${source(`${star.name}${starOverall}`, "star-source")} would not swap him for anybody in the division.`;
+        return `${lead}${contract}`;
+      })(),
       evidence: [
         `Highest rated player in the squad: ${starOverall} overall${star.potential !== null ? `, ceiling ${star.potential}` : ""}`,
         `Squad of ${input.squad.length}`
@@ -33450,24 +33767,6 @@ function buildNews(input, options = {}) {
     const words = positionWords(absence.role);
     const seed = `injury-${foldName(absence.name)}-${band}`;
     const noteParagraph = absence.note ? `The club's own description of it is short: "${absence.note}".` : null;
-    const standing = pickFresh(
-      absence.isStarter ? [
-        `He has been a regular part of this ${input.clubName} side, which is what makes it a team selection problem rather than a line on a medical sheet.`,
-        `He is in the manager's XI when everybody is fit, so this is not a squad note. It is a change to the team that has to be made from outside it.`,
-        `A first choice is missing, and that is a different sentence from "a player is injured". The side that has been picked has to be picked differently.`,
-        `He has been starting, which puts the problem where it belongs: in the team sheet rather than in the treatment room's paperwork.`,
-        `The XI has to change, and not by choice. Losing a player the manager was already picking is the expensive kind of absence.`
-      ] : [
-        `He was not in the saved XI, so the shape does not have to move. What a squad loses in that case is depth, and depth is what the back half of a season is played on.`,
-        `This is not a change to the first choice side, and it should not be reported as one. It is a hole in the cover, which matters later rather than in the next match.`,
-        `He has not been starting, so the team that lines up is the team the manager wanted. The cost of this one is measured in the options he no longer has on the bench.`,
-        `The starting XI is untouched by it. What the squad loses is an alternative, and alternatives are only noticed in the weeks when three games land in eight days.`,
-        `A squad player rather than a starter, so nobody has to re-pick the side. The absence still narrows the bench, and a narrow bench is what makes a manager conservative.`
-      ],
-      seed,
-      "article-standing",
-      used
-    );
     const byBand = {
       KNOCK: {
         headline: [
@@ -33502,24 +33801,23 @@ function buildNews(input, options = {}) {
             ],
             seed,
             "article-cover"
-          ),
-          standing
+          )
         ],
         weight: 62
       },
       WEEKS: {
         headline: [
-          `${absence.name} Faces ${capitalise(timeOut)} Out`,
-          `${capitalise(timeOut)} Out for ${absence.name}`,
-          `${input.clubName} Lose ${absence.name} for ${capitalise(timeOut)}`,
+          `${absence.name} Faces ${titleCase(timeOut)} Out`,
+          `${capitalise(titleCase(timeOut))} Out for ${absence.name}`,
+          `${input.clubName} Lose ${absence.name} for ${titleCase(timeOut)}`,
           `A Spell on the Sidelines for ${absence.name}`,
-          `${absence.name} Set to Miss ${capitalise(timeOut)}`
+          `${absence.name} Set to Miss ${titleCase(timeOut)}`
         ],
         body: {
           fact: [
             `${absence.name} is out for ${timeOut}, and that is long enough to stop being a knock and start being a run of games without him.`,
             `${absence.name} will miss ${timeOut} of football. ${capitalise(timeOut)} is the awkward length: long enough that somebody else has to play, short enough that nobody signs anyone about it.`,
-            `Out for ${timeOut}, and ${absence.name} leaves a hole in the ${words} position that has to be filled from inside the squad, because no window is open to solve it any other way.`
+            `Out for ${timeOut}, and ${absence.name} leaves a hole in the ${words} position that has to be filled from inside the squad${windowOpen ? ", unless the club move in the window" : ", because no window is open to solve it any other way"}.`
           ],
           starter: [
             `${input.clubName} now have to decide what the team looks like without their ${words}, and the answer has to come from a squad that has not had to give one all season.`,
@@ -33541,7 +33839,6 @@ function buildNews(input, options = {}) {
             seed,
             "article-replacement"
           ),
-          standing,
           noteParagraph
         ].filter((paragraph) => Boolean(paragraph)),
         weight: 74
@@ -33580,7 +33877,6 @@ function buildNews(input, options = {}) {
             seed,
             "article-month"
           ),
-          standing,
           noteParagraph
         ].filter((paragraph) => Boolean(paragraph)),
         weight: 80
@@ -33619,7 +33915,6 @@ function buildNews(input, options = {}) {
             seed,
             "article-absorb"
           ),
-          standing,
           noteParagraph
         ].filter((paragraph) => Boolean(paragraph)),
         weight: 88
@@ -33658,7 +33953,6 @@ function buildNews(input, options = {}) {
             seed,
             "article-planning"
           ),
-          standing,
           noteParagraph
         ].filter((paragraph) => Boolean(paragraph)),
         weight: 96
@@ -33765,7 +34059,17 @@ function buildNews(input, options = {}) {
           `haul${foldName(haul.name)}${last.eventId}`,
           "headline"
         ),
-        body: `${haul.name} scored ${goalTallyWord(haul.goals)} in a match that finished ${scoreOf2(last)}. ${haulTally.length === 1 ? `Nobody else scored for ${input.clubName} at all, which makes it his match rather than his side's.` : `${namesList(haulTally.slice(1).map((entry) => entry.name))} got the others, which will not bother him much.`}`,
+        body: (() => {
+          const rest = haulTally.slice(1);
+          const restGoals = sum(rest.map((entry) => entry.goals));
+          const resultWord2 = last.result === "WIN" ? "win" : last.result === "LOSS" ? "defeat" : "draw";
+          const opening = `${haul.name} scored ${goalTallyWord(haul.goals)} in the ${proseScore(last)} ${resultWord2} against ${haulAgainst}.`;
+          const others = rest.length === 0 ? ` Nobody else in a ${input.clubName} shirt scored, so it was his match and nobody else's.` : ` ${namesList(rest.map((entry) => entry.name))} got the ${restGoals === 1 ? "other" : "rest"}.`;
+          const start = seasonStartIso(input.inGameDate);
+          const earlierHauls = start ? input.matches.slice(1).filter((match) => (match.matchDate ?? "") >= start).filter((match) => match.scorers.filter((name) => sameName(name, haul.name)).length >= 3).length : 0;
+          const running = earlierHauls > 0 ? ` It is his ${ordinalWord(earlierHauls + 1)} hat-trick of the season.` : "";
+          return `${opening}${others}${running}`;
+        })(),
         evidence: [
           `${haul.name} ${haul.goals} ${plural(haul.goals, "goal")}`,
           `${last.scorers.length} scorer entries logged for ${input.clubName}`,
@@ -33776,7 +34080,7 @@ function buildNews(input, options = {}) {
         weight: 86,
         quote: null
       });
-    } else if (haul && haul.goals >= 2 && last.goalsFor === haul.goals && last.goalsAgainst > 0) {
+    } else if (haul && haul.goals >= 2 && last.goalsFor === haul.goals && last.goalsAgainst > 0 && last.result !== "WIN") {
       items.push({
         id: `carried-${foldName(haul.name)}-${last.eventId}`,
         kind: "MATCH",
@@ -33791,7 +34095,7 @@ function buildNews(input, options = {}) {
           `carried${foldName(haul.name)}${last.eventId}`,
           "headline"
         ),
-        body: `Every goal ${input.clubName} scored came from ${haul.name}, and the match finished ${scoreOf2(last)}. A player doing that will be pleased with himself and the manager will be quietly uneasy about it, because a side that scores only through one man has one man to lose.`,
+        body: `Every goal ${input.clubName} scored in the ${proseScore(last)} ${last.result === "LOSS" ? "defeat" : "draw"} came from ${haul.name}. A player doing that will be pleased with himself and the manager will be quietly uneasy about it, because a side that scores only through one man has one man to lose.`,
         evidence: [
           `${haul.name} ${haul.goals} of ${input.clubName}'s ${last.goalsFor}`,
           `Final score ${scoreOf2(last)}`
@@ -33803,7 +34107,7 @@ function buildNews(input, options = {}) {
       });
     }
     const decided = decidingGoalMinute(last);
-    if (decided !== null && decided >= 85 && last.result === "WIN") {
+    if (decided !== null && decided >= 85 && last.result === "WIN" && soleScorer(last) !== null) {
       items.push({
         id: `late-winner-${last.eventId}`,
         kind: "MATCH",
@@ -33819,7 +34123,7 @@ function buildNews(input, options = {}) {
           `late${last.eventId}`,
           "headline"
         ),
-        body: `The goal that won it came on ${decided} minutes, which is late enough that ${haulAgainst} will feel they had it. A match like that is remembered for the moment rather than for the ninety minutes, and ${input.clubName} will not mind which part of it is remembered.`,
+        body: `${soleScorer(last)} won it on ${decided} minutes, late enough that ${haulAgainst} will feel they had a point. ${pick3([`Matches like that are remembered for the moment and not the ninety minutes.`, `It is the kind of goal that gets a stand on its feet and a manager onto the pitch.`, `Those are the points a season is built on, and nobody gives them back.`], last.eventId, "late-tail")}`,
         evidence: [
           `Winning goal on ${decided} minutes`,
           `Final score ${scoreOf2(last)}`,
@@ -33847,7 +34151,12 @@ function buildNews(input, options = {}) {
           `thrown${last.eventId}`,
           "headline"
         ),
-        body: `${input.clubName} were in front in this one and finished it ${scoreOf2(last)}, which is a different sentence from a defeat and a worse one than a draw. Led, level, and the manager left to explain the space between the two. It is the sort of thing that shows up in a table at the end of a season.`,
+        body: (() => {
+          const ending = last.result === "DRAW" ? `drew ${proseScore(last)}` : `lost ${proseScore(last)}`;
+          const story = unfoldingLine(last, input.clubName);
+          const cost = last.result === "DRAW" ? "Two points went from a winning position." : "A match they were winning ended with nothing.";
+          return `${input.clubName} were ahead against ${haulAgainst} and ${ending}. ${story ? `${story} ` : ""}${cost}`;
+        })(),
         evidence: [
           `Led during the match and did not win it`,
           `Final score ${scoreOf2(last)}`,
@@ -33884,7 +34193,12 @@ function buildNews(input, options = {}) {
         `drought${recent[0].eventId}`,
         "headline"
       ),
-      body: `Nothing has gone in for ${scorelessRun} ${plural(scorelessRun, "match", "matches")}. That is not bad luck and it is not a defensive problem: it is a team that has stopped finding a way to score, and every match it continues is one more the manager has to explain.`,
+      body: (() => {
+        const run = recent.slice(0, scorelessRun);
+        const shots = run.map((match) => match.shots).filter((count) => count !== null);
+        const shotLine = shots.length === run.length && shots.length > 0 ? ` They have had ${sum(shots)} shots in that time${sum(shots) / shots.length >= 12 ? ", so the chances are coming and the finishing is not" : ", which is not enough to expect a goal from"}.` : "";
+        return `${input.clubName} have not scored for ${scorelessRun} ${plural(scorelessRun, "match", "matches")}.${shotLine} Every match it goes on is one more the manager has to explain.`;
+      })(),
       evidence: [
         `${scorelessRun} matches without a goal`,
         `Goals for 0 across the run`,
@@ -33895,6 +34209,302 @@ function buildNews(input, options = {}) {
       weight: 80,
       quote: null
     });
+  }
+  if (recent.length >= 3) {
+    const club2 = input.clubName;
+    const wobbles = recent.flatMap(
+      (match) => match.goalMinutes.map((minute) => ({ match, scored: minute, conceded: match.concededMinutes.find((other) => other > minute && other - minute <= 5) })).filter((entry) => entry.conceded !== void 0).slice(0, 1)
+    );
+    if (wobbles.length >= 2) {
+      items.push({
+        id: `celebration-${recent[0].eventId}`,
+        kind: "FORM",
+        category: "OFF THE BALL",
+        tone: "NEUTRAL",
+        headline: pick3(
+          [`${club2} Have a Celebration Problem`, `Score, Celebrate, Concede`, `The Five Minutes After a Goal`],
+          `celebration${recent[0].eventId}`,
+          "headline"
+        ),
+        body: `${wobbles.length === 2 ? "Twice" : `${capitalise(countWord(wobbles.length))} times`} in the last ${recent.length} matches, ${club2} have scored and then conceded inside five minutes. Whatever is being said in the celebrations, it is going on too long.`,
+        article: [
+          wobbles.slice(0, 3).map((entry) => `Against ${opponentWord(entry.match)}, scored on ${entry.scored} and conceded on ${entry.conceded}.`).join(" ")
+        ],
+        evidence: [`${wobbles.length} matches with a goal conceded within five minutes of scoring`],
+        playerNames: [],
+        publishedOn: recent[0].matchDate,
+        weight: 58,
+        quote: null
+      });
+    }
+    const lateOnes = recent.slice(0, 3).filter((match) => match.concededMinutes.some((minute) => minute >= 85));
+    if (lateOnes.length >= 2) {
+      const pointsFor = (ours, theirs) => ours > theirs ? 3 : ours === theirs ? 1 : 0;
+      const cost = sum(
+        lateOnes.map((match) => {
+          const late = match.concededMinutes.filter((minute) => minute >= 85).length;
+          return pointsFor(match.goalsFor, match.goalsAgainst - late) - pointsFor(match.goalsFor, match.goalsAgainst);
+        })
+      );
+      items.push({
+        id: `late-leak-${recent[0].eventId}`,
+        kind: "FORM",
+        category: "OFF THE BALL",
+        // A joke about the clock rather than a verdict, so it does not count against the paper's fairness cap.
+        tone: "NEUTRAL",
+        headline: pick3(
+          [`Somebody Get ${club2} a Watch`, `The Last Five Minutes Are a Problem`, `Late, Late Trouble for ${club2}`],
+          `lateleak${recent[0].eventId}`,
+          "headline"
+        ),
+        body: `${club2} have conceded after the 85th minute in ${countWord(lateOnes.length)} of the last three matches.${cost > 0 ? ` Take those goals away and they have ${cost} more ${plural(cost, "point")}.` : " None of them cost a result, which is the only good news in it."}`,
+        article: [
+          lateOnes.map((match) => `${capitalise(opponentWord(match))} scored on ${match.concededMinutes.filter((minute) => minute >= 85).join(" and ")}.`).join(" ")
+        ],
+        evidence: [`${lateOnes.length} of the last 3 matches with a goal conceded after 85 minutes`, `Points those goals cost: ${cost}`],
+        playerNames: [],
+        publishedOn: recent[0].matchDate,
+        weight: cost > 0 ? 68 : 56,
+        quote: null
+      });
+    }
+  }
+  if (last && last.result === "LOSS") {
+    const hero = last.standouts.find((name) => roleGroup(roleOf(name)) === "GK") ?? null;
+    if (hero) {
+      items.push({
+        id: `keeper-heroics-${last.eventId}`,
+        kind: "MATCH",
+        category: "PLAYER FOCUS",
+        tone: "GOOD",
+        headline: pick3(
+          [`${hero} Did Everything, Nobody Else Did`, `Beaten, but Not Because of ${hero}`, `${hero} Kept It Respectable`],
+          `heroics${last.eventId}`,
+          "headline"
+        ),
+        body: `${input.clubName} lost ${proseScore(last)} to ${opponentWord(last)}, and it would have been worse without ${hero}. When the goalkeeper is the name a manager picks out after a defeat, it is not much of a compliment to the ten in front of him.`,
+        evidence: [`Singled out in a ${scoreOf2(last)} defeat`, "Goalkeeper by position"],
+        playerNames: [hero],
+        publishedOn: last.matchDate,
+        weight: 74,
+        quote: null
+      });
+    }
+  }
+  if (recent.length >= 4 && input.matches.length >= WINDOW + 4) {
+    const earlierRun = input.matches.slice(WINDOW, WINDOW + 10);
+    const dry = input.squad.filter((player) => roleGroup(player.role) === "ATT").map((player) => ({ player, before: goalsIn(earlierRun, player.name), now: goalsIn(recent, player.name) })).filter((entry) => entry.now === 0 && entry.before >= 3).sort((left, right) => right.before - left.before)[0];
+    if (dry) {
+      const name = dry.player.name;
+      const scored2 = sum(recent.map((match) => match.goalsFor));
+      items.push({
+        id: `striker-drought-${foldName(name)}-${recent[0].eventId}`,
+        kind: "PLAYER",
+        category: "PLAYER FOCUS",
+        tone: "NEUTRAL",
+        headline: pick3(
+          [`Where Have ${surnameOf(name)}'s Goals Gone?`, `${name} Is Waiting`, `A Dry Spell for ${name}`],
+          `dry${name}${recent[0].eventId}`,
+          "headline"
+        ),
+        body: `${name} scored ${dry.before} in the ${earlierRun.length} matches before this run and has not scored in the last ${recent.length}. ${scored2 > 0 ? `${input.clubName} have found ${scored2} goals elsewhere in that time, so the side is coping. The striker will want his share back.` : `Nobody else has scored either, which is the bigger problem.`}`,
+        evidence: [`${dry.before} goals in the ${earlierRun.length} matches before`, `None in the last ${recent.length}`],
+        playerNames: [name],
+        publishedOn: recent[0].matchDate,
+        weight: 62,
+        quote: null
+      });
+    }
+  }
+  const seasonStart = seasonStartIso(input.inGameDate);
+  const seasonMatches = seasonStart ? input.matches.filter((match) => (match.matchDate ?? "") >= seasonStart) : [];
+  if (last && seasonMatches.includes(last)) {
+    const tallies = scorerTally(seasonMatches.flatMap((match) => match.scorers));
+    for (const entry of tallies.slice(0, 2)) {
+      const inLast = last.scorers.filter((name) => sameName(name, entry.name)).length;
+      const marker = [10, 15, 20, 25, 30, 40].find((mark) => entry.goals >= mark && entry.goals - inLast < mark);
+      if (!marker || inLast === 0) continue;
+      const nextBest = tallies.find((other) => !sameName(other.name, entry.name))?.goals ?? 0;
+      items.push({
+        id: `season-tally-${foldName(entry.name)}-${marker}-${input.seasonNumber}`,
+        kind: "PLAYER",
+        category: "PLAYER FOCUS",
+        tone: "GOOD",
+        headline: pick3(
+          [`${marker} for the Season: ${entry.name}`, `${entry.name} Reaches ${marker}`, `${entry.name} Hits ${marker}`],
+          `tally${entry.name}${marker}`,
+          "headline"
+        ),
+        body: `${entry.name}'s ${inLast === 1 ? "goal" : "goals"} against ${opponentWord(last)} took him to ${entry.goals} for the season. ${nextBest > 0 ? `Nobody else at the club has more than ${nextBest}.` : "Nobody else at the club is close."}`,
+        evidence: [`${entry.goals} goals across ${seasonMatches.length} logged matches dated this season`],
+        playerNames: [entry.name],
+        publishedOn: last.matchDate,
+        weight: 80,
+        quote: null
+      });
+      break;
+    }
+  }
+  if (last) {
+    const named = [...new Set([...last.scorers, ...last.assisters, ...last.standouts].map(foldName))].map((key) => [...last.scorers, ...last.assisters, ...last.standouts].find((name) => foldName(name) === key));
+    if (named.length >= 3) {
+      const stance = hash4(`${last.eventId}|ratings`) % 2 === 0 ? "STRAIGHT" : "LOYAL";
+      const kindness = stance === "LOYAL" ? 0.5 : 0;
+      const resultNudge = last.result === "WIN" ? 0.5 : last.result === "LOSS" ? -0.5 : 0;
+      const rows = named.map((name) => {
+        const goals = last.scorers.filter((scorer) => sameName(scorer, name)).length;
+        const assists = last.assisters.filter((assister) => sameName(assister, name)).length;
+        const picked = last.standouts.some((pick4) => sameName(pick4, name));
+        const group = roleGroup(roleOf(name));
+        const shutout = last.goalsAgainst === 0 && (group === "GK" || group === "DEF");
+        const raw = 6 + goals * 1.2 + assists * 0.6 + (picked ? 1 : 0) + (shutout ? 0.6 : 0) + resultNudge + kindness;
+        const mark = Math.max(4, Math.min(10, Math.round(raw)));
+        const reasons = [
+          goals > 0 ? goals === 1 ? "scored" : goals === 2 ? "scored twice" : `a hat-trick${goals > 3 ? " and more" : ""}` : "",
+          assists > 0 ? assists === 1 ? "made one" : `made ${countWord(assists)}` : "",
+          shutout ? "kept them out" : "",
+          picked ? "the manager's pick" : ""
+        ].filter(Boolean);
+        return { name, mark, reasons };
+      });
+      rows.sort((left, right) => right.mark - left.mark || left.name.localeCompare(right.name));
+      const star2 = rows[0];
+      const resultWord2 = last.result === "WIN" ? "win over" : last.result === "LOSS" ? "defeat against" : "draw with";
+      items.push({
+        id: `ratings-${last.eventId}`,
+        kind: "MATCH",
+        category: "PLAYER RATINGS",
+        tone: last.result === "LOSS" ? "NEUTRAL" : "GOOD",
+        stance,
+        headline: pick3(
+          [`Marks Out of Ten: ${fixtureLine(last, input.clubName)}`, `${star2.name} the Star Man Against ${capitalise(opponentWord(last))}`, `How They Rated Against ${capitalise(opponentWord(last))}`],
+          `ratings${last.eventId}`,
+          "headline"
+        ),
+        body: `How the ${proseScore(last)} ${resultWord2} ${opponentWord(last)} rated: ${rows.map((row) => `${row.name} ${row.mark}`).join(", ")}. ${star2.name} is the star man.`,
+        article: [rows.map((row) => `${row.name} ${row.mark}: ${capitalise(namesList(row.reasons) || "did the job")}.`).join(" ")],
+        evidence: ["Only players named in your debrief are rated", "Marks built from goals, assists, your standout picks and the result"],
+        playerNames: rows.slice(0, 3).map((row) => row.name),
+        publishedOn: last.matchDate,
+        weight: 60,
+        quote: null
+      });
+    }
+  }
+  const openWindow = transferWindowOn(input.inGameDate);
+  if (openWindow && input.inGameDate) {
+    const day = Number(input.inGameDate.slice(8, 10));
+    const month = Number(input.inGameDate.slice(5, 7));
+    const deadline = openWindow === "WINTER" && day >= 29 || openWindow === "SUMMER" && (month === 8 && day >= 29 || month === 9);
+    const longInjury = (input.injuries ?? []).find((absence) => {
+      const band = injuryBand(absence.until, at2);
+      return band === "MONTHS" || band === "SEASON";
+    });
+    const expiringSoon = input.inGameYear !== null ? input.squad.filter((player) => player.contractValidUntil !== null && player.contractValidUntil <= input.inGameYear + 1).sort((left, right) => (right.overall ?? 0) - (left.overall ?? 0))[0] ?? null : null;
+    const contractCall = expiringSoon && expiringSoon.name !== depthGap?.name && expiringSoon.name !== longInjury?.name ? expiringSoon : null;
+    const needs = [
+      depthGap ? `cover at ${depthGap.words} (${depthGap.name} is the only senior one)` : "",
+      longInjury ? `someone to fill in for ${longInjury.name} (out for ${describeTimeOut(longInjury.until, at2) ?? "a long time"})` : "",
+      contractCall ? `a decision on ${contractCall.name} (his deal ends in ${contractCall.contractValidUntil})` : ""
+    ].filter(Boolean);
+    if (needs.length > 0) {
+      const which = openWindow === "WINTER" ? "January" : "summer";
+      const budget = finance?.transferBudget != null ? ` The budget is understood to be ${moneyBand(finance.transferBudget, finance.currency)}.` : " No budget has been set, so anything that comes in will probably have to be paid for by something going out.";
+      items.push({
+        id: `${deadline ? "deadline" : "window"}-${input.inGameDate.slice(0, 4)}-${openWindow}`,
+        kind: "TRANSFER",
+        category: "THE WINDOW",
+        tone: "NEUTRAL",
+        headline: pick3(
+          deadline ? [`Deadline Day at ${input.clubName}`, `Last Call: ${input.clubName}'s Window`, `The Clock Runs Down at ${input.clubName}`] : [`The ${capitalise(which)} Window Opens at ${input.clubName}`, `${input.clubName}'s ${capitalise(which)} Shopping List`, `What ${input.clubName} Need This ${capitalise(which)}`],
+          `window${input.inGameDate}${openWindow}`,
+          "headline"
+        ),
+        body: `${deadline ? `It is deadline day, and ${input.clubName} still have` : `The ${which} window is open, and ${input.clubName} have`} ${countWord(needs.length)} ${plural(needs.length, "job")} on the list: ${namesList(needs)}.${budget}`,
+        evidence: [`Save date ${input.inGameDate}`, depthGap ? `One senior ${depthGap.words}` : "", longInjury ? `${longInjury.name} out until ${longInjury.until}` : ""].filter(Boolean),
+        playerNames: [depthGap?.name, longInjury?.name, expiringSoon?.name].filter((name) => Boolean(name)).slice(0, 3),
+        publishedOn: at2,
+        weight: deadline ? 78 : 66,
+        quote: null
+      });
+    }
+  }
+  if (input.inGameDate) {
+    const year = Number(input.inGameDate.slice(0, 4));
+    const month = Number(input.inGameDate.slice(5, 7));
+    const day = Number(input.inGameDate.slice(8, 10));
+    const inSeason = month === 12 && day >= 27 || month === 1 && day <= 12;
+    if (inSeason) {
+      const startYear = month === 12 ? year : year - 1;
+      const from = `${startYear}-12-20`;
+      const to = `${startYear + 1}-01-03`;
+      const festive = input.matches.filter((match) => match.matchDate !== null && match.matchDate >= from && match.matchDate <= to);
+      if (festive.length >= 2) {
+        const points = sum(festive.map((match) => match.result === "WIN" ? 3 : match.result === "DRAW" ? 1 : 0));
+        const max = festive.length * 3;
+        const good = points / max >= 0.6;
+        items.push({
+          id: `festive-${startYear}`,
+          kind: "FORM",
+          category: "FORM WATCH",
+          tone: good ? "GOOD" : points / max < 0.35 ? "CONCERN" : "NEUTRAL",
+          headline: pick3(
+            good ? [`A Very Good Christmas for ${input.clubName}`, `${points} Points From the Festive Fixtures`, `${input.clubName} Come Through the Christmas Rush`] : points / max < 0.35 ? [`A Christmas to Forget at ${input.clubName}`, `${points} From ${max} Over Christmas`, `The Festive Fixtures Bite`] : [`${points} From ${max} Over Christmas`, `A Mixed Christmas at ${input.clubName}`],
+            `festive${startYear}`,
+            "headline"
+          ),
+          body: `${capitalise(countWord(festive.length))} matches over Christmas and New Year, and ${points} points out of ${max}: ${formWords(festive)}. ${good ? "That is the stretch where seasons get made, and this one has been." : points / max < 0.35 ? "That is the stretch where squads get found out, and this one has been." : "Not a disaster and not a springboard, which is what most clubs get out of it."}`,
+          states: ["run"],
+          evidence: [`${festive.length} matches dated ${from} to ${to}`, `${points} points`],
+          playerNames: [],
+          publishedOn: at2,
+          weight: 70,
+          quote: null
+        });
+      }
+    }
+  }
+  {
+    const phase = seasonPhase(input.progress ?? null);
+    const closed = input.seasons.some((season) => season.season === input.seasonNumber && season.complete);
+    if ((phase === "FINAL_STRETCH" || closed) && seasonMatches.length >= 10) {
+      const scoreOfPlayer = (name) => goalsIn(seasonMatches, name) * 3 + assistsIn(seasonMatches, name) * 2 + seasonMatches.filter((match) => match.standouts.some((pick4) => sameName(pick4, name))).length * 2;
+      const ranked = input.squad.map((player) => ({ player, score: scoreOfPlayer(player.name) })).filter((entry) => entry.score > 0).sort((left, right) => right.score - left.score);
+      const winner = ranked[0] ?? null;
+      if (winner) {
+        const young = ranked.find((entry) => entry.player.age !== null && entry.player.age <= 21 && entry !== winner) ?? null;
+        const line = (name) => {
+          const goals = goalsIn(seasonMatches, name);
+          const assists = assistsIn(seasonMatches, name);
+          const picks = seasonMatches.filter((match) => match.standouts.some((pick4) => sameName(pick4, name))).length;
+          return namesList(
+            [
+              goals > 0 ? `${goals} ${plural(goals, "goal")}` : "",
+              assists > 0 ? `${assists} ${plural(assists, "assist")}` : "",
+              picks > 0 ? `${picks} ${plural(picks, "match", "matches")} as the manager's pick` : ""
+            ].filter(Boolean)
+          );
+        };
+        items.push({
+          id: `awards-${input.seasonNumber}`,
+          kind: "PLAYER",
+          category: "AWARDS",
+          tone: "GOOD",
+          headline: pick3(
+            [`${winner.player.name} Is Our Player of the Season`, `Player of the Season: ${winner.player.name}`, `The Season's Best: ${winner.player.name}`],
+            `awards${input.seasonNumber}`,
+            "headline"
+          ),
+          body: `${winner.player.name} is our player of the season at ${input.clubName}: ${line(winner.player.name)}.${young ? ` The young player of the season is ${young.player.name}, ${young.player.age}, with ${line(young.player.name)}.` : ""}`,
+          ...ranked[1] && ranked[1] !== young ? { article: [`${ranked[1].player.name} ran him closest, with ${line(ranked[1].player.name)}.`] } : {},
+          evidence: [`Counted over ${seasonMatches.length} debriefs dated this season`, "Goals count 3, assists 2, a standout pick 2"],
+          playerNames: [winner.player.name, ...young ? [young.player.name] : []],
+          publishedOn: at2,
+          weight: 86,
+          quote: null
+        });
+      }
+    }
   }
   const careerMatches = input.gamesInCharge ?? null;
   if (careerMatches !== null && careerMatches >= 50 && careerMatches % 50 === 0) {
@@ -33934,45 +34544,80 @@ function buildNews(input, options = {}) {
     return count;
   })();
   const badRun = straightLosses >= 3;
+  const pointsOf = (match) => match.result === "WIN" ? 3 : match.result === "DRAW" ? 1 : 0;
+  const recentPoints = sum(recent.map(pointsOf));
+  const recentPpg = recent.length > 0 ? recentPoints / recent.length : 0;
+  const before = input.matches.slice(WINDOW, WINDOW * 2);
+  const beforePoints = before.length >= 3 ? sum(before.map(pointsOf)) : null;
+  const beforePpg = beforePoints !== null ? beforePoints / before.length : null;
+  const scoredRecent = sum(recent.map((match) => match.goalsFor));
+  const concededRecent = sum(recent.map((match) => match.goalsAgainst));
+  const club = input.clubName;
+  const surname = surnameOf(input.managerName);
+  const lastFinish = previousSeason?.tablePosition ?? null;
+  const window2 = `${recent.length} ${plural(recent.length, "match", "matches")}`;
+  const pointsLine = `${recentPoints} ${plural(recentPoints, "point")} from the last ${window2}`;
+  const trendLine = () => {
+    if (beforePoints === null || beforePpg === null) return "";
+    if (recentPpg - beforePpg >= 0.4) return ` The ${before.length} before that brought ${beforePoints}, so it is getting better.`;
+    if (beforePpg - recentPpg >= 0.4) return ` The ${before.length} before that brought ${beforePoints}, so it is getting worse.`;
+    return ` The ${before.length} before that brought ${beforePoints}, so nothing has really moved.`;
+  };
+  const distinctScorers = [...new Set(recent.flatMap((match) => match.scorers.map(foldName)))].length;
+  const scorerNamesInWindow = scorerTally(recent.flatMap((match) => match.scorers)).map((entry) => entry.name);
   if (recent.length >= 3) {
+    const verdict = badRun || recentPpg < 0.8 ? "AGAINST" : recentPpg >= 2 || beforePpg !== null && recentPpg - beforePpg >= 0.8 ? "FOR" : "OPEN";
+    const honours = input.trophies.length;
+    const latestHonour = input.trophies[0] ?? null;
+    const seed = `op-manager${input.seasonNumber}${recent[0].eventId}`;
+    const body2 = verdict === "AGAINST" ? `${capitalise(formWords(recent))}: ${pointsLine}.${trendLine()} ${input.seasonNumber >= 2 ? `This is ${surname}'s ${ordinalWord(input.seasonNumber)} season, and the squad on the pitch is the one ${surname} built.` : `It is a first season and much of this squad was here before ${surname}, but results are still results.`}${latestHonour ? ` The ${latestHonour.name} buys time. It does not buy unlimited time.` : ""}` : verdict === "FOR" ? `${capitalise(formWords(recent))}, which is ${pointsLine}.${trendLine()} ${pick3(
+      [
+        `${surname} deserves the credit for it, because this is the same squad people were doubting.`,
+        `That is the work of a manager who knows what this side is good at.`,
+        `${club} look like a team with a plan, and the plan is ${surname}'s.`
+      ],
+      seed,
+      "for"
+    )}` : `${capitalise(formWords(recent))}: ${pointsLine}.${trendLine()} ${lastFinish !== null ? `Last season ended ${ordinal2(lastFinish)}, and nothing yet says this one will finish higher or lower.` : `Nothing in that says which way the season is going yet, and anybody claiming otherwise is guessing.`}`;
+    const theme = (() => {
+      const counts = /* @__PURE__ */ new Map();
+      for (const match of recent) {
+        const family = match.weakness ? weaknessFamily(match.weakness) : null;
+        if (!family) continue;
+        const entry = counts.get(family.key) ?? { line: family.line, count: 0 };
+        entry.count += 1;
+        counts.set(family.key, entry);
+      }
+      return [...counts.values()].sort((left, right) => right.count - left.count)[0] ?? null;
+    })();
+    const article = verdict === "AGAINST" ? theme && theme.count >= 2 ? `The same thing keeps going wrong, and it is ${theme.line}. ${concededRecent} conceded in ${window2} is what that costs.` : `${concededRecent} conceded and ${scoredRecent} scored in ${window2}. Whatever the explanation is, it has to arrive soon.` : verdict === "FOR" ? distinctScorers >= 3 ? `${capitalise(countWord(distinctScorers))} different players have scored in that run, so it is not one man carrying the side.` : `${scoredRecent} scored and ${concededRecent} conceded in ${window2}.` : `${scoredRecent} scored and ${concededRecent} conceded in ${window2}. The margins are thin, and the next few matches will decide which side of them the season falls.`;
     items.push({
       id: `opinion-manager-${input.seasonNumber}-${recent[0].eventId}`,
       kind: "OPINION",
       category: "TALKING POINT",
-      tone: badRun ? "CONCERN" : "NEUTRAL",
-      stance: badRun ? "HOSTILE" : "STRAIGHT",
+      tone: verdict === "AGAINST" ? "CONCERN" : verdict === "FOR" ? "GOOD" : "NEUTRAL",
+      stance: verdict === "AGAINST" ? "HOSTILE" : verdict === "FOR" ? "LOYAL" : "STRAIGHT",
       headline: pick3(
-        badRun ? [
-          `The Case Against ${input.managerName} Is Getting Easier to Make`,
-          `Something Has to Change at ${input.clubName}`,
-          `${input.clubName} Are Going Backwards`
-        ] : [
-          `${input.managerName} Has Earned the Benefit of the Doubt`,
-          `Judging ${input.managerName} Fairly`,
-          `What We Actually Know About ${input.managerName}`
-        ],
-        `op-manager${input.seasonNumber}${recent[0].eventId}`,
+        verdict === "AGAINST" ? [
+          `The Case Against ${surname} Is Getting Easier to Make`,
+          `Something Has to Change at ${club}`,
+          `${recentPoints} ${plural(recentPoints, "Point")} from ${recent.length} Is Not Good Enough`
+        ] : verdict === "FOR" ? [
+          honours > 0 ? `${surname} Has Earned the Benefit of the Doubt` : `Credit Where It Is Due: ${surname}`,
+          `${club} Are Going Somewhere Under ${surname}`,
+          `This Is ${surname}'s Team Now`
+        ] : [`Judging ${surname} Fairly`, `What We Actually Know About ${surname}`, `The Next Month Decides ${surname}'s Season`],
+        seed,
         "headline"
       ),
-      body: badRun ? `${straightLosses} defeats in a row is not a blip, it is a pattern, and patterns are a manager's problem. The argument that the squad is not his does not survive a ${ordinalWord(input.seasonNumber)} season in charge: at some point the team on the pitch is the one he built. None of this is a demand for anybody's head. It is an observation that the case for patience has to be argued now rather than assumed.` : `The record is ${formWords(recent)}, and it is worth saying plainly that a manager's work is not measured over ${recent.length} ${plural(recent.length, "match", "matches")}. It is measured over seasons, and the only honest place to stand is a few paces back. That is not a defence of anybody. It is what the evidence supports, and the evidence is all anybody outside the club actually has.`,
-      article: [
-        pick3(
-          badRun ? [
-            `There is a version of this where the manager is right and the results are wrong, and it is the version that ends with everybody out of work. The harder question is not whether he is a good manager but whether the same problems keep arriving, week after week, in the same place.`,
-            `It is worth remembering that this is the ${ordinalWord(input.seasonNumber)} season of a project rather than the ${ordinalWord(input.seasonNumber)} month of one. Projects are allowed to be judged, and they are not allowed to be exempt.`
-          ] : [
-            `What is knowable is small: a run of results, the squad he has, and how long he has been here. What is not knowable is anything happening inside the training ground at half past nine on a Tuesday, which is where most of this is actually decided.`,
-            `The temptation with a manager who has won something is to stop examining the present. The temptation with one who has not is to stop crediting the past. Both are ways of not reading the evidence.`
-          ],
-          `op-manager-art${input.seasonNumber}`,
-          "article"
-        )
-      ],
+      body: body2,
+      article: [article],
+      states: ["run", "block", "tenure"],
       evidence: [
         `Run ${formString(recent)}`,
-        `${straightLosses} straight ${plural(straightLosses, "defeat")}`,
+        `${recentPoints} points from ${recent.length}${beforePoints !== null ? `, ${beforePoints} from the ${before.length} before` : ""}`,
         `Season ${input.seasonNumber} of the manager's time here`,
-        badRun ? "Filed hostile: the run justifies the argument" : "Filed straight: the facts do not carry a verdict"
+        verdict === "AGAINST" ? "Filed hostile: the results justify the argument" : verdict === "FOR" ? "Filed loyal: the results justify the praise" : "Filed straight: the facts do not carry a verdict"
       ],
       playerNames: [],
       publishedOn: at2,
@@ -33980,46 +34625,39 @@ function buildNews(input, options = {}) {
       quote: null
     });
   }
-  if (recent.length >= 3) {
+  if (recent.length >= 4 && (recentPpg >= 2.2 || recentPpg <= 0.6)) {
     const wins = recent.filter((match) => match.result === "WIN").length;
     const losses = recent.filter((match) => match.result === "LOSS").length;
+    const hot = recentPpg >= 2.2;
+    const extreme = [...recent].sort(
+      (left, right) => hot ? right.goalsFor - right.goalsAgainst - (left.goalsFor - left.goalsAgainst) : left.goalsFor - left.goalsAgainst - (right.goalsFor - right.goalsAgainst)
+    )[0];
     items.push({
       id: `opinion-form-${input.seasonNumber}-${recent[0].eventId}`,
       kind: "OPINION",
       category: "OPINION",
-      tone: wins > losses ? "GOOD" : losses > wins ? "CONCERN" : "NEUTRAL",
+      tone: hot ? "GOOD" : "CONCERN",
       stance: "SENSATIONAL",
       headline: pick3(
-        [
-          `The Numbers Do Not Care About Your Excuses`,
-          `${wins} Wins, ${losses} ${plural(losses, "Defeat", "Defeats")}: the Season in One Line`,
-          `Forget the Table, Look at This`,
-          `It Is Time to Talk About the Form`
-        ],
+        hot ? [`Nobody Wants to Play ${club} Right Now`, `${wins} Wins in ${recent.length}: Believe It`, `${club} Are the Form Side and It Is Not Close`] : [`${losses} Defeats in ${recent.length}: Call It What It Is`, `This Is a Slump`, `The Numbers Do Not Care About Your Excuses`],
         `op-form${input.seasonNumber}${recent[0].eventId}`,
         "headline"
       ),
-      body: `The last ${recent.length} ${plural(recent.length, "match", "matches")} have brought ${formWords(recent)}, and that is the whole of it. Everything else on the page is interpretation. This is the part that will still be true in a month.`,
+      body: hot ? `${capitalise(formWords(recent))}, ${scoredRecent} goals scored, and ${club} look like a side that expects to win every week. Anybody still waiting for it to fall apart has not been watching.` : `${capitalise(formWords(recent))}, and ${concededRecent} goals conceded. This is a slump, and calling it a bad patch is the sort of thing people say right up until it is a relegation fight.`,
       article: [
-        pick3(
-          [
-            `There is no clever reading of a run like this one and anybody offering one has a book to sell. A sequence of results is the least subtle piece of evidence in football and the most reliable.`,
-            `Every club has a paragraph of context for a sequence like this, and every one of those paragraphs has been written before about somebody else. The sequence is the part nobody can argue with.`
-          ],
-          `op-form-art${input.seasonNumber}`,
-          "article"
-        )
+        hot ? `The pick of it was the ${proseScore(extreme)} against ${opponentWord(extreme)}, and the scary thing for everybody else is that it did not look like a one-off.` : `The low point was the ${proseScore(extreme)} against ${opponentWord(extreme)}, and nothing since has suggested it was a one-off.`
       ],
-      evidence: [`Run ${formString(recent)}`, `${wins} wins, ${losses} defeats in the window`],
+      states: ["run"],
+      evidence: [`Run ${formString(recent)}`, `${wins} wins, ${losses} defeats in the window`, `${scoredRecent} scored, ${concededRecent} conceded`],
       playerNames: [],
       publishedOn: at2,
       weight: 76,
       quote: null
     });
   }
-  if (input.squad.length > 0) {
+  if (recent.length >= 4 && distinctScorers >= 4) {
     items.push({
-      id: `opinion-squad-${input.seasonNumber}`,
+      id: `opinion-squad-${input.seasonNumber}-${recent[0].eventId}`,
       kind: "OPINION",
       category: "OPINION",
       tone: "GOOD",
@@ -34027,65 +34665,55 @@ function buildNews(input, options = {}) {
       headline: pick3(
         [
           `This Squad Is Better Than It Is Being Given Credit For`,
-          `A Note on What ${input.clubName} Actually Have`,
+          `${capitalise(countWord(distinctScorers))} Scorers and No Passengers`,
           `The Case for Backing What Is Already Here`
         ],
-        `op-squad${input.seasonNumber}`,
+        `op-squad${input.seasonNumber}${recent[0].eventId}`,
         "headline"
       ),
-      body: `A squad of ${input.squad.length} is not a small one, and the instinct to look outside it whenever a result goes wrong is a habit rather than a diagnosis. Clubs at this level are built from what is in the building, and the manager knows better than anybody which parts of it work. That is not an argument against signing anybody. It is an argument against panic.`,
+      body: `${capitalise(countWord(distinctScorers))} different players have scored for ${club} in the last ${window2}. That is a squad, not one player carrying ten, and it is why the call to sign somebody every time a result goes wrong misses the point.`,
       article: [
-        pick3(
-          [
-            `Every club in this division has a squad of roughly this size and roughly this standard, which is exactly why the differences come from coaching and patience rather than from the market. The market is where money is, and money is what most clubs at this level do not have.`,
-            `It is worth remembering that the players being criticised are the same ones who were being praised a month ago, and that neither verdict was ever about them. Form is a property of a team, and teams take time.`
-          ],
-          `op-squad-art${input.seasonNumber}`,
-          "article"
-        )
+        `${namesList(scorerNamesInWindow.slice(0, 5))}${scorerNamesInWindow.length > 5 ? " and more" : ""} have all scored in that run. When the goals come from that many places, the opposition cannot stop all of them.`
       ],
-      evidence: [`Squad of ${input.squad.length}`, "Filed loyal: the fanzine's own line is behind the club"],
-      playerNames: [],
+      evidence: [`${distinctScorers} different scorers in ${recent.length} matches`, "Filed loyal: the fanzine's own line is behind the club"],
+      playerNames: scorerNamesInWindow.slice(0, 3),
       publishedOn: at2,
-      weight: 46,
+      weight: 52,
       quote: null
     });
   }
-  if (recent.length >= 3) {
+  const homeRecent = recent.filter((match) => venueOf(match) === "HOME");
+  if (recent.length >= 4 && homeRecent.length >= 2) {
+    const homePoints = sum(homeRecent.map(pointsOf));
+    const homePpg = homePoints / homeRecent.length;
+    const mood = homePpg >= 2 ? "HAPPY" : homePpg < 1 ? "RESTLESS" : "WAITING";
     items.push({
       id: `opinion-supporters-${input.seasonNumber}-${recent[0].eventId}`,
       kind: "OPINION",
       category: "OPINION",
-      tone: badRun ? "CONCERN" : "NEUTRAL",
+      tone: mood === "HAPPY" ? "GOOD" : mood === "RESTLESS" ? "CONCERN" : "NEUTRAL",
       stance: "LOYAL",
       headline: pick3(
-        [
-          `What the Supporters Are Actually Saying`,
-          `Nobody Is Asking for Miracles at ${input.clubName}`,
-          `A Word From the Stands`
-        ],
+        mood === "HAPPY" ? [`Home Is Where the Points Are`, `A Ground Worth Turning Up To Again`, `The Home Crowd Are Getting Their Money's Worth`] : mood === "RESTLESS" ? [`What the Supporters Are Actually Saying`, `The Home Crowd Deserve More`, `A Word From the Stands`] : [`Nobody Is Asking for Miracles at ${club}`, `A Word From the Stands`, `The Home Crowd Are Waiting`],
         `op-supporters${input.seasonNumber}${recent[0].eventId}`,
         "headline"
       ),
-      body: `The people paying for this are not asking for a league title, and they never were. They are asking for a run of ${formWords(recent)} to look like it is going somewhere. That is a smaller ask than it sounds, and it is the one the manager has to answer.`,
+      body: mood === "HAPPY" ? `${capitalise(formWords(homeRecent))} in the last ${homeRecent.length} at home. The people paying to watch are getting what they paid for, and they know it.` : mood === "RESTLESS" ? `${capitalise(formWords(homeRecent))} in the last ${homeRecent.length} at home. Supporters forgive a bad day away. They do not forgive many of these in front of them.` : `${capitalise(formWords(homeRecent))} in the last ${homeRecent.length} at home. Nobody in the stands is asking for a title. They are asking for home wins, and they are getting some of them.`,
       article: [
-        pick3(
-          [
-            `Supporters forgive a great deal. They forgive losing to a better side, they forgive a bad signing, and they forgive a season that does not work out. What they do not forgive is a team that looks like it has stopped being able to change its own story.`,
-            `The relationship between a club and the people who turn up is not sentimental, whatever the marketing says. It is a straightforward question of whether the thing being paid for is going anywhere, asked every week.`
-          ],
-          `op-supporters-art${input.seasonNumber}`,
-          "article"
-        )
+        mood === "RESTLESS" ? `The away record is a separate argument. What the home crowd sees is the club, and right now it is not giving them much to sing about.` : `A side that wins at home gives itself a season to work with. Everything away from home is a bonus on top of that.`
       ],
-      evidence: [`Run ${formString(recent)}`, "Filed loyal: the fanzine speaks for the stands"],
+      evidence: [`Home run ${formString(homeRecent)}`, `${homePoints} points from ${homeRecent.length} home matches`, "Filed loyal: the fanzine speaks for the stands"],
       playerNames: [],
       publishedOn: at2,
       weight: 44,
       quote: null
     });
   }
-  if (input.academy?.name) {
+  const teenScorer = input.squad.find((player) => player.age !== null && player.age <= 19 && goalsIn(recent, player.name) > 0) ?? null;
+  const prospectRecord = input.academy?.name && ((input.academy.goals ?? 0) > 0 || (input.academy.appearances ?? 0) > 0) ? input.academy : null;
+  if (input.academy?.name && (prospectRecord || teenScorer)) {
+    const prospect = input.academy;
+    const record = prospectRecord && prospectRecord.appearances ? `${prospectRecord.goals ?? 0} ${plural(prospectRecord.goals ?? 0, "goal")} in ${prospectRecord.appearances} ${plural(prospectRecord.appearances, "game")} for the youth side` : null;
     items.push({
       id: `opinion-youth-${input.seasonNumber}`,
       kind: "OPINION",
@@ -34093,67 +34721,72 @@ function buildNews(input, options = {}) {
       tone: "GOOD",
       stance: "LOYAL",
       headline: pick3(
-        [
-          `The Answer May Already Be in the Building`,
-          `${input.academy.name} and the Case for Patience`,
-          `Where the Next One Comes From`
-        ],
+        [`The Answer May Already Be in the Building`, `${prospect.name} and the Case for Patience`, `Where the Next One Comes From`],
         `op-youth${input.seasonNumber}`,
         "headline"
       ),
-      body: `There is a player in this club's academy worth being patient about, and patience is the only thing that has ever produced one. The clubs that buy their way out of a problem are the clubs with the money to do it. ${input.clubName} are not one of those, and pretending otherwise has never once worked.`,
+      body: `${teenScorer ? `${teenScorer.name} is ${teenScorer.age} and already scoring for the first team, which is the best argument there is for giving the next one a chance.` : `${prospect.name} has ${record}.`} ${teenScorer && record ? `The next one is ${prospect.name}, with ${record}.` : teenScorer ? `The question is when ${prospect.name} gets the same chance, not whether.` : `The question is when he gets a first-team chance, not whether.`}`,
       article: [
-        pick3(
-          [
-            `A youth player is not a transfer policy and should not be sold as one, but the arithmetic is unavoidable: a club at this level gets maybe one of these a season and cannot afford to be careless with him.`,
-            `The romanticism around academy football obscures something more useful, which is that it is cheap. A player who comes through costs a fraction of one who arrives, and the gap is what pays for everything else.`
-          ],
-          `op-youth-art${input.seasonNumber}`,
-          "article"
-        )
+        input.finance && input.finance.transferBudget === null ? `With no transfer budget set, the academy is not the romantic option. It is the only cheap one.` : `A player who comes through costs a fraction of one who arrives, and that difference pays for everything else.`
       ],
-      evidence: [`Academy prospect ${input.academy.name}`, "Filed loyal: an argument for the club's own method"],
-      playerNames: [input.academy.name],
+      states: ["academy"],
+      evidence: [
+        `Academy prospect ${prospect.name}`,
+        record ? `Youth record: ${record}` : "",
+        teenScorer ? `${teenScorer.name}, ${teenScorer.age}, has scored in the last ${recent.length}` : "",
+        "Filed loyal: an argument for the club's own method"
+      ].filter(Boolean),
+      playerNames: [prospect.name ?? "", ...teenScorer ? [teenScorer.name] : []].filter(Boolean),
       publishedOn: at2,
       weight: 42,
       quote: null
     });
   }
-  if (recent.length >= 3 && input.matches.some((match) => (match.weakness ?? "").trim().length > 0)) {
-    items.push({
-      id: `opinion-tactics-${input.seasonNumber}-${recent[0].eventId}`,
-      kind: "OPINION",
-      category: "TALKING POINT",
-      tone: "NEUTRAL",
-      stance: "STRAIGHT",
-      headline: pick3(
-        [
-          `The Question Nobody at ${input.clubName} Wants to Answer`,
-          `One Problem, Named and Not Solved`,
-          `What the Record Keeps Showing`
+  {
+    const families = /* @__PURE__ */ new Map();
+    for (const match of input.matches) {
+      const family = match.weakness ? weaknessFamily(match.weakness) : null;
+      if (!family) continue;
+      const entry = families.get(family.key) ?? { line: family.line, count: 0, first: match, conceded: 0 };
+      entry.count += 1;
+      entry.first = match;
+      entry.conceded += match.goalsAgainst;
+      families.set(family.key, entry);
+    }
+    const running = [...families.entries()].sort((left, right) => right[1].count - left[1].count)[0] ?? null;
+    const firstIndex = running ? input.matches.indexOf(running[1].first) : -1;
+    if (running && running[1].count >= 3 && firstIndex >= WINDOW) {
+      const [key, entry] = running;
+      const since = momentOf(entry.first.matchDate);
+      items.push({
+        id: `opinion-tactics-${input.seasonNumber}-${key}-${entry.count}`,
+        kind: "OPINION",
+        category: "TALKING POINT",
+        tone: "NEUTRAL",
+        stance: "STRAIGHT",
+        headline: pick3(
+          [`The Question Nobody at ${club} Wants to Answer`, `One Problem, Named and Not Solved`, `${capitalise(countWord(entry.count))} Times and Counting`],
+          `op-tactics${input.seasonNumber}${key}${entry.count}`,
+          "headline"
+        ),
+        body: `It has come up ${countWord(entry.count)} times${since ? ` since ${since.month}` : ""}: ${entry.line}. ${club} conceded ${entry.conceded} in those matches, and the problem has outlasted every explanation for it.`,
+        article: [
+          `A one-off is noise and a second time is a coincidence. ${capitalise(countWord(entry.count))} times across ${firstIndex + 1} matches is a pattern, and patterns are a manager's job.`
         ],
-        `op-tactics${input.seasonNumber}${recent[0].eventId}`,
-        "headline"
-      ),
-      body: `The same problem has been written down more than once this season, which makes it a problem rather than an accident. Nobody is suggesting it is unfixable, and nobody at the club has suggested it is fixed. The gap between those two positions is where the rest of the season lives.`,
-      article: [
-        pick3(
-          [
-            `A recurring problem in football is usually a problem of the system rather than of the players, because players change and systems do not. That is not a criticism of anybody in particular and it is where the work is.`,
-            `The interesting thing about a repeat is that it is evidence. A one-off is noise; the second one is a pattern, and the third is a manager's job.`
-          ],
-          `op-tactics-art${input.seasonNumber}`,
-          "article"
-        )
-      ],
-      evidence: ["The manager's own match notes name the same problem more than once", "Filed straight: a question rather than a verdict"],
-      playerNames: [],
-      publishedOn: at2,
-      weight: 74,
-      quote: null
-    });
+        evidence: [
+          `Named in ${entry.count} of the last ${firstIndex + 1} logged matches`,
+          since ? `First logged ${entry.first.matchDate}` : "",
+          "Filed straight: a question rather than a verdict"
+        ].filter(Boolean),
+        playerNames: [],
+        publishedOn: at2,
+        weight: 66,
+        quote: null
+      });
+    }
   }
-  if (finance && (finance.recordBuy !== null || finance.recordSale !== null || finance.wageTurnoverLevel !== "OK")) {
+  if (finance && (finance.wageTurnoverLevel === "WARNING" || finance.wageTurnoverLevel === "CRITICAL")) {
+    const wages = moneyBand(finance.squadAnnualWage, finance.currency);
     items.push({
       id: `opinion-money-${input.seasonNumber}`,
       kind: "OPINION",
@@ -34161,27 +34794,17 @@ function buildNews(input, options = {}) {
       tone: "CONCERN",
       stance: "HOSTILE",
       headline: pick3(
-        [
-          `The Money Has Always Been the Real Story at ${input.clubName}`,
-          `Follow the Spending`,
-          `${input.clubName} Are Paying for Decisions Already Made`
-        ],
+        [`The Money Has Always Been the Real Story at ${club}`, `Follow the Spending`, `${club} Are Paying for Decisions Already Made`],
         `op-money${input.seasonNumber}`,
         "headline"
       ),
-      body: `The wage bill is understood to be ${moneyBand(finance.squadAnnualWage, finance.currency)} a year against a turnover this level of the game supports only up to a point. ${finance.recordBuy !== null ? `The largest fee paid on the record is ${moneyBand(finance.recordBuy, finance.currency)}. ` : ""}None of that is the manager's fault in the first year of a job and all of it is his problem in the third.`,
+      body: `The wage bill is understood to be ${wages} a year, which is more than a club at this level can comfortably carry. ${input.seasonNumber >= 2 ? `In season ${input.seasonNumber}, that is ${surname}'s wage bill, not one ${surname} inherited.` : `Most of it was here before ${surname}, and ${surname} will still be judged on what it buys.`}${finance.recordBuy !== null ? ` The biggest fee paid in that time is ${moneyBand(finance.recordBuy, finance.currency)}.` : ""}`,
       article: [
-        pick3(
-          [
-            `A club's wage bill is the most honest thing about it, because it cannot be spun. It says what the club believes its players are worth, and it says it whether or not anybody agrees.`,
-            `Every argument about a manager eventually becomes an argument about money, and every argument about money eventually becomes an argument about who agreed to it. That is where the pressure actually lives.`
-          ],
-          `op-money-art${input.seasonNumber}`,
-          "article"
-        )
+        recent.length >= 3 ? `What it has bought lately is ${formWords(recent)}. Expensive squads are allowed bad runs. They are not allowed many.` : `Every argument about a manager ends up as an argument about money, and every argument about money ends up as one about who agreed to it.`
       ],
+      states: ["contracts"],
       evidence: [
-        `Squad wage ${moneyBand(finance.squadAnnualWage, finance.currency)} a year (from the squad's own contract rows)`,
+        `Squad wage ${wages} a year (from the squad's own contract rows)`,
         `Assumed turnover ${moneyBand(finance.estimatedTierRevenue, finance.currency)} (DERIVED_ESTIMATE)`,
         "Filed hostile: the numbers are argued rather than reported"
       ],
@@ -34191,34 +34814,24 @@ function buildNews(input, options = {}) {
       quote: null
     });
   }
-  if (input.position?.value != null && input.leagueName) {
+  if (input.position?.value != null && input.leagueName && lastFinish !== null) {
+    const position = input.position.value;
+    const better = position < lastFinish;
+    const same = position === lastFinish;
     items.push({
-      id: `opinion-table-${input.seasonNumber}-${input.position.value}`,
+      id: `opinion-table-${input.seasonNumber}-${position}`,
       kind: "OPINION",
       category: "OPINION",
-      tone: input.position.value <= 6 ? "GOOD" : input.position.value >= 18 ? "CONCERN" : "NEUTRAL",
+      tone: better ? "GOOD" : same ? "NEUTRAL" : "CONCERN",
       stance: "STRAIGHT",
       headline: pick3(
-        [
-          `${ordinal2(input.position.value)} Is Not a Disaster and Not an Achievement`,
-          `What ${ordinal2(input.position.value)} Actually Means`,
-          `The Table, Read Properly`
-        ],
-        `op-table${input.seasonNumber}${input.position.value}`,
+        better ? [`${ordinal2(position)} After ${ordinal2(lastFinish)}: That Is Progress`, `The Table Says ${club} Are Moving`, `Up From ${ordinal2(lastFinish)}`] : same ? [`${ordinal2(position)} Again`, `The Table, Read Properly`, `Standing Still at ${ordinal2(position)}`] : [`${ordinal2(position)} After ${ordinal2(lastFinish)} Is a Step Back`, `The Table, Read Properly`, `Down From ${ordinal2(lastFinish)}`],
+        `op-table${input.seasonNumber}${position}`,
         "headline"
       ),
-      body: `${ordinal2(input.position.value)} in the ${input.leagueName} is where this season has got to, and the table is the only verdict that accumulates rather than being announced. Positions in the middle of it are not comfortable or uncomfortable; they are unfinished, and there is a difference between a table that is unfinished and one that is decided.`,
-      article: [
-        pick3(
-          [
-            `A league table is the least fashionable piece of analysis in football and the only one that has never been wrong about who finished where. Everything else is a forecast.`,
-            `The honest reading of a mid-season table is that it tells you what has happened and nothing at all about what will. Clubs have climbed from worse and fallen from better, which is the entire reason anybody watches.`
-          ],
-          `op-table-art${input.seasonNumber}`,
-          "article"
-        )
-      ],
-      evidence: [`Position ${input.position.value}`, input.position.basis ? `Basis ${input.position.basis}` : "", "Filed straight: the table is reported rather than argued"].filter(Boolean),
+      body: better ? `${ordinal2(position)} in the ${input.leagueName}, after ${ordinal2(lastFinish)} the season before. Progress at a football club is rarely a straight line, but it is usually measured in places, and that is ${countWord(lastFinish - position)} of them.` : same ? `${ordinal2(position)} in the ${input.leagueName}, exactly where the season before ended. That is not failure, and it is not the step forward a second go at it was supposed to bring.` : `${ordinal2(position)} in the ${input.leagueName}, after ${ordinal2(lastFinish)} the season before. A table does not care about context, and that is ${countWord(position - lastFinish)} ${plural(position - lastFinish, "place")} lost.`,
+      states: ["table"],
+      evidence: [`Position ${position}`, `Previous season ${ordinal2(lastFinish)}`, "Filed straight: the table is reported rather than argued"],
       playerNames: [],
       publishedOn: at2,
       weight: 54,
@@ -34262,255 +34875,103 @@ function pickFresh(options, seed, slot, used) {
 }
 function outlookParagraph(input, draft, memory) {
   const recent = input.matches.slice(0, WINDOW);
-  const candidates = [];
   const club = input.clubName;
-  const manager = input.managerName;
-  const surname = manager.split(/\s+/).slice(-1)[0] ?? manager;
+  const states = new Set(draft.states ?? []);
   const named = draft.playerNames;
   const lead = named[0] ?? null;
-  const linked = input.matches.find((match) => draft.id.endsWith(match.eventId)) ?? null;
-  const opponent = linked?.opponent ?? null;
-  const matchday = input.progress?.matchday ?? null;
+  const candidates = [];
   if (recent.length >= 3) {
     const run = formWords(recent);
     const window2 = `${recent.length} ${plural(recent.length, "match", "matches")}`;
     candidates.push({
       key: "run",
-      score: 80,
+      kinds: ["MATCH"],
       options: [
-        `The wider picture for ${club} is ${run} across the last ${window2}, which is what turns one result into a story.`,
-        `Taken with the ${window2} before it, ${club} have produced ${run}, and it is the sequence rather than the single match that will be judged.`,
-        `A record of ${run} in ${window2} is the context ${club} are being judged in.`,
-        `Over the last ${window2} ${club} have produced ${run}, and that is the sequence the season will be read through.`,
-        `${capitalise(club)} have taken ${run} from the last ${window2}, and it is the shape of the month rather than of one match.`,
-        `Set against ${club}'s last ${window2}, ${run} is what the standing is actually being built from.`,
-        `Nothing about ${club}'s last ${window2} is changed by one result, and those ${window2} are ${run}.`,
-        `The ${window2} before it make it ${run} for ${club}, and that is the part of this worth holding on to.`,
-        // Only when the debrief named an opponent, so the sentence is bound to a side rather than to "the next
-        // fixture". A run read against a named opponent is the version of this a paper would actually print.
-        ...opponent ? [`Set against ${opponent} next, ${club} go in on ${run} from the last ${window2}.`] : []
+        `That makes it ${run} from the last ${window2}.`,
+        `It is ${run} from ${club}'s last ${window2}.`,
+        `${club} have now had ${run} in their last ${window2}.`
       ]
     });
   }
   const position = input.position?.value ?? null;
   if (position !== null && !input.position?.disputed && input.leagueName) {
-    const table = input.leagueName;
+    const closed = input.seasons.some((season) => season.season === input.seasonNumber && season.complete);
     candidates.push({
       key: "table",
-      score: 75,
-      options: [
-        `It leaves ${club} ${ordinal2(position)} in the ${table} on the standings as they are.`,
-        `On the current standings that is ${club} at ${ordinal2(position)} in the ${table}.`,
-        `${ordinal2(position)} in the ${table} is where this leaves ${club}.`,
-        `The table puts ${club} ${ordinal2(position)} in the ${table}.`,
-        `${club} are ${ordinal2(position)} in the ${table} on the numbers as they stand.`,
-        `Read against the rest of the ${table}, ${club} are ${ordinal2(position)}.`
-      ]
-    });
-  }
-  if (input.block && input.block.gamesPlayed >= 3 && input.block.points !== null) {
-    const games = input.block.gamesPlayed;
-    const points = input.block.points;
-    const perGame = (points / games).toFixed(1);
-    candidates.push({
-      key: "block",
-      score: 70,
-      options: [
-        `${points} points from ${club}'s last ${games} ${plural(games, "match", "matches")} is the return the month is being built on.`,
-        `${club} have taken ${points} points from ${games} ${plural(games, "match", "matches")}, which is the figure the next month has to improve on.`,
-        `At ${points} points from ${games}, ${club} are running at ${perGame} a game.`,
-        `Put next to the ${games} before it, ${club}'s ${points} points is a return that has to be read as a trend.`,
-        `${games} ${plural(games, "match", "matches")} and ${points} points for ${club}, which is what ${surname} is working from.`,
-        `${club} at ${perGame} points a game across ${games}: that is the rate the season is running at.`
-      ]
+      kinds: ["MATCH", "FORM"],
+      options: closed ? [`${club} finished ${ordinal2(position)} in the ${input.leagueName}.`] : [`${club} are ${ordinal2(position)} in the ${input.leagueName}.`, `It leaves ${club} ${ordinal2(position)} in the ${input.leagueName}.`]
     });
   }
   const unavailable = (input.injuries ?? []).filter(
-    (absence) => absence.until !== null && input.inGameDate !== null && absence.until > input.inGameDate
+    (absence) => absence.until !== null && input.inGameDate !== null && absence.until > input.inGameDate && absence.isStarter
   );
-  const absent = unavailable.find((absence) => lead !== null && sameName(absence.name, lead)) ?? unavailable[0] ?? null;
-  if (absent) {
-    const role = positionWords(absent.role);
-    const group = positionGroupWords(absent.role);
+  if (unavailable.length > 0) {
+    const absent = unavailable[0];
     candidates.push({
       key: "injuries",
-      score: 65,
+      kinds: ["MATCH"],
       options: [
-        `With ${absent.name} out, ${club} have one fewer ${role} to call on.`,
-        `${absent.name}'s absence leaves ${club} short in the ${group}, and that is measured over the weeks ahead rather than in one match.`,
-        `${club} lose ${absent.name}'s minutes, and the ${group} has to be covered from inside the squad.`,
-        `Cover for ${absent.name} has to come from the players ${club} already have.`,
-        `${absent.name} is one fewer ${role} for ${club} to pick from.`,
-        `The ${group} is where ${club} feel the loss of ${absent.name} first.`
+        `${club} go into the next match without ${absent.name}.`,
+        `${absent.name} will still be missing for the next one.`
       ]
     });
   }
-  const moved = lead !== null ? input.squad.find((player) => sameName(player.name, lead))?.role ?? null : null;
-  if (lead !== null) {
-    const role = positionWords(moved);
-    const group = positionGroupWords(moved);
-    candidates.push({
-      key: "development",
-      score: 58,
-      about: lead,
-      options: [
-        `${lead} is a ${role} moving in the right direction, and that changes what ${club} have.`,
-        `The movement at ${club} is in the ${group}, and ${lead} is the name on it.`,
-        `${lead} is a ${role}, and improvement in the ${group} is what ${club} are getting.`,
-        `For ${club}, the change is one ${role}: ${lead}.`,
-        `${club} have a ${role} improving, and ${lead} is the one.`,
-        `A squad moves one player at a time, and for ${club} that player is ${lead}.`
-      ]
-    });
-  }
-  if (input.squad.length > 0) {
-    const size = input.squad.length;
-    candidates.push({
-      key: "squad",
-      score: 50,
-      options: [
-        `${club}'s squad of ${size} is what ${surname} has to work with.`,
-        `With ${size} players, ${club} have the room to change a side once.`,
-        `${surname} has ${size} players at ${club}, and every judgement is drawn from that.`,
-        `${club} are ${size} strong, which is the number everything else is worked out from.`,
-        `At ${size} players, ${club} can change a side and not change it twice.`,
-        `${size} players is the depth ${club} are working with this season.`
-      ]
-    });
-  }
-  const expiring = input.squad.filter(
-    (player) => player.contractValidUntil !== null && input.inGameYear !== null && player.contractValidUntil <= input.inGameYear + 1
-  ).sort(
-    (left, right) => (left.contractValidUntil ?? 0) - (right.contractValidUntil ?? 0)
-  );
-  if (expiring.length > 0) {
-    const soonest = expiring[0];
-    const year = soonest.contractValidUntil;
-    if (year !== null) {
-      const sameYear = expiring.filter((player) => player.contractValidUntil === year).length;
-      const others = sameYear - 1;
+  if (lead !== null && !states.has(`development:${foldName(lead)}`)) {
+    const moved = input.developments.find((entry) => entry.delta > 0 && sameName(entry.name, lead));
+    if (moved) {
       candidates.push({
-        key: "contracts",
-        score: 45,
-        about: soonest.name,
+        key: `development:${foldName(lead)}`,
+        kinds: ["MATCH", "PLAYER"],
+        about: lead,
         options: [
-          `${soonest.name} is out of contract in ${year}${others > 0 ? `, and ${countWord(others)} ${plural(others, "other")} at ${club} expiring the same year` : ""}.`,
-          `${club} have ${countWord(expiring.length)} ${plural(expiring.length, "deal")} expiring by ${year + 1}, ${soonest.name}'s the soonest.`,
-          `${soonest.name} is out of contract in ${year}, the nearest of the deals ${club} have to settle.`,
-          `${year} is when ${soonest.name}'s deal ends, and ${club} have ${countWord(expiring.length)} to sort by then.`,
-          `The next decision at ${club} is ${soonest.name}, out of contract in ${year}.`,
-          `${club} have to deal with ${soonest.name} first, in ${year}${others > 0 ? `, with ${countWord(others)} more the same year` : ""}.`
+          `It comes as ${lead} is improving, and the coaching staff have noticed that too.`,
+          `${lead} has been getting better on the training ground as well, by the club's own reckoning.`
         ]
       });
     }
   }
-  const latestTrophy = [...input.trophies].sort((left, right) => right.season - left.season)[0] ?? null;
-  if (latestTrophy) {
-    candidates.push({
-      key: "trophy",
-      score: 40,
-      options: [
-        `The ${latestTrophy.name} came in season ${latestTrophy.season}, and ${surname} has ${countWord(input.trophies.length)} on the record at ${club}.`,
-        `${surname} won the ${latestTrophy.name} in season ${latestTrophy.season}, which is the standard ${club} are measured against.`,
-        `Season ${latestTrophy.season} brought the ${latestTrophy.name} to ${club}, and nothing since has matched it.`,
-        `The ${latestTrophy.name} of season ${latestTrophy.season} is the last thing ${club} won.`,
-        `${club}'s most recent honour is the ${latestTrophy.name}, in season ${latestTrophy.season}.`,
-        `${surname} has the ${latestTrophy.name} of season ${latestTrophy.season} on the record at ${club}.`
-      ]
-    });
+  if (input.inGameYear !== null) {
+    const expiring = input.squad.filter((player) => player.contractValidUntil !== null && player.contractValidUntil <= input.inGameYear + 1).sort((left, right) => (left.contractValidUntil ?? 0) - (right.contractValidUntil ?? 0));
+    const soonest = expiring[0] ?? null;
+    if (soonest && soonest.contractValidUntil !== null) {
+      const others = expiring.filter((player) => player.contractValidUntil === soonest.contractValidUntil).length - 1;
+      candidates.push({
+        key: "contracts",
+        kinds: ["FINANCE", "TRANSFER"],
+        about: soonest.name,
+        options: [
+          `${soonest.name}'s deal runs out in ${soonest.contractValidUntil}${others > 0 ? `, and ${countWord(others)} ${plural(others, "other")} with it` : ""}.`,
+          `The first contract decision is ${soonest.name}, whose deal ends in ${soonest.contractValidUntil}.`
+        ]
+      });
+    }
   }
-  const prospect = input.academy;
-  if (prospect?.name) {
-    const age = prospect.age;
-    const goals = prospect.goals;
-    candidates.push({
-      key: "academy",
-      score: 38,
-      about: prospect.name,
-      options: [
-        `${prospect.name} is ${age} and on the books at ${club}, which is where the value is here.`,
-        `At ${age}, ${prospect.name} is the name ${club} are being patient about.`,
-        `${club}'s next first-team candidate is ${prospect.name}, ${age}.`,
-        `${prospect.name} is the academy name at ${club}, and the club know it.`,
-        goals !== null && goals > 0 ? `${prospect.name} has ${countWord(goals)} for the youth side, and ${club} are watching that closely.` : `${prospect.name} is ${age}, which is the age ${club} have to make a decision about.`,
-        `${club} have ${prospect.name} at ${age}, and that is a longer game than this season.`
-      ]
-    });
-  }
-  if (input.seasonNumber >= 1) {
-    const season = input.seasonNumber;
-    candidates.push({
-      key: "tenure",
-      score: 42,
-      options: [
-        `Season ${season} in charge at ${club} is a different thing to be judged on from a settled one.`,
-        `Whatever the table says, season ${season} is the context these arguments sit inside at ${club}.`,
-        `${surname} is in season ${season} at ${club}, and only the next month will say which way it is going.`,
-        `${surname}'s ${ordinalWord(season)} season at ${club} is the window this is being judged in.`,
-        `${club} are ${surname}'s project in season ${season}, which is the clock that matters.`
-      ]
-    });
-  }
-  const atPhase = phasePhrase(seasonPhase(input.progress ?? null));
-  if (atPhase && matchday !== null) {
-    candidates.push({
-      key: "phase",
-      score: 35,
-      options: [
-        `${club} are ${matchday} games into the season, which is ${atPhase}, and there is time for that to change.`,
-        `${matchday} matches in, ${atPhase}, ${club} still have the room a season gives.`,
-        `With ${matchday} games behind ${club}, this sits ${atPhase}.`,
-        `${atPhase} of a season, and ${matchday} games into it, ${club} are not a settled side.`,
-        `${matchday} games in and ${atPhase}, ${surname} has as much room as the calendar allows.`
-      ]
-    });
-  }
-  candidates.push({
-    key: "season",
-    score: 10,
-    generic: true,
-    options: [
-      `Season ${input.seasonNumber} at ${club} is unfinished, and this is one of the things it is being made of.`
-    ]
-  });
-  const onTopic = candidates.filter((candidate) => {
-    const allowed = CONCLUSION_KINDS[candidate.key];
-    if (allowed !== void 0 && !allowed.includes(draft.kind)) return false;
-    if (candidate.about && named.length > 0 && !named.includes(candidate.about)) return false;
-    return true;
-  });
-  const pool = onTopic.length > 0 ? onTopic : candidates;
-  const usedTimes = (key) => memory.families.get(key) ?? 0;
-  const ranked = pool.map((candidate) => ({
-    ...candidate,
-    value: candidate.score - usedTimes(candidate.key) * 50 + hash4(`${draft.id}|frame|${candidate.key}`) % 1e3 / 1e3
-  })).sort((left, right) => right.value - left.value);
-  const first = ranked.find((candidate) => !candidate.generic) ?? ranked[0];
-  const firstGroup = CONCLUSION_GROUPS[first.key] ?? first.key;
-  const second = ranked.find(
-    (candidate) => candidate.key !== first.key && (CONCLUSION_GROUPS[candidate.key] ?? candidate.key) === firstGroup
+  const usable = candidates.find(
+    (candidate) => candidate.kinds.includes(draft.kind) && !states.has(candidate.key) && !memory.families.has(candidate.key) && (!candidate.about || named.length === 0 || named.some((name) => sameName(name, candidate.about)))
   );
-  const picks = [first, second].filter(
-    (candidate) => Boolean(candidate)
-  );
-  return picks.map((candidate) => {
-    memory.families.set(candidate.key, usedTimes(candidate.key) + 1);
-    return pickFresh(candidate.options, draft.id, `outlook-${candidate.key}`, memory.sentences);
-  }).join(" ").trim();
+  if (!usable) return "";
+  memory.families.set(usable.key, 1);
+  return pickFresh(usable.options, draft.id, `outlook-${usable.key}`, memory.sentences);
 }
 function finalise(items, input) {
   const memory = newEditionMemory();
-  return items.map((item) => {
-    const own = (item.article ?? []).map((paragraph) => paragraph.trim()).filter(Boolean);
-    const summary = tidy2(item.body);
-    const article = [summary, ...own, outlookParagraph(input, item, memory)].filter(Boolean);
+  for (const item of items) for (const fact of item.states ?? []) memory.families.set(fact, 1);
+  return items.map((draft) => {
+    const { states: _states, tabloidHeadlines, ...item } = draft;
+    void _states;
+    const own = (item.article ?? []).map((paragraph) => tidy2(paragraph)).filter(Boolean);
+    const closing = outlookParagraph(input, draft, memory);
+    const article = voice([tidy2(item.body), ...own, closing].filter(Boolean), input);
     const byline = BYLINED_CATEGORIES.has(item.category) ? bylineFor(item.id, input.countryId ?? null, input.clubName, "byline", item.stance ?? void 0) : null;
+    const headline = byline?.stance === "SENSATIONAL" && tabloidHeadlines && tabloidHeadlines.length > 0 ? pick3(tabloidHeadlines, item.id, "tabloid") : item.headline;
     return {
       ...item,
       id: item.id,
       kind: item.kind,
-      body: summary,
+      headline,
+      body: article[0],
       article,
+      closing: closing ? article.at(-1) ?? null : null,
       byline,
       /**
        * The line this PIECE takes, which is nothing unless it was written as an opinion.
@@ -34521,6 +34982,42 @@ function finalise(items, input) {
        */
       stance: item.stance ?? null
     };
+  });
+}
+function voice(paragraphs, input) {
+  const full = input.clubName.trim();
+  const opponents = input.matches.map((match) => (match.opponent ?? "").toLowerCase());
+  const candidate = clubShortName(full) ?? (() => {
+    const last = full.split(/\s+/).slice(-1)[0] ?? "";
+    return full.includes(" ") && /^(City|United|Town|County|Villa|Forest|Palace|Rangers|Orient|Vale)$/.test(last) ? last : null;
+  })();
+  const short = candidate && !opponents.some((name) => name.split(/\s+/).includes(candidate.toLowerCase())) ? candidate : null;
+  const manager = input.managerName.trim();
+  const surname = surnameOf(manager);
+  const escape = (text4) => text4.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let clubSeen = false;
+  let managerSeen = false;
+  return paragraphs.map((paragraph) => {
+    let out = paragraph;
+    if (manager.includes(" ")) {
+      out = out.replace(new RegExp(escape(manager), "g"), (match) => {
+        if (!managerSeen) {
+          managerSeen = true;
+          return match;
+        }
+        return surname;
+      });
+    }
+    if (short) {
+      out = out.replace(new RegExp(escape(full), "g"), (match) => {
+        if (!clubSeen) {
+          clubSeen = true;
+          return match;
+        }
+        return short;
+      });
+    }
+    return out;
   });
 }
 function matchStatsNote(match) {
@@ -34653,7 +35150,7 @@ function balanceCoverage(items) {
   if (dropped.size === 0) return items;
   return items.filter((item) => !dropped.has(item));
 }
-var NEWS_COPY_VERSION, SOURCES, WINDOW, RETURN_STORY_DAYS, BYLINED_CATEGORIES, CONCLUSION_KINDS, CONCLUSION_GROUPS, MAX_CONCERN_STORIES, STORY_TYPES, MAX_EDITION_STORIES, RECENT_TYPE_PENALTY, RELEVANCE_BY_TOPIC, RELEVANCE_LATEST_MATCH, RELEVANCE_RECENT_MATCH, RECENT_MATCHES_IN_WINDOW, SINGLE_MATCH_PREFIXES, MAX_ANGLES_PER_MATCH, REPORTED_CATEGORIES;
+var NEWS_COPY_VERSION, SOURCES, WINDOW, RETURN_STORY_DAYS, BYLINED_CATEGORIES, MAX_CONCERN_STORIES, STORY_TYPES, MAX_EDITION_STORIES, RECENT_TYPE_PENALTY, RELEVANCE_BY_TOPIC, RELEVANCE_LATEST_MATCH, RELEVANCE_RECENT_MATCH, RECENT_MATCHES_IN_WINDOW, SINGLE_MATCH_PREFIXES, MAX_ANGLES_PER_MATCH, REPORTED_CATEGORIES;
 var init_news_engine = __esm({
   "src/lib/news/news-engine.ts"() {
     "use strict";
@@ -34663,7 +35160,7 @@ var init_news_engine = __esm({
     init_moment();
     init_format();
     init_match_stats();
-    NEWS_COPY_VERSION = 14;
+    NEWS_COPY_VERSION = 15;
     SOURCES = [
       "Those inside the club",
       "The coaching staff",
@@ -34690,43 +35187,13 @@ var init_news_engine = __esm({
       // A column or a rumour without a name on it reads as a system note, and a stated stance only means
       // something if the masthead it belongs to is on the piece.
       "OPINION",
-      "TALKING POINT"
+      "TALKING POINT",
+      // The light pieces, the ratings, the window and the awards are all written by somebody.
+      "OFF THE BALL",
+      "PLAYER RATINGS",
+      "THE WINDOW",
+      "AWARDS"
     ]);
-    CONCLUSION_KINDS = {
-      // Results, standing and the season's shape. Each already requires its own fact before it is built at all - a
-      // position, a phase with a matchday count, a block of results - and none of them may close a story about
-      // money, a contract, a squad or an injury.
-      run: ["MATCH", "FORM", "TABLE"],
-      block: ["MATCH", "FORM", "TABLE"],
-      table: ["MATCH", "FORM", "TABLE"],
-      phase: ["MATCH", "FORM", "TABLE"],
-      // Selection: who is available, and who plays.
-      injuries: ["MATCH", "PLAYER", "TEAMNEWS", "SQUAD"],
-      // Depth, and the shape of the squad.
-      squad: ["SQUAD", "TEAMNEWS", "CONTRACT"],
-      // Money, which is the only topic the contracts family belongs to.
-      contracts: ["FINANCE", "CONTRACT", "TRANSFER"],
-      // A player's own movement, and the academy that produces them.
-      development: ["PLAYER", "SQUAD"],
-      academy: ["PLAYER", "SQUAD"],
-      // Silverware, and the manager's own time in the post.
-      trophy: ["TROPHY"],
-      tenure: ["MILESTONE", "OPINION"]
-    };
-    CONCLUSION_GROUPS = {
-      run: "results",
-      block: "results",
-      table: "results",
-      squad: "squad",
-      contracts: "squad",
-      development: "squad",
-      tenure: "squad",
-      injuries: "availability",
-      academy: "academy",
-      trophy: "trophy",
-      phase: "time",
-      season: "time"
-    };
     MAX_CONCERN_STORIES = 2;
     STORY_TYPES = [
       "result",
@@ -34784,7 +35251,17 @@ var init_news_engine = __esm({
       "opinion-youth",
       "opinion-tactics",
       "opinion-money",
-      "opinion-table"
+      "opinion-table",
+      "celebration",
+      "late-leak",
+      "keeper-heroics",
+      "striker-drought",
+      "season-tally",
+      "ratings",
+      "window",
+      "deadline",
+      "festive",
+      "awards"
     ];
     MAX_EDITION_STORIES = 9;
     RECENT_TYPE_PENALTY = 40;
@@ -34820,7 +35297,9 @@ var init_news_engine = __esm({
       "timing-",
       "margin-",
       "defence-",
-      "weakness-"
+      "weakness-",
+      "ratings-",
+      "keeper-heroics-"
     ];
     MAX_ANGLES_PER_MATCH = 4;
     REPORTED_CATEGORIES = /* @__PURE__ */ new Set(["TEAM NEWS"]);
@@ -34891,7 +35370,12 @@ function toMatch(eventId, payload, comments) {
     bigChances: stats ? asNumber(stats.bigChances) : null,
     expectedGoalsReported: stats ? asNumber(stats.expectedGoalsReported) : null,
     comment: comments.get(eventId)?.comment ?? null,
-    commentRefused: comments.get(eventId)?.refused ?? false
+    commentRefused: comments.get(eventId)?.refused ?? false,
+    press: comments.get(eventId)?.question ? {
+      question: comments.get(eventId)?.question,
+      outlet: comments.get(eventId)?.outlet ?? null,
+      writer: comments.get(eventId)?.writer ?? null
+    } : null
   };
 }
 var NewsService;
@@ -34918,6 +35402,65 @@ var init_news_service = __esm({
        * it does not exist, and the archive decides what to do with the list.
        */
       async buildStories(careerId) {
+        const prepared = await this.prepare(careerId);
+        if (!prepared) return null;
+        const { career, input, idsFor, matches, seasonNumber } = prepared;
+        const items = buildNews(input).map((item) => ({ ...item, playerIds: idsFor(item.playerNames) }));
+        return {
+          careerId,
+          clubName: career.clubName,
+          managerName: career.managerName,
+          leagueName: input.leagueName,
+          seasonNumber,
+          inGameDate: career.inGameDate,
+          matchesConsidered: matches.length,
+          matchEventIds: matches.map((match) => match.eventId),
+          items
+        };
+      }
+      /**
+       * The stories with these ids, written again in the desk's current voice.
+       *
+       * This is what lets a rewrite of the desk reach a paper that is already printed. A story about a match is
+       * rewritten as of THAT match - the desk is run on the debriefs up to and including it, with nobody injured
+       * and no rating movements, because those are today's facts and not that day's - so a report on a game in
+       * September does not pick up a closing line about a player who got injured in November. A standing story is
+       * rewritten from today's facts, which is what it was about when it ran.
+       *
+       * An id the desk can no longer produce from the evidence is simply absent from the result; the archive
+       * decides what to do about it.
+       */
+      async rewrite(careerId, ids) {
+        const out = /* @__PURE__ */ new Map();
+        if (ids.length === 0) return out;
+        const prepared = await this.prepare(careerId);
+        if (!prepared) return out;
+        const { input, idsFor } = prepared;
+        const editions = /* @__PURE__ */ new Map();
+        const editionFor = (eventId) => {
+          const key = eventId ?? "";
+          const cached = editions.get(key);
+          if (cached) return cached;
+          const from = eventId === null ? -1 : input.matches.findIndex((match) => match.eventId === eventId);
+          const asOf = from <= 0 ? input : {
+            ...input,
+            matches: input.matches.slice(from),
+            injuries: [],
+            developments: [],
+            inGameDate: input.matches[from].matchDate ?? input.inGameDate
+          };
+          const written = buildNews({ ...asOf, recentTypes: [] }, { maxStories: 99 });
+          editions.set(key, written);
+          return written;
+        };
+        for (const id of ids) {
+          const match = input.matches.find((entry) => id.endsWith(entry.eventId)) ?? null;
+          const story = editionFor(match?.eventId ?? null).find((item) => item.id === id);
+          if (story) out.set(id, { ...story, playerIds: idsFor(story.playerNames) });
+        }
+        return out;
+      }
+      async prepare(careerId) {
         const career = await db2.select().from(careers).where(eq(careers.id, careerId)).get();
         if (!career) return null;
         const catalogue = await db2.select().from(leagues).where(eq(leagues.careerId, careerId));
@@ -34932,7 +35475,11 @@ var init_news_service = __esm({
           if (!debriefEventId) continue;
           commentsByDebriefId.set(debriefEventId, {
             comment: asText(payload.comment),
-            refused: payload.refused === true || asText(payload.comment) === null
+            refused: payload.refused === true || asText(payload.comment) === null,
+            // Only comments recorded since the question was stored carry it; older ones print the answer alone.
+            question: asText(payload.question),
+            outlet: asText(payload.outlet),
+            writer: asText(payload.writer)
           });
         }
         const matches = rows.map((row) => ({
@@ -35108,21 +35655,8 @@ var init_news_service = __esm({
           const eaPlayerId = asNumber(payload.eaPlayerId);
           if (name && eaPlayerId !== null) eaIdByName.set(foldName(name), eaPlayerId);
         }
-        const items = buildNews(input).map((item) => ({
-          ...item,
-          playerIds: item.playerNames.map((name) => eaIdByName.get(foldName(name))).filter((eaPlayerId) => typeof eaPlayerId === "number")
-        }));
-        return {
-          careerId,
-          clubName: career.clubName,
-          managerName: career.managerName,
-          leagueName: input.leagueName,
-          seasonNumber,
-          inGameDate: career.inGameDate,
-          matchesConsidered: matches.length,
-          matchEventIds: matches.map((match) => match.eventId),
-          items
-        };
+        const idsFor = (names) => names.map((name) => eaIdByName.get(foldName(name))).filter((eaPlayerId) => typeof eaPlayerId === "number");
+        return { career, input, idsFor, matches, seasonNumber };
       }
     };
   }
@@ -35192,35 +35726,73 @@ var init_news_archive = __esm({
         };
       }
       /**
-       * Clears what the desk itself has rewritten, so it can be written again in the current voice.
+       * Rewrites what the desk itself has rewritten, IN PLACE, so a paper already printed reads in the new voice.
        *
        * The rule the whole archive rests on is that a story is printed once and kept. This is the one exception
-       * and it is narrow: a row is only cleared when the DESK changed, not when the facts did, and only when it
-       * is still sitting on the paper. Three states are deliberately untouched:
+       * and it is narrow: a row is only rewritten when the DESK changed, not when the facts did. It keeps its
+       * place, its edition and whether it has been read - the manager opens the paper to the same stories,
+       * worded the way the desk words them now. A story about a match is rewritten as of that match (see
+       * `NewsService.rewrite`), so an older report does not pick up today's facts.
+       *
+       * A story the desk can no longer write from the evidence is cleared instead, with its tombstone, exactly as
+       * this used to clear every stale row. Two states are deliberately untouched:
        *
        *   - a SAVED story, because a bookmark is the manager's and rewording it under him would be worse than
        *     leaving one story in the old voice,
-       *   - a DISMISSED story, which has a tombstone and no row at all, so it cannot come back,
-       *   - and its tombstone is removed only alongside a row that exists, which is what keeps the two in step.
+       *   - a DISMISSED story, which has a tombstone and no row at all, so it cannot come back.
        *
-       * The clear is ONE statement carrying the staleness predicate, rather than a select followed by deletes by
-       * id. Two reads of the same career arrive together - the app fires a second one the moment the first lands
-       * - and a select-then-delete let the second read delete a row the first had already rewritten in the new
-       * voice, taking the tombstone with it. Scoping the delete to the version being retired means a row written
-       * at the current version is not a candidate for it, whatever else is running.
+       * Every write carries the staleness predicate. Two reads of the same career arrive together - the app fires
+       * a second one the moment the first lands - and a write scoped to the version being retired means a row the
+       * other read has already rewritten is not touched again.
        */
       async reprintOutdatedCopy(careerId) {
-        const cleared = await db2.delete(newsItems).where(
-          and(
+        const stale = await db2.select({ id: newsItems.id }).from(newsItems).where(
+          and(eq(newsItems.careerId, careerId), eq(newsItems.saved, false), lt(newsItems.copyVersion, NEWS_COPY_VERSION))
+        );
+        if (stale.length === 0) return 0;
+        const rewritten = await new NewsService().rewrite(
+          careerId,
+          stale.map((row) => row.id)
+        );
+        let changed = 0;
+        for (const row of stale) {
+          const stillStale = and(
             eq(newsItems.careerId, careerId),
+            eq(newsItems.id, row.id),
             eq(newsItems.saved, false),
             lt(newsItems.copyVersion, NEWS_COPY_VERSION)
-          )
-        ).returning({ id: newsItems.id });
-        for (const row of cleared) {
-          await db2.delete(newsPublished).where(and(eq(newsPublished.careerId, careerId), eq(newsPublished.id, row.id)));
+          );
+          const item = rewritten.get(row.id);
+          if (item) {
+            const updated = await db2.update(newsItems).set({
+              category: item.category,
+              tone: item.tone,
+              headline: item.headline,
+              body: item.body,
+              kind: item.kind,
+              stance: item.byline?.stance ?? item.stance ?? "STRAIGHT",
+              articleJson: JSON.stringify(item.article),
+              outlet: item.byline?.outlet ?? null,
+              writer: item.byline?.writer ?? null,
+              writerRole: item.byline?.writerRole ?? null,
+              dateline: item.byline?.dateline ?? null,
+              evidenceJson: JSON.stringify(item.evidence),
+              playerNamesJson: JSON.stringify(item.playerNames),
+              playerIdsJson: JSON.stringify(item.playerIds),
+              quote: item.quote,
+              weight: item.weight,
+              copyVersion: NEWS_COPY_VERSION
+            }).where(stillStale).returning({ id: newsItems.id });
+            changed += updated.length;
+            continue;
+          }
+          const cleared = await db2.delete(newsItems).where(stillStale).returning({ id: newsItems.id });
+          if (cleared.length > 0) {
+            await db2.delete(newsPublished).where(and(eq(newsPublished.careerId, careerId), eq(newsPublished.id, row.id)));
+            changed += 1;
+          }
         }
-        return cleared.length;
+        return changed;
       }
       /**
        * Stores the stories that are not already on file, then trims the archive.
@@ -35525,6 +36097,10 @@ async function recordMediaComment(rawBody) {
         debriefEventId: body2.debriefEventId,
         opponent: body2.opponent ?? "",
         subject: body2.subject ?? "",
+        // What was asked, and by whom, so the paper can print the exchange rather than only the answer.
+        question: typeof body2.question === "string" ? body2.question : "",
+        outlet: typeof body2.outlet === "string" ? body2.outlet : null,
+        writer: typeof body2.writer === "string" ? body2.writer : null,
         comment: refused ? null : comment,
         refused
       }),

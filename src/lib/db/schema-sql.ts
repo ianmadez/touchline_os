@@ -999,4 +999,6 @@ export const SCHEMA_MIGRATIONS: string[] = [
     "ALTER TABLE players ADD COLUMN on_loan_team_id INTEGER;",
     "ALTER TABLE players ADD COLUMN on_loan_team_name TEXT;",
     "ALTER TABLE players ADD COLUMN loan_end_date INTEGER;",
+    // A shirt number the manager gives a loanee. The save only has his number at the loan club.
+    "ALTER TABLE player_user_profiles ADD COLUMN loan_jersey INTEGER;",
   ];
