@@ -1,5 +1,6 @@
 "use client";
 
+import type { PlayerHistoryPayload } from "@/lib/squad/history";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navbar } from "@/components/ui/nav/navbar";
 import { LandingPage } from "@/components/ui/landing/landing-page";
@@ -317,6 +318,7 @@ export default function TouchlineApp() {
   const [seasonState, setSeasonState] = useState<SeasonState | null>(null);
   const [valuations, setValuations] = useState<Record<number, PlayerValuation>>({});
   const [playerPerformance, setPlayerPerformance] = useState<PlayerPerformancePayload | null>(null);
+  const [playerHistory, setPlayerHistory] = useState<PlayerHistoryPayload | null>(null);
   /**
    * Whether the open dossier should show the player's form.
    *
@@ -334,6 +336,7 @@ export default function TouchlineApp() {
     if (payload.seasonState) setSeasonState(payload.seasonState);
     if (payload.valuations) setValuations(payload.valuations);
     if (payload.playerPerformance) setPlayerPerformance(payload.playerPerformance);
+    if (payload.playerHistory) setPlayerHistory(payload.playerHistory);
     if (typeof payload.formationId === "string" && payload.formationId) {
       setFormationId(payload.formationId);
     }
@@ -1913,6 +1916,7 @@ export default function TouchlineApp() {
                 }}
                 currencySymbol={currencySymbolFor(appSettings?.currencySymbol)}
                 playerPerformance={playerPerformance}
+                playerHistory={playerHistory}
               />
             )}
           </div>

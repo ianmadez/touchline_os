@@ -1001,4 +1001,7 @@ export const SCHEMA_MIGRATIONS: string[] = [
     "ALTER TABLE players ADD COLUMN loan_end_date INTEGER;",
     // A shirt number the manager gives a loanee. The save only has his number at the loan club.
     "ALTER TABLE player_user_profiles ADD COLUMN loan_jersey INTEGER;",
+    // Permanent per-match history. The save forgets old seasons; this table never deletes.
+    "CREATE TABLE IF NOT EXISTS player_match_archive (id TEXT PRIMARY KEY, career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE, player_id INTEGER NOT NULL, date INTEGER NOT NULL, rating INTEGER NOT NULL, minutes INTEGER NOT NULL, position INTEGER, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
+    "CREATE INDEX IF NOT EXISTS idx_player_match_archive_career_player ON player_match_archive(career_id, player_id);",
   ];

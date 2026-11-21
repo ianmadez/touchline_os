@@ -59,6 +59,7 @@ export const BULK_TABLES = [
   "league_positions",
   "season_history",
   "player_match_ratings",
+  "player_match_archive",
   "transfer_deals",
   "world_players",
   "youth_prospects",

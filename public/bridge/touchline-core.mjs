@@ -4382,7 +4382,7 @@ var require_browser = __commonJS({
     var QRCode3 = require_qrcode();
     var CanvasRenderer = require_canvas();
     var SvgRenderer = require_svg_tag();
-    function renderCanvas(renderFunc, canvas, text4, opts, cb) {
+    function renderCanvas(renderFunc, canvas, text5, opts, cb) {
       const args = [].slice.call(arguments, 1);
       const argsNum = args.length;
       const isLastArgCb = typeof args[argsNum - 1] === "function";
@@ -4394,8 +4394,8 @@ var require_browser = __commonJS({
           throw new Error("Too few arguments provided");
         }
         if (argsNum === 2) {
-          cb = text4;
-          text4 = canvas;
+          cb = text5;
+          text5 = canvas;
           canvas = opts = void 0;
         } else if (argsNum === 3) {
           if (canvas.getContext && typeof cb === "undefined") {
@@ -4403,8 +4403,8 @@ var require_browser = __commonJS({
             opts = void 0;
           } else {
             cb = opts;
-            opts = text4;
-            text4 = canvas;
+            opts = text5;
+            text5 = canvas;
             canvas = void 0;
           }
         }
@@ -4413,16 +4413,16 @@ var require_browser = __commonJS({
           throw new Error("Too few arguments provided");
         }
         if (argsNum === 1) {
-          text4 = canvas;
+          text5 = canvas;
           canvas = opts = void 0;
         } else if (argsNum === 2 && !canvas.getContext) {
-          opts = text4;
-          text4 = canvas;
+          opts = text5;
+          text5 = canvas;
           canvas = void 0;
         }
         return new Promise(function(resolve2, reject) {
           try {
-            const data = QRCode3.create(text4, opts);
+            const data = QRCode3.create(text5, opts);
             resolve2(renderFunc(data, canvas, opts));
           } catch (e) {
             reject(e);
@@ -4430,7 +4430,7 @@ var require_browser = __commonJS({
         });
       }
       try {
-        const data = QRCode3.create(text4, opts);
+        const data = QRCode3.create(text5, opts);
         cb(null, renderFunc(data, canvas, opts));
       } catch (e) {
         cb(e);
@@ -4454,8 +4454,8 @@ var require_server = __commonJS({
     var Utf8Renderer = require_utf8();
     var TerminalRenderer = require_terminal2();
     var SvgRenderer = require_svg();
-    function checkParams(text4, opts, cb) {
-      if (typeof text4 === "undefined") {
+    function checkParams(text5, opts, cb) {
+      if (typeof text5 === "undefined") {
         throw new Error("String required as first argument");
       }
       if (typeof cb === "undefined") {
@@ -4502,11 +4502,11 @@ var require_server = __commonJS({
           return Utf8Renderer;
       }
     }
-    function render(renderFunc, text4, params) {
+    function render(renderFunc, text5, params) {
       if (!params.cb) {
         return new Promise(function(resolve2, reject) {
           try {
-            const data = QRCode3.create(text4, params.opts);
+            const data = QRCode3.create(text5, params.opts);
             return renderFunc(data, params.opts, function(err, data2) {
               return err ? reject(err) : resolve2(data2);
             });
@@ -4516,7 +4516,7 @@ var require_server = __commonJS({
         });
       }
       try {
-        const data = QRCode3.create(text4, params.opts);
+        const data = QRCode3.create(text5, params.opts);
         return renderFunc(data, params.opts, params.cb);
       } catch (e) {
         params.cb(e);
@@ -4524,43 +4524,43 @@ var require_server = __commonJS({
     }
     exports.create = QRCode3.create;
     exports.toCanvas = require_browser().toCanvas;
-    exports.toString = function toString(text4, opts, cb) {
-      const params = checkParams(text4, opts, cb);
+    exports.toString = function toString(text5, opts, cb) {
+      const params = checkParams(text5, opts, cb);
       const type = params.opts ? params.opts.type : void 0;
       const renderer = getStringRendererFromType(type);
-      return render(renderer.render, text4, params);
+      return render(renderer.render, text5, params);
     };
-    exports.toDataURL = function toDataURL(text4, opts, cb) {
-      const params = checkParams(text4, opts, cb);
+    exports.toDataURL = function toDataURL(text5, opts, cb) {
+      const params = checkParams(text5, opts, cb);
       const renderer = getRendererFromType(params.opts.type);
-      return render(renderer.renderToDataURL, text4, params);
+      return render(renderer.renderToDataURL, text5, params);
     };
-    exports.toBuffer = function toBuffer(text4, opts, cb) {
-      const params = checkParams(text4, opts, cb);
+    exports.toBuffer = function toBuffer(text5, opts, cb) {
+      const params = checkParams(text5, opts, cb);
       const renderer = getRendererFromType(params.opts.type);
-      return render(renderer.renderToBuffer, text4, params);
+      return render(renderer.renderToBuffer, text5, params);
     };
-    exports.toFile = function toFile(path13, text4, opts, cb) {
-      if (typeof path13 !== "string" || !(typeof text4 === "string" || typeof text4 === "object")) {
+    exports.toFile = function toFile(path13, text5, opts, cb) {
+      if (typeof path13 !== "string" || !(typeof text5 === "string" || typeof text5 === "object")) {
         throw new Error("Invalid argument");
       }
       if (arguments.length < 3 && !canPromise()) {
         throw new Error("Too few arguments provided");
       }
-      const params = checkParams(text4, opts, cb);
+      const params = checkParams(text5, opts, cb);
       const type = params.opts.type || getTypeFromFilename(path13);
       const renderer = getRendererFromType(type);
       const renderToFile = renderer.renderToFile.bind(null, path13);
-      return render(renderToFile, text4, params);
+      return render(renderToFile, text5, params);
     };
-    exports.toFileStream = function toFileStream(stream, text4, opts) {
+    exports.toFileStream = function toFileStream(stream, text5, opts) {
       if (arguments.length < 2) {
         throw new Error("Too few arguments provided");
       }
-      const params = checkParams(text4, opts, stream.emit.bind(stream, "error"));
+      const params = checkParams(text5, opts, stream.emit.bind(stream, "error"));
       const renderer = getRendererFromType("png");
       const renderToFileStream = renderer.renderToFileStream.bind(null, stream);
-      render(renderToFileStream, text4, params);
+      render(renderToFileStream, text5, params);
     };
   }
 });
@@ -4742,9 +4742,9 @@ var init_game_versions = __esm({
 });
 
 // src/lib/parser/bytes.ts
-function asciiBytes(text4) {
-  const out = new Uint8Array(text4.length);
-  for (let i = 0; i < text4.length; i++) out[i] = text4.charCodeAt(i) & 255;
+function asciiBytes(text5) {
+  const out = new Uint8Array(text5.length);
+  for (let i = 0; i < text5.length; i++) out[i] = text5.charCodeAt(i) & 255;
   return out;
 }
 function latin1Text(bytes) {
@@ -4780,8 +4780,8 @@ function indexOfBytes(haystack, needle, fromIndex = 0) {
   }
   return -1;
 }
-function utf8Bytes(text4) {
-  return utf8Encoder.encode(text4);
+function utf8Bytes(text5) {
+  return utf8Encoder.encode(text5);
 }
 var LATIN1_CHUNK, HEX, utf8Encoder;
 var init_bytes = __esm({
@@ -4917,11 +4917,11 @@ function sha256(bytes) {
   for (let i = 0; i < 8; i++) outView.setUint32(i * 4, h[i], false);
   return out;
 }
-function sha1Hex(text4) {
-  return toHex(sha1(utf8Bytes(text4)));
+function sha1Hex(text5) {
+  return toHex(sha1(utf8Bytes(text5)));
 }
-function sha256Hex(text4) {
-  return toHex(sha256(utf8Bytes(text4)));
+function sha256Hex(text5) {
+  return toHex(sha256(utf8Bytes(text5)));
 }
 var HEX2, rotl, rotr, SHA256_K;
 var init_sha = __esm({
@@ -6213,7 +6213,10 @@ var init_schema_sql = __esm({
       "ALTER TABLE players ADD COLUMN on_loan_team_name TEXT;",
       "ALTER TABLE players ADD COLUMN loan_end_date INTEGER;",
       // A shirt number the manager gives a loanee. The save only has his number at the loan club.
-      "ALTER TABLE player_user_profiles ADD COLUMN loan_jersey INTEGER;"
+      "ALTER TABLE player_user_profiles ADD COLUMN loan_jersey INTEGER;",
+      // Permanent per-match history. The save forgets old seasons; this table never deletes.
+      "CREATE TABLE IF NOT EXISTS player_match_archive (id TEXT PRIMARY KEY, career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE, player_id INTEGER NOT NULL, date INTEGER NOT NULL, rating INTEGER NOT NULL, minutes INTEGER NOT NULL, position INTEGER, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
+      "CREATE INDEX IF NOT EXISTS idx_player_match_archive_career_player ON player_match_archive(career_id, player_id);"
     ];
   }
 });
@@ -6257,8 +6260,8 @@ function isValidCode(code) {
 function loadOrCreateConfig(port, env = process.env) {
   const file = configPath(env);
   try {
-    const text4 = fs2.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
-    const raw = JSON.parse(text4);
+    const text5 = fs2.readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+    const raw = JSON.parse(text5);
     if (isValidCode(raw.code)) return { code: raw.code, port };
   } catch {
   }
@@ -12703,6 +12706,7 @@ __export(schema_exports, {
   newsItems: () => newsItems,
   newsPublished: () => newsPublished,
   objectiveStatusEnum: () => objectiveStatusEnum,
+  playerMatchArchive: () => playerMatchArchive,
   playerMatchRatings: () => playerMatchRatings,
   playerSnapshots: () => playerSnapshots,
   playerUserProfiles: () => playerUserProfiles,
@@ -12730,7 +12734,7 @@ __export(schema_exports, {
   worldPlayers: () => worldPlayers,
   youthProspects: () => youthProspects
 });
-var provenanceEnum, careers, careerSnapshots, playerSnapshots, clubFinanceSnapshots, players, clubFinances, playerUserProfiles, careerEvents, managerOnboardingProfiles, tacticalSystems, appSettings, storylineCategoryEnum, storylineStatusEnum, storylines, storylineEvents, leagues, leagueTeams, seasonHistory, leaguePositions, objectiveStatusEnum, boardObjectives, careerObjectives, transferDeals, seasonProgress, targetBlocks, reviewDecisionEnum, reviewDecisions, hypothesisOriginEnum, hypothesisStatusEnum, hypothesisKindEnum, hypotheses, hypothesisStanceEnum, hypothesisEvidence, assignmentTypeEnum, assignmentStatusEnum, assignments, rulesProfiles, careerFinanceInputs, dealKindEnum, transferInputs, transferCounterpartyNames, scoutTargetStatuses, scoutTargetPriorities, scoutArchiveReasons, scoutTargets, careerTrophies, newsItems, newsPublished, debriefMarks, youthProspects, worldPlayers, worldPlayerOverrides, playerMatchRatings, competitionTeams;
+var provenanceEnum, careers, careerSnapshots, playerSnapshots, clubFinanceSnapshots, players, clubFinances, playerUserProfiles, careerEvents, managerOnboardingProfiles, tacticalSystems, appSettings, storylineCategoryEnum, storylineStatusEnum, storylines, storylineEvents, leagues, leagueTeams, seasonHistory, leaguePositions, objectiveStatusEnum, boardObjectives, careerObjectives, transferDeals, seasonProgress, targetBlocks, reviewDecisionEnum, reviewDecisions, hypothesisOriginEnum, hypothesisStatusEnum, hypothesisKindEnum, hypotheses, hypothesisStanceEnum, hypothesisEvidence, assignmentTypeEnum, assignmentStatusEnum, assignments, rulesProfiles, careerFinanceInputs, dealKindEnum, transferInputs, transferCounterpartyNames, scoutTargetStatuses, scoutTargetPriorities, scoutArchiveReasons, scoutTargets, careerTrophies, newsItems, newsPublished, debriefMarks, youthProspects, worldPlayers, worldPlayerOverrides, playerMatchRatings, playerMatchArchive, competitionTeams;
 var init_schema = __esm({
   "src/lib/db/schema.ts"() {
     "use strict";
@@ -14040,6 +14044,24 @@ var init_schema = __esm({
         )
       })
     );
+    playerMatchArchive = sqliteTable(
+      "player_match_archive",
+      {
+        id: text("id").primaryKey(),
+        // `${careerId}_${playerId}_${date}`
+        careerId: text("career_id").notNull().references(() => careers.id, { onDelete: "cascade" }),
+        playerId: integer("player_id").notNull(),
+        /** YYYYMMDD, as the save records it. */
+        date: integer("date").notNull(),
+        rating: integer("rating").notNull(),
+        minutes: integer("minutes").notNull(),
+        position: integer("position"),
+        updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull()
+      },
+      (table) => ({
+        careerPlayerIdx: index("idx_player_match_archive_career_player").on(table.careerId, table.playerId)
+      })
+    );
     competitionTeams = sqliteTable(
       "competition_teams",
       {
@@ -14128,6 +14150,7 @@ var init_tables = __esm({
       "league_positions",
       "season_history",
       "player_match_ratings",
+      "player_match_archive",
       "transfer_deals",
       "world_players",
       "youth_prospects"
@@ -15103,11 +15126,11 @@ function eaDaysToDate(days) {
   return new Date(EA_DATE_EPOCH_MS + days * 864e5);
 }
 function yyyymmddToDate(value) {
-  const text4 = String(value);
-  if (text4.length !== 8) return null;
-  const year = Number(text4.slice(0, 4));
-  const month = Number(text4.slice(4, 6));
-  const day = Number(text4.slice(6, 8));
+  const text5 = String(value);
+  if (text5.length !== 8) return null;
+  const year = Number(text5.slice(0, 4));
+  const month = Number(text5.slice(4, 6));
+  const day = Number(text5.slice(6, 8));
   if (!Number.isFinite(year) || month < 1 || month > 12 || day < 1 || day > 31) return null;
   const date = new Date(Date.UTC(year, month - 1, day));
   return Number.isNaN(date.getTime()) ? null : date;
@@ -16638,7 +16661,7 @@ var init_season_service = __esm({
        * `targetPosition` is what makes an objective machine-judgeable at season end. Without a target the
        * outcome is still recorded, but nothing ever claims it was met or missed.
        */
-      async setUserObjective(careerId, text4, targetPosition) {
+      async setUserObjective(careerId, text5, targetPosition) {
         const latest = (await this.getSeasonHistory(careerId)).at(-1);
         if (!latest) return;
         await db2.insert(careerObjectives).values({
@@ -16646,13 +16669,13 @@ var init_season_service = __esm({
           careerId,
           seasonNumber: latest.season,
           source: "USER",
-          text: text4,
+          text: text5,
           targetPosition,
           status: "ACTIVE",
           updatedAt: (/* @__PURE__ */ new Date()).toISOString()
         }).onConflictDoUpdate({
           target: [careerObjectives.careerId, careerObjectives.seasonNumber, careerObjectives.source],
-          set: { text: text4, targetPosition, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }
+          set: { text: text5, targetPosition, updatedAt: (/* @__PURE__ */ new Date()).toISOString() }
         });
       }
       /**
@@ -17115,9 +17138,9 @@ var init_season_scope = __esm({
 
 // src/lib/services/player-performance-service.ts
 function isoFromSaveDate(value) {
-  const text4 = String(value);
-  if (!/^\d{8}$/.test(text4)) return null;
-  return `${text4.slice(0, 4)}-${text4.slice(4, 6)}-${text4.slice(6, 8)}`;
+  const text5 = String(value);
+  if (!/^\d{8}$/.test(text5)) return null;
+  return `${text5.slice(0, 4)}-${text5.slice(4, 6)}-${text5.slice(6, 8)}`;
 }
 var PlayerPerformanceService;
 var init_player_performance_service = __esm({
@@ -17216,6 +17239,270 @@ var init_player_performance_service = __esm({
           };
         }
         return { seasonStart, seasonScoped: seasonStart !== null, byPlayer };
+      }
+    };
+  }
+});
+
+// src/lib/squad/history.ts
+function seasonLabel(seasonStart) {
+  const year = Number(seasonStart.slice(0, 4));
+  if (!Number.isFinite(year)) return seasonStart;
+  return `${year}/${String((year + 1) % 100).padStart(2, "0")}`;
+}
+var init_history = __esm({
+  "src/lib/squad/history.ts"() {
+    "use strict";
+  }
+});
+
+// src/lib/services/player-history-service.ts
+function isoFromSaveDate2(value) {
+  const text5 = String(value);
+  if (!/^\d{8}$/.test(text5)) return null;
+  return `${text5.slice(0, 4)}-${text5.slice(4, 6)}-${text5.slice(6, 8)}`;
+}
+function round2(value) {
+  return Math.round(value * 100) / 100;
+}
+var ARCHIVE_CHUNK, text2, PlayerHistoryService;
+var init_player_history_service = __esm({
+  "src/lib/services/player-history-service.ts"() {
+    "use strict";
+    init_drizzle_orm();
+    init_client();
+    init_schema();
+    init_performance();
+    init_season_scope();
+    init_history();
+    init_squad_service();
+    ARCHIVE_CHUNK = 50;
+    text2 = (value) => typeof value === "string" && value.trim() ? value.trim() : null;
+    PlayerHistoryService = class {
+      constructor() {
+        this.squadService = new SquadService();
+      }
+      /** Copies any rating the archive does not hold yet. Existing archive rows are left alone. */
+      async topUpArchive(careerId) {
+        const ratings = await db2.select().from(playerMatchRatings).where(eq(playerMatchRatings.careerId, careerId));
+        for (let at2 = 0; at2 < ratings.length; at2 += ARCHIVE_CHUNK) {
+          const chunk = ratings.slice(at2, at2 + ARCHIVE_CHUNK).map((row) => ({
+            id: `${careerId}_${row.playerId}_${row.date}`,
+            careerId,
+            playerId: row.playerId,
+            date: row.date,
+            rating: row.rating,
+            minutes: row.minutes,
+            position: row.position
+          }));
+          if (chunk.length > 0) await db2.insert(playerMatchArchive).values(chunk).onConflictDoNothing();
+        }
+      }
+      async load(careerId) {
+        await this.topUpArchive(careerId);
+        const [archiveRows, debriefRows, squadRows, profileRows, snapshotNames] = await Promise.all([
+          db2.select().from(playerMatchArchive).where(eq(playerMatchArchive.careerId, careerId)),
+          db2.select({ payloadJson: careerEvents.payloadJson }).from(careerEvents).where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "MATCH_DEBRIEF"))).orderBy(desc(careerEvents.timestamp)),
+          db2.select({
+            eaPlayerId: players.eaPlayerId,
+            name: players.name,
+            primaryPosition: players.primaryPosition
+          }).from(players).where(eq(players.careerId, careerId)),
+          db2.select({ playerId: playerUserProfiles.playerId, displayName: playerUserProfiles.displayName }).from(playerUserProfiles).where(eq(playerUserProfiles.careerId, careerId)),
+          db2.select({
+            eaPlayerId: playerSnapshots.eaPlayerId,
+            name: playerSnapshots.name,
+            primaryPosition: playerSnapshots.primaryPosition,
+            createdAt: playerSnapshots.createdAt
+          }).from(playerSnapshots).where(eq(playerSnapshots.careerId, careerId))
+        ]);
+        const displayNameByKey = /* @__PURE__ */ new Map();
+        for (const row of profileRows) if (row.displayName) displayNameByKey.set(row.playerId, row.displayName);
+        const identity = /* @__PURE__ */ new Map();
+        const latestSnapshot = /* @__PURE__ */ new Map();
+        for (const row of snapshotNames) {
+          const previous = latestSnapshot.get(row.eaPlayerId);
+          if (!previous || row.createdAt > previous.createdAt) {
+            latestSnapshot.set(row.eaPlayerId, {
+              name: row.name,
+              primaryPosition: row.primaryPosition,
+              createdAt: row.createdAt
+            });
+          }
+        }
+        for (const row of squadRows) {
+          identity.set(row.eaPlayerId, { name: row.name, primaryPosition: row.primaryPosition, current: true });
+        }
+        const ensure = (eaPlayerId) => {
+          if (identity.has(eaPlayerId)) return;
+          const snap = latestSnapshot.get(eaPlayerId);
+          identity.set(eaPlayerId, {
+            name: snap?.name ?? `#${eaPlayerId}`,
+            primaryPosition: snap?.primaryPosition ?? null,
+            current: false
+          });
+        };
+        const contextByDate = /* @__PURE__ */ new Map();
+        const loggedByPlayer = /* @__PURE__ */ new Map();
+        const keyPrefix = `${careerId}_`;
+        for (const row of debriefRows) {
+          let payload;
+          try {
+            payload = JSON.parse(row.payloadJson);
+          } catch {
+            continue;
+          }
+          const matchDate = text2(payload.matchDate);
+          if (matchDate === null) continue;
+          if (!contextByDate.has(matchDate)) {
+            contextByDate.set(matchDate, {
+              opponent: text2(payload.opponent),
+              venue: text2(payload.venue),
+              scoreline: text2(payload.scoreline)
+            });
+          }
+          const contributions = Array.isArray(payload.contributions) ? payload.contributions : [];
+          for (const raw of contributions) {
+            const contribution = raw;
+            if (typeof contribution.playerId !== "string" || !contribution.playerId.startsWith(keyPrefix)) continue;
+            const eaPlayerId = Number(contribution.playerId.slice(keyPrefix.length));
+            if (!Number.isInteger(eaPlayerId)) continue;
+            const goals = typeof contribution.goals === "number" ? contribution.goals : 0;
+            const assists = typeof contribution.assists === "number" ? contribution.assists : 0;
+            const byDate = loggedByPlayer.get(eaPlayerId) ?? /* @__PURE__ */ new Map();
+            const day = byDate.get(matchDate) ?? { goals: 0, assists: 0 };
+            day.goals += goals;
+            day.assists += assists;
+            byDate.set(matchDate, day);
+            loggedByPlayer.set(eaPlayerId, byDate);
+            ensure(eaPlayerId);
+          }
+        }
+        const matchesByPlayer = /* @__PURE__ */ new Map();
+        const matchFor = (eaPlayerId, date) => {
+          const byDate = matchesByPlayer.get(eaPlayerId) ?? /* @__PURE__ */ new Map();
+          matchesByPlayer.set(eaPlayerId, byDate);
+          const existing = byDate.get(date);
+          if (existing) return existing;
+          const context = contextByDate.get(date);
+          const created = {
+            date,
+            rating: null,
+            minutes: null,
+            position: null,
+            opponent: context?.opponent ?? null,
+            venue: context?.venue ?? null,
+            scoreline: context?.scoreline ?? null,
+            goals: 0,
+            assists: 0
+          };
+          byDate.set(date, created);
+          return created;
+        };
+        for (const row of archiveRows) {
+          const date = isoFromSaveDate2(row.date);
+          if (date === null) continue;
+          ensure(row.playerId);
+          const match = matchFor(row.playerId, date);
+          match.rating = row.rating;
+          match.minutes = row.minutes >= 0 ? row.minutes : null;
+          match.position = row.position;
+        }
+        for (const [eaPlayerId, byDate] of loggedByPlayer) {
+          for (const [date, logged] of byDate) {
+            const match = matchFor(eaPlayerId, date);
+            match.goals += logged.goals;
+            match.assists += logged.assists;
+          }
+        }
+        const ids = [...identity.keys()];
+        const growthLists = await Promise.all(
+          ids.map((eaPlayerId) => this.squadService.getPlayerGrowthHistory(careerId, eaPlayerId))
+        );
+        const growthById = new Map(ids.map((id, index2) => [id, growthLists[index2]]));
+        const result = [];
+        for (const [eaPlayerId, who] of identity) {
+          const matches = [...matchesByPlayer.get(eaPlayerId)?.values() ?? []];
+          const growth = (growthById.get(eaPlayerId) ?? []).map((point) => ({
+            snapshotNumber: point.snapshotNumber,
+            inGameDate: point.inGameDate ?? null,
+            overallRating: point.overallRating,
+            potentialRating: point.potentialRating
+          }));
+          if (matches.length === 0 && !who.current) continue;
+          const seasons = /* @__PURE__ */ new Map();
+          for (const match of matches) {
+            const start = seasonStartFor(match.date);
+            if (start === null) continue;
+            const list = seasons.get(start) ?? [];
+            list.push(match);
+            seasons.set(start, list);
+          }
+          const seasonRows = [...seasons.entries()].sort(([left], [right]) => right.localeCompare(left)).map(([seasonStart, list]) => {
+            list.sort((left, right) => right.date.localeCompare(left.date));
+            let appearances = 0;
+            let minutes = 0;
+            let ratingSum = 0;
+            let best = null;
+            let goals = 0;
+            let assists = 0;
+            for (const match of list) {
+              goals += match.goals;
+              assists += match.assists;
+              if (match.rating !== null && match.minutes !== null && countsTowardForm(match.minutes)) {
+                appearances += 1;
+                minutes += match.minutes;
+                ratingSum += match.rating;
+                best = best === null ? match.rating : Math.max(best, match.rating);
+              }
+            }
+            const seasonEnd = `${Number(seasonStart.slice(0, 4)) + 1}-07-01`;
+            const inSeason = growth.filter(
+              (point) => point.inGameDate !== null && point.inGameDate >= seasonStart && point.inGameDate < seasonEnd
+            );
+            return {
+              seasonStart,
+              label: seasonLabel(seasonStart),
+              appearances,
+              minutes,
+              averageRating: appearances > 0 ? round2(ratingSum / appearances) : null,
+              bestRating: best,
+              goals,
+              assists,
+              overallStart: inSeason[0]?.overallRating ?? null,
+              overallEnd: inSeason[inSeason.length - 1]?.overallRating ?? null,
+              potentialEnd: inSeason[inSeason.length - 1]?.potentialRating ?? null,
+              matches: list
+            };
+          });
+          const totalApps = seasonRows.reduce((sum2, season) => sum2 + season.appearances, 0);
+          const weighted = seasonRows.reduce(
+            (sum2, season) => sum2 + (season.averageRating ?? 0) * season.appearances,
+            0
+          );
+          const key = `${careerId}_${eaPlayerId}`;
+          result.push({
+            eaPlayerId,
+            playerKey: key,
+            name: displayNameByKey.get(key) ?? who.name,
+            currentSquad: who.current,
+            primaryPosition: who.primaryPosition,
+            seasons: seasonRows,
+            totals: {
+              seasons: seasonRows.length,
+              appearances: totalApps,
+              minutes: seasonRows.reduce((sum2, season) => sum2 + season.minutes, 0),
+              averageRating: totalApps > 0 ? round2(weighted / totalApps) : null,
+              goals: seasonRows.reduce((sum2, season) => sum2 + season.goals, 0),
+              assists: seasonRows.reduce((sum2, season) => sum2 + season.assists, 0)
+            },
+            growth
+          });
+        }
+        result.sort(
+          (left, right) => Number(right.currentSquad) - Number(left.currentSquad) || right.totals.appearances - left.totals.appearances || left.name.localeCompare(right.name)
+        );
+        return { players: result };
       }
     };
   }
@@ -17527,7 +17814,7 @@ var init_evidence = __esm({
 function num(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
-function text2(value) {
+function text3(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 function standingOf(payload) {
@@ -17624,24 +17911,24 @@ function clauseFor(fact, currentYear) {
       return `he has gone ${delta > 0 ? "up" : "down"} ${Math.abs(delta)} overall`;
     }
     case "PLAYER_POSITION_CHANGED": {
-      const from = text2(p.fromPosition);
-      const to = text2(p.toPosition);
+      const from = text3(p.fromPosition);
+      const to = text3(p.toPosition);
       return from && to ? `he has been moved from ${from} to ${to}` : null;
     }
     case "SQUAD_DEPTH_THIN": {
-      const position = text2(p.position);
+      const position = text3(p.position);
       const count = num(p.count);
       if (position === null || count === null) return null;
       if (count === 0) return "nobody is listed there";
       return `${count} player${count === 1 ? " is" : "s are"} listed there, where two are wanted`;
     }
     case "PLAYER_OUT_OF_POSITION": {
-      const slot = text2(p.slotLabel) ?? text2(p.assignedSlotRole);
-      const natural = text2(p.naturalPosition);
+      const slot = text3(p.slotLabel) ?? text3(p.assignedSlotRole);
+      const natural = text3(p.naturalPosition);
       return slot && natural ? `he is being played at ${slot} rather than ${natural}` : null;
     }
     case "TACTICAL_SLOT_UNASSIGNED": {
-      const label2 = text2(p.label) ?? text2(p.role);
+      const label2 = text3(p.label) ?? text3(p.role);
       return label2 === null ? null : `${label2} has nobody assigned to it`;
     }
     case "PLAYER_PRAISED": {
@@ -17670,8 +17957,8 @@ function historyFor(fact) {
       return oldOvr !== null && newOvr !== null ? `overall went ${oldOvr} to ${newOvr}` : null;
     }
     case "PLAYER_POSITION_CHANGED": {
-      const fromPos = text2(p.fromPosition);
-      const toPos = text2(p.toPosition);
+      const fromPos = text3(p.fromPosition);
+      const toPos = text3(p.toPosition);
       return fromPos && toPos ? `position moved from ${fromPos} to ${toPos}` : null;
     }
     case "PLAYER_FORM_SLUMP":
@@ -17747,7 +18034,7 @@ function headlineFor(subject, leading, fallbackTitle, currentYear, seed) {
     }
     case "SQUAD_DEPTH_THIN": {
       const count = num(p.count);
-      const position = text2(p.position) ?? subject;
+      const position = text3(p.position) ?? subject;
       if (count === null) return `Structural Vulnerability: ${position} short on numbers`;
       return count === 0 ? pickVariant(
         [
@@ -17827,7 +18114,7 @@ function headlineFor(subject, leading, fallbackTitle, currentYear, seed) {
       );
     }
     case "PLAYER_POSITION_CHANGED": {
-      const to = text2(p.toPosition);
+      const to = text3(p.toPosition);
       return to === null ? `${subject} - position change` : pickVariant(
         [
           `${subject} - now played at ${to}`,
@@ -17839,7 +18126,7 @@ function headlineFor(subject, leading, fallbackTitle, currentYear, seed) {
       );
     }
     case "PLAYER_OUT_OF_POSITION": {
-      const slot = text2(p.slotLabel);
+      const slot = text3(p.slotLabel);
       return slot === null ? `${subject} - out of position` : pickVariant(
         [
           `${subject} - out of position at ${slot}`,
@@ -17851,7 +18138,7 @@ function headlineFor(subject, leading, fallbackTitle, currentYear, seed) {
       );
     }
     case "TACTICAL_SLOT_UNASSIGNED": {
-      const label2 = text2(p.label) ?? text2(p.role);
+      const label2 = text3(p.label) ?? text3(p.role);
       return label2 === null ? "An empty slot in the XI" : pickVariant(
         [`${label2} has nobody in it`, `${label2} is unfilled`, `Nobody in the ${label2} slot`],
         seed,
@@ -17859,7 +18146,7 @@ function headlineFor(subject, leading, fallbackTitle, currentYear, seed) {
       );
     }
     case "PLAYER_PRAISED": {
-      const name = text2(p.name) ?? "Squad player";
+      const name = text3(p.name) ?? "Squad player";
       const count = num(p.praiseCount);
       const windowSize = num(p.windowSize);
       if (count === null || windowSize === null) return `${name} manager praise`;
@@ -17892,7 +18179,7 @@ function riskFor(category, leading, currentYear, seed) {
   const p = first.payload;
   switch (category) {
     case "CONTRACT": {
-      const name = text2(p.name) ?? "He";
+      const name = text3(p.name) ?? "He";
       const until = num(p.contractValidUntil);
       if (until !== null && currentYear !== null && until <= currentYear) {
         return pickVariant(
@@ -17936,7 +18223,7 @@ function riskFor(category, leading, currentYear, seed) {
     }
     case "SQUAD_DEPTH": {
       const count = num(p.count);
-      const position = text2(p.position) ?? "the position";
+      const position = text3(p.position) ?? "the position";
       if (count === 0) {
         return pickVariant(
           [
@@ -18205,7 +18492,7 @@ function askFor(category, leading, seed) {
       );
     case "PRAISE": {
       const payload = first?.payload ?? {};
-      const name = text2(payload.name) ?? "The player";
+      const name = text3(payload.name) ?? "The player";
       const count = num(payload.praiseCount) ?? 3;
       const windowSize = num(payload.windowSize) ?? 5;
       const matchDetails = Array.isArray(payload.matchDetails) ? payload.matchDetails : [];
@@ -18239,7 +18526,7 @@ function listClauses(clauses) {
 }
 function composeStoryline(thread, facts, inGameDate, liveStarters) {
   const standingFacts = liveStarters === void 0 ? facts : facts.map((fact) => {
-    const playerId = text2(fact.payload.playerId);
+    const playerId = text3(fact.payload.playerId);
     if (playerId === null) return fact;
     return { ...fact, payload: { ...fact.payload, isStarter: liveStarters.has(playerId) } };
   });
@@ -18289,7 +18576,7 @@ function composeStoryline(thread, facts, inGameDate, liveStarters) {
       body: traced.length > 0 ? `${outcome} How it went: ${traced.join("; ")}.` : outcome
     };
   }
-  const clauses = leading.map((fact) => clauseFor(fact, yearFromInGameDate(inGameDate)) ?? text2(fact.summary)).filter((line) => line !== null);
+  const clauses = leading.map((fact) => clauseFor(fact, yearFromInGameDate(inGameDate)) ?? text3(fact.summary)).filter((line) => line !== null);
   const clauseList = listClauses(clauses);
   const lead = clauses.length === 0 ? `${subject}: ${thread.title}.` : clauses.length === 1 ? pickVariant([`${subject}: ${clauseList}.`, `${subject} - ${clauseList}.`], seed, "lead") : pickVariant(
     [
@@ -18360,6 +18647,7 @@ var init_career_service = __esm({
     init_user_profile_service();
     init_value_service();
     init_player_performance_service();
+    init_player_history_service();
     init_formations();
     init_evidence();
     init_compose();
@@ -18372,6 +18660,7 @@ var init_career_service = __esm({
         this.valueService = new ValueService();
         this.userProfileService = new UserProfileService();
         this.playerPerformanceService = new PlayerPerformanceService();
+        this.playerHistoryService = new PlayerHistoryService();
       }
       /** Deletes a career row; its child rows follow via the schema's foreign keys. */
       async deleteCareer(careerId) {
@@ -18426,6 +18715,7 @@ var init_career_service = __esm({
         const seasonState = await this.seasonService.getState(careerId);
         const valuations = await this.valueService.valueSquad(careerId, players2);
         const playerPerformance = await this.playerPerformanceService.load(careerId, career.inGameDate);
+        const playerHistory = await this.playerHistoryService.load(careerId);
         return {
           careerId: career.id,
           managerName: career.managerName,
@@ -18443,6 +18733,7 @@ var init_career_service = __esm({
           seasonState,
           valuations,
           playerPerformance,
+          playerHistory,
           leagueTeams: leagueTeamRows.map((row) => ({
             teamId: row.teamId,
             name: row.name,
@@ -19433,10 +19724,10 @@ function houseStance(house) {
       return "STRAIGHT";
   }
 }
-function hash(text4) {
+function hash(text5) {
   let value = 2166136261;
-  for (let index2 = 0; index2 < text4.length; index2 += 1) {
-    value ^= text4.charCodeAt(index2);
+  for (let index2 = 0; index2 < text5.length; index2 += 1) {
+    value ^= text5.charCodeAt(index2);
     value = Math.imul(value, 16777619) >>> 0;
   }
   return value;
@@ -19827,10 +20118,10 @@ var init_outlets = __esm({
 });
 
 // src/lib/news/media.ts
-function hash2(text4) {
+function hash2(text5) {
   let value = 2166136261;
-  for (let index2 = 0; index2 < text4.length; index2 += 1) {
-    value ^= text4.charCodeAt(index2);
+  for (let index2 = 0; index2 < text5.length; index2 += 1) {
+    value ^= text5.charCodeAt(index2);
     value = Math.imul(value, 16777619) >>> 0;
   }
   return value;
@@ -21112,9 +21403,9 @@ function normaliseNote(note) {
   return note.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 function weaknessFamily(note) {
-  const text4 = normaliseNote(note);
-  if (text4.length === 0) return null;
-  const found = WEAKNESS_FAMILIES.find((family) => family.test.test(text4));
+  const text5 = normaliseNote(note);
+  if (text5.length === 0) return null;
+  const found = WEAKNESS_FAMILIES.find((family) => family.test.test(text5));
   return found ? { key: found.key, line: found.line } : null;
 }
 var WEAKNESS_FAMILIES;
@@ -21176,7 +21467,7 @@ function num2(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
-function text3(value) {
+function text4(value) {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 function minuteList(value) {
@@ -21195,7 +21486,7 @@ function scoreOf(payload) {
   const home = num2(payload.homeScore);
   const away = num2(payload.awayScore);
   if (home !== null && away !== null) return { for: home, against: away };
-  const scoreline2 = text3(payload.scoreline);
+  const scoreline2 = text4(payload.scoreline);
   if (scoreline2 !== null) {
     const parts = scoreline2.split(/[-–:]/).map((part) => num2(part.trim()));
     if (parts.length === 2 && parts[0] !== null && parts[1] !== null) {
@@ -21219,7 +21510,7 @@ function contributionsFrom(value) {
   if (!Array.isArray(value)) return [];
   return value.map((entry) => {
     const record = entry;
-    const playerName = text3(record.playerName);
+    const playerName = text4(record.playerName);
     if (playerName === null) return null;
     return {
       playerName,
@@ -21231,9 +21522,9 @@ function contributionsFrom(value) {
 function standoutsFrom(payload) {
   const names = payload.standoutPlayerNames;
   if (Array.isArray(names)) {
-    return names.map((name) => text3(name)).filter((name) => name !== null);
+    return names.map((name) => text4(name)).filter((name) => name !== null);
   }
-  const single = text3(payload.standoutPlayerName);
+  const single = text4(payload.standoutPlayerName);
   return single !== null && single !== "None Selected" ? [single] : [];
 }
 function matchFromEvent(event) {
@@ -21241,15 +21532,15 @@ function matchFromEvent(event) {
   const score = scoreOf(payload);
   const stats = payload.matchStats ?? null;
   const { figures, hasFigures } = figuresFrom(stats);
-  const opponent = text3(payload.opponent) ?? "Opponent not named";
-  const venue = text3(payload.venue);
+  const opponent = text4(payload.opponent) ?? "Opponent not named";
+  const venue = text4(payload.venue);
   return {
     id: event.id,
-    date: text3(payload.matchDate),
+    date: text4(payload.matchDate),
     opponent,
     foldedOpponent: foldOpponent(opponent),
     venue: venue === "HOME" || venue === "AWAY" || venue === "NEUTRAL" ? venue : null,
-    competition: text3(payload.competition),
+    competition: text4(payload.competition),
     goalsFor: score.for,
     goalsAgainst: score.against,
     points: pointsFrom(score.for, score.against),
@@ -21258,7 +21549,7 @@ function matchFromEvent(event) {
     hasFigures,
     goalMinutes: minuteList(payload.goalMinutes),
     concededMinutes: minuteList(payload.concededMinutes),
-    weakness: text3(payload.weaknessIdentified),
+    weakness: text4(payload.weaknessIdentified),
     standouts: standoutsFrom(payload),
     contributions: contributionsFrom(payload.contributions),
     source: "DEBRIEF"
@@ -24010,13 +24301,13 @@ var init_objectives = __esm({
 // src/lib/parser/feasibility-parser.ts
 function decodeUtf8OrLatin1(bytes) {
   if (bytes.length === 0) return "";
-  let text4;
+  let text5;
   try {
-    text4 = utf8.decode(bytes);
+    text5 = utf8.decode(bytes);
   } catch {
-    text4 = latin1Text(bytes);
+    text5 = latin1Text(bytes);
   }
-  return text4.replace(CONTROL_CHARS, "").trim();
+  return text5.replace(CONTROL_CHARS, "").trim();
 }
 function decodeName(field) {
   if (field.length === 0) return { text: "", complete: true };
@@ -25344,9 +25635,9 @@ var init_feasibility_parser = __esm({
     };
     asDate = (yyyymmdd) => {
       if (yyyymmdd === null) return null;
-      const text4 = String(yyyymmdd);
-      if (text4.length !== 8) return null;
-      return `${text4.slice(0, 4)}-${text4.slice(4, 6)}-${text4.slice(6, 8)}`;
+      const text5 = String(yyyymmdd);
+      if (text5.length !== 8) return null;
+      return `${text5.slice(0, 4)}-${text5.slice(4, 6)}-${text5.slice(6, 8)}`;
     };
     nationalityCodeOf = (row, key = "nationality") => {
       const value = num3(row, key);
@@ -25775,8 +26066,8 @@ var init_feasibility_parser = __esm({
         const dcNames = /* @__PURE__ */ new Map();
         for (const row of decodeTable("dcplayernames", { unregistered: true })) {
           const id = num3(row, "nameid");
-          const text4 = str(row, "name");
-          if (id !== null && id > 0 && text4) dcNames.set(id, text4);
+          const text5 = str(row, "name");
+          if (id !== null && id > 0 && text5) dcNames.set(id, text5);
         }
         const resolveName = (playerId, player) => {
           if (playerId === null) return { name: null, nameSource: "unresolved" };
@@ -26947,6 +27238,26 @@ var init_sync_service = __esm({
             const CHUNK = 30;
             for (let at2 = 0; at2 < ratingRows.length; at2 += CHUNK) {
               tx.insert(playerMatchRatings).values(ratingRows.slice(at2, at2 + CHUNK)).run();
+            }
+            for (const row of ratingRows) {
+              const id = `${careerId}_${row.playerId}_${row.date}`;
+              tx.insert(playerMatchArchive).values({
+                id,
+                careerId,
+                playerId: row.playerId,
+                date: row.date,
+                rating: row.rating,
+                minutes: row.minutes,
+                position: row.position ?? null
+              }).onConflictDoUpdate({
+                target: playerMatchArchive.id,
+                set: {
+                  rating: row.rating,
+                  minutes: row.minutes,
+                  position: row.position ?? null,
+                  updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+                }
+              }).run();
             }
           }
           const catalogueLeagueIds = new Set(
@@ -28270,10 +28581,10 @@ var init_club_culture = __esm({
 
 // src/lib/fit-copy.ts
 function hash3(seed) {
-  const text4 = String(seed);
+  const text5 = String(seed);
   let h = 2166136261;
-  for (let i = 0; i < text4.length; i += 1) {
-    h ^= text4.charCodeAt(i);
+  for (let i = 0; i < text5.length; i += 1) {
+    h ^= text5.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
   return h >>> 0;
@@ -31535,10 +31846,10 @@ var init_moment = __esm({
 });
 
 // src/lib/news/news-engine.ts
-function hash4(text4) {
+function hash4(text5) {
   let value = 2166136261;
-  for (let index2 = 0; index2 < text4.length; index2 += 1) {
-    value ^= text4.charCodeAt(index2);
+  for (let index2 = 0; index2 < text5.length; index2 += 1) {
+    value ^= text5.charCodeAt(index2);
     value = Math.imul(value, 16777619) >>> 0;
   }
   return value;
@@ -31621,9 +31932,9 @@ function lateGoals2(minutes) {
   return minutes.filter((minute) => minute >= 75).length;
 }
 function aOrAn(word) {
-  const text4 = word.trim();
-  if (/^(8|11|18)(\D|$)/.test(text4) || /^8\d/.test(text4)) return "an";
-  return /^[aeiou]/i.test(text4) ? "an" : "a";
+  const text5 = word.trim();
+  if (/^(8|11|18)(\D|$)/.test(text5) || /^8\d/.test(text5)) return "an";
+  return /^[aeiou]/i.test(text5) ? "an" : "a";
 }
 function countWord(count) {
   const words = [
@@ -31735,9 +32046,9 @@ function isCupCompetition(competition) {
     competition
   );
 }
-function titleCase(text4) {
+function titleCase(text5) {
   const small = /* @__PURE__ */ new Set(["a", "an", "and", "the", "of", "in", "on", "for", "to", "at", "or"]);
-  return text4.split(" ").map((word) => small.has(word) ? word : capitalise(word)).join(" ");
+  return text5.split(" ").map((word) => small.has(word) ? word : capitalise(word)).join(" ");
 }
 function clubShortName(clubName) {
   const words = clubName.trim().split(/\s+/).filter((word) => !/^(A?FC|CF|SC|AC|FK|SK|IF|BK)$/i.test(word));
@@ -31819,11 +32130,11 @@ function trailedAtAnyPoint(match) {
   }
   return false;
 }
-function tidy2(text4) {
-  return text4.replace(/\s+/g, " ").replace(/\s+([.,;:!?])/g, "$1").replace(/([.,;:!?])\1+/g, "$1").replace(/,\s*,/g, ",").trim();
+function tidy2(text5) {
+  return text5.replace(/\s+/g, " ").replace(/\s+([.,;:!?])/g, "$1").replace(/([.,;:!?])\1+/g, "$1").replace(/,\s*,/g, ",").trim();
 }
-function capitalise(text4) {
-  return text4.length === 0 ? text4 : `${text4.charAt(0).toUpperCase()}${text4.slice(1)}`;
+function capitalise(text5) {
+  return text5.length === 0 ? text5 : `${text5.charAt(0).toUpperCase()}${text5.slice(1)}`;
 }
 function positionWords(role) {
   if (!role) return "player";
@@ -34998,7 +35309,7 @@ function voice(paragraphs, input) {
   const short = candidate && !opponents.some((name) => name.split(/\s+/).includes(candidate.toLowerCase())) ? candidate : null;
   const manager = input.managerName.trim();
   const surname = surnameOf(manager);
-  const escape = (text4) => text4.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const escape = (text5) => text5.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   let clubSeen = false;
   let managerSeen = false;
   return paragraphs.map((paragraph) => {

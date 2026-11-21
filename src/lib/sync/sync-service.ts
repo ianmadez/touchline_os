@@ -18,6 +18,7 @@ import {
   worldPlayers,
   youthProspects,
   playerMatchRatings,
+  playerMatchArchive,
   competitionTeams,
 } from "../db/schema";
 import {
@@ -476,6 +477,31 @@ export class SyncService {
         for (let at = 0; at < ratingRows.length; at += CHUNK) {
           tx.insert(playerMatchRatings)
             .values(ratingRows.slice(at, at + CHUNK))
+            .run();
+        }
+
+        // The permanent copy. Upserted, never deleted, so a season the save later drops is kept.
+        for (const row of ratingRows) {
+          const id = `${careerId}_${row.playerId}_${row.date}`;
+          tx.insert(playerMatchArchive)
+            .values({
+              id,
+              careerId,
+              playerId: row.playerId,
+              date: row.date,
+              rating: row.rating,
+              minutes: row.minutes,
+              position: row.position ?? null,
+            })
+            .onConflictDoUpdate({
+              target: playerMatchArchive.id,
+              set: {
+                rating: row.rating,
+                minutes: row.minutes,
+                position: row.position ?? null,
+                updatedAt: new Date().toISOString(),
+              },
+            })
             .run();
         }
       }

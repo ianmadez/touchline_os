@@ -25,6 +25,8 @@ import {
   PlayerPerformanceService,
 } from "./player-performance-service";
 import type { PlayerPerformancePayload } from "../squad/performance";
+import { PlayerHistoryService } from "./player-history-service";
+import type { PlayerHistoryPayload } from "../squad/history";
 import { FORMATIONS_REGISTRY } from "../tactics/formations";
 import { StorylineItem, DomainEvent } from "../events/types";
 import {
@@ -141,6 +143,8 @@ export interface CareerHydrationPayload extends CareerSummary {
    * would be one round trip per row of the table.
    */
   playerPerformance: PlayerPerformancePayload;
+  /** Every player's record at the club, season by season and match by match (Squad → Stats). */
+  playerHistory: PlayerHistoryPayload;
 }
 
 /** One club in the division, as the save describes it. */
@@ -171,6 +175,7 @@ export class CareerService {
   private valueService = new ValueService();
   private userProfileService = new UserProfileService();
   private playerPerformanceService = new PlayerPerformanceService();
+  private playerHistoryService = new PlayerHistoryService();
 
   /** Deletes a career row; its child rows follow via the schema's foreign keys. */
   async deleteCareer(careerId: string): Promise<void> {
@@ -263,6 +268,7 @@ export class CareerService {
     const valuations = await this.valueService.valueSquad(careerId, players);
     // One read for the whole squad: the save's rating history joined to the manager's logged debriefs.
     const playerPerformance = await this.playerPerformanceService.load(careerId, career.inGameDate);
+    const playerHistory = await this.playerHistoryService.load(careerId);
 
     return {
       careerId: career.id,
@@ -281,6 +287,7 @@ export class CareerService {
       seasonState,
       valuations,
       playerPerformance,
+      playerHistory,
       leagueTeams: leagueTeamRows
         .map((row) => ({
           teamId: row.teamId,

@@ -1824,6 +1824,29 @@ export const playerMatchRatings = sqliteTable(
 
 export type PlayerMatchRatingRecord = typeof playerMatchRatings.$inferSelect;
 
+// `player_match_archive` is the PERMANENT copy of `player_match_ratings`. The save drops old seasons and
+// the ratings table follows it on every sync; this one is only ever upserted, so a player's history at the
+// club survives the game forgetting it. One row per player per match day.
+export const playerMatchArchive = sqliteTable(
+  "player_match_archive",
+  {
+    id: text("id").primaryKey(), // `${careerId}_${playerId}_${date}`
+    careerId: text("career_id")
+      .notNull()
+      .references(() => careers.id, { onDelete: "cascade" }),
+    playerId: integer("player_id").notNull(),
+    /** YYYYMMDD, as the save records it. */
+    date: integer("date").notNull(),
+    rating: integer("rating").notNull(),
+    minutes: integer("minutes").notNull(),
+    position: integer("position"),
+    updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  },
+  (table) => ({
+    careerPlayerIdx: index("idx_player_match_archive_career_player").on(table.careerId, table.playerId),
+  })
+);
+
 // ============================================================================
 // COMPETITION TEAMS (every division's real record, not just our zeroed one)
 // ============================================================================

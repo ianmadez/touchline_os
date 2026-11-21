@@ -10,6 +10,8 @@ import { SquadTable } from "./squad-table";
 import { ScoutSearch } from "./scout-search";
 import { TransferDesk } from "./transfer-desk";
 import { YouthAcademyPanel } from "./youth-academy-panel";
+import { PlayerStatsView } from "./player-stats-view";
+import type { PlayerHistoryPayload } from "@/lib/squad/history";
 
 /**
  * The Squad section.
@@ -18,13 +20,14 @@ import { YouthAcademyPanel } from "./youth-academy-panel";
  * They sit together because a manager moves between the three in one thought, and because the
  * scouting board and the transfers desk are two views of the same shortlist rather than two lists.
  */
-type SquadSubTab = "SQUAD" | "SCOUTING" | "TRANSFERS" | "YOUTH";
+type SquadSubTab = "SQUAD" | "SCOUTING" | "TRANSFERS" | "YOUTH" | "STATS";
 
 const SUB_TABS: ReadonlyArray<SubTabOption<SquadSubTab>> = [
   { id: "SQUAD", label: "Squad" },
   { id: "SCOUTING", label: "Scouting", tour: "squad-subtab-SCOUTING" },
   { id: "TRANSFERS", label: "Transfers", tour: "squad-subtab-TRANSFERS" },
   { id: "YOUTH", label: "Youth", tour: "squad-subtab-YOUTH" },
+  { id: "STATS", label: "Stats", tour: "squad-subtab-STATS" },
 ];
 
 /** The box narrows the squad list, the scouting board and the academy. */
@@ -32,6 +35,7 @@ const SEARCH_PLACEHOLDERS: Record<Exclude<SquadSubTab, "TRANSFERS">, string> = {
   SQUAD: "Search your squad by name or position",
   SCOUTING: "Search the board by name, club or position",
   YOUTH: "Search academy prospects by name or position",
+  STATS: "Search player records by name or position",
 };
 
 export function SquadView({
@@ -42,6 +46,7 @@ export function SquadView({
   onSelectPlayerFromStats,
   currencySymbol = "£",
   playerPerformance = null,
+  playerHistory = null,
 }: {
   careerId: string | null;
   players: EnrichedPlayer[];
@@ -53,6 +58,8 @@ export function SquadView({
   currencySymbol?: string;
   /** The season's per-player match record, for the table's match-stats mode. */
   playerPerformance?: PlayerPerformancePayload | null;
+  /** Every player's record at the club, for the Stats tab. */
+  playerHistory?: PlayerHistoryPayload | null;
 }) {
   const [subTab, setSubTab] = useState<SquadSubTab>("SQUAD");
   const [query, setQuery] = useState("");
@@ -114,6 +121,8 @@ export function SquadView({
           </div>
         </>
       )}
+
+      {subTab === "STATS" && <PlayerStatsView history={playerHistory} query={query} />}
 
       {subTab === "SCOUTING" &&
         (careerId ? (
