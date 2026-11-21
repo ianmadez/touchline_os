@@ -82,6 +82,10 @@ const WORLD_POOL_LIMIT = 30_000;
  */
 const WORLD_PLAYER_FIELDS: readonly string[] = [
   "playerid",
+  // Name ids into `dcplayernames`, the in-save name table that names DLC, live-update and modded players.
+  "firstnameid",
+  "lastnameid",
+  "commonnameid",
   /**
    * Read so the pool can be restricted to men's football AT DECODE TIME.
    *
@@ -2566,6 +2570,40 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       if (id !== null) squadPlayerIds.add(id);
     }
 
+    // ---- Players out on loan -------------------------------------------------------------------
+    //
+    // A player loaned OUT is linked to the borrowing club in `teamplayerlinks`, so the club filter above
+    // never sees him even though he is still the manager's player. `playerloans` names the parent club
+    // (`teamidloanedfrom`), which is how he is found. His link at the loan club supplies form and injury.
+    const loanedOut = new Map<number, Row>();
+    if (clubId !== null) {
+      for (const row of decodeTable("playerloans", {
+        filter: (row) => num(row, "teamidloanedfrom") === clubId,
+      })) {
+        const id = num(row, "playerid");
+        if (id !== null && !squadPlayerIds.has(id) && !loanedOut.has(id)) loanedOut.set(id, row);
+      }
+    }
+    const loanLinkByPlayer = new Map<number, Row>();
+    if (loanedOut.size > 0) {
+      for (const link of decodeTable("teamplayerlinks", {
+        unregistered: true,
+        filter: (row) => {
+          const id = num(row, "playerid");
+          return id !== null && loanedOut.has(id) && num(row, "teamid") !== clubId;
+        },
+      })) {
+        const id = num(link, "playerid");
+        if (id !== null && !loanLinkByPlayer.has(id)) loanLinkByPlayer.set(id, link);
+      }
+    }
+    const loanTeamNames = new Map<number, string>();
+    for (const team of (extractedTables.teams as Row[] | undefined) ?? []) {
+      const id = num(team, "teamid");
+      const name = str(team, "teamname");
+      if (id !== null && name && !loanTeamNames.has(id)) loanTeamNames.set(id, name);
+    }
+
     // ---- The academy ---------------------------------------------------------------------------
     //
     // Academy players are NOT in `teamplayerlinks`: they are unpromoted, so no row links them to the
@@ -2596,7 +2634,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       limit: Math.max(this.options.rowLimit * 2, 120),
       filter: (row) => {
         const playerId = num(row, "playerid");
-        if (playerId !== null && squadPlayerIds.has(playerId)) return true;
+        if (playerId !== null && (squadPlayerIds.has(playerId) || loanedOut.has(playerId))) return true;
         return clubId !== null && num(row, "teamid") === clubId;
       },
     });
@@ -2624,13 +2662,13 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       },
     });
     const players = decodeTable("players", {
-      limit: Math.max(squadPlayerIds.size * 10, 500),
+      limit: Math.max((squadPlayerIds.size + loanedOut.size) * 10, 500),
       filter: (row) => {
         const id = num(row, "playerid");
         if (id === null) return false;
         // Academy ids are included so a prospect has a name, a rating and a position. They never reach
         // `squadSample` - that list is built from the team-sheet links, not from this one.
-        return squadPlayerIds.has(id) || youthIds.has(id);
+        return squadPlayerIds.has(id) || loanedOut.has(id) || youthIds.has(id);
       },
     });
 
@@ -2645,7 +2683,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       if (id !== null && !contractByPlayer.has(id)) contractByPlayer.set(id, contract);
     }
 
-    const editedNames = decodeTable("editedplayernames", { limit: 2000 });
+    const editedNames = decodeTable("editedplayernames");
     const editedByPlayer = new Map<number, string>();
     for (const row of editedNames) {
       const id = num(row, "playerid");
@@ -2655,6 +2693,40 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         [str(row, "firstname"), str(row, "surname")].filter(Boolean).join(" ").trim();
       if (name) editedByPlayer.set(id, name);
     }
+
+    // `dcplayernames` (nameid -> name) is the save's own name table for players the base game DB does not
+    // name: live-update additions, DLC and modded players (e.g. Live Editor real-life academy players).
+    // `players.firstnameid/lastnameid/commonnameid` point into it. Without this those players had no name,
+    // and the squad list hid every unnamed player, so they looked missing.
+    const dcNames = new Map<number, string>();
+    for (const row of decodeTable("dcplayernames", { unregistered: true })) {
+      const id = num(row, "nameid");
+      const text = str(row, "name");
+      if (id !== null && id > 0 && text) dcNames.set(id, text);
+    }
+    const resolveName = (
+      playerId: number | null,
+      player: Row | undefined
+    ): { name: string | null; nameSource: SquadEntry["nameSource"] } => {
+      if (playerId === null) return { name: null, nameSource: "unresolved" };
+      const edited = editedByPlayer.get(playerId);
+      if (edited) return { name: edited, nameSource: "edited-in-save" };
+      if (player !== undefined) {
+        const dc = (field: string): string | undefined => {
+          const id = num(player, field);
+          return id !== null && id > 0 ? dcNames.get(id) : undefined;
+        };
+        const common = dc("commonnameid");
+        const last = dc("lastnameid");
+        const first = dc("firstnameid");
+        // A lone first name is not enough to identify a player; a common or last name is.
+        const fromDc = common ?? (last ? [first, last].filter(Boolean).join(" ") : undefined);
+        if (fromDc) return { name: fromDc, nameSource: "save-name-table" };
+      }
+      const imported = this.names.get(playerId);
+      if (imported) return { name: imported, nameSource: "imported-name-table" };
+      return { name: null, nameSource: "unresolved" };
+    };
 
     /**
      * The three history tables, decoded HERE so the in-game date can see them.
@@ -2699,20 +2771,20 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       (latestDate > 0 ? yyyymmddToDate(latestDate) : null) ??
       new Date(Date.UTC(2025 + (seasonCount ?? 0), 11, 31));
 
-    const squadSample: SquadEntry[] = squadLinks.map((link) => {
+    const squadRows: Array<{ link: Row; loan: Row | null }> = [
+      ...squadLinks.map((link) => ({ link, loan: null })),
+      ...[...loanedOut.entries()].map(([id, loan]) => ({
+        link: loanLinkByPlayer.get(id) ?? { playerid: id },
+        loan,
+      })),
+    ];
+    const squadSample: SquadEntry[] = squadRows.map(({ link, loan }) => {
       const playerId = num(link, "playerid");
+      const loanTeamId = loan === null ? null : num(link, "teamid");
       const player = playerId !== null ? playerById.get(playerId) : undefined;
       const contract = playerId !== null ? contractByPlayer.get(playerId) : undefined;
 
-      let name = playerId !== null ? editedByPlayer.get(playerId) ?? null : null;
-      let nameSource: SquadEntry["nameSource"] = name ? "edited-in-save" : "unresolved";
-      if (!name && playerId !== null) {
-        const imported = this.names.get(playerId);
-        if (imported) {
-          name = imported;
-          nameSource = "imported-name-table";
-        }
-      }
+      const { name, nameSource } = resolveName(playerId, player);
 
       // Prefer the player's primary preference, then the team-sheet position. `preferredposition2`
       // is deliberately skipped (a secondary position must not outrank the team sheet) and
@@ -2737,7 +2809,8 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         nameSource,
         position: rawPosCode,
         primaryPosition: positionCodeToRole(rawPosCode),
-        jersey: num(link, "jerseynumber"),
+        // The shirt number at the loan club is not his number here.
+        jersey: loan === null ? num(link, "jerseynumber") : null,
         overall: num(player, "overallrating") ?? num(link, "overallrating"),
         potential: num(player, "potential"),
         age: computedAge,
@@ -2752,6 +2825,14 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         hasHighQualityHead: headQuality === null ? null : headQuality > 0,
         headAssetId: num(player, "headassetid"),
         avatarPomId: num(player, "avatarpomid"),
+        onLoan:
+          loan === null
+            ? null
+            : {
+                teamId: loanTeamId,
+                teamName: loanTeamId === null ? null : loanTeamNames.get(loanTeamId) ?? null,
+                endDate: num(loan, "loandateend"),
+              },
       };
     });
 
@@ -2793,15 +2874,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
         const player = playerById.get(playerId);
         const history = youthHistoryByPlayer.get(playerId);
 
-        let name = editedByPlayer.get(playerId) ?? null;
-        let nameSource = name ? "edited-in-save" : "unresolved";
-        if (!name) {
-          const imported = this.names.get(playerId);
-          if (imported) {
-            name = imported;
-            nameSource = "imported-name-table";
-          }
-        }
+        const { name, nameSource } = resolveName(playerId, player);
 
         // `-1` is the game's "no preference" sentinel, so it is filtered here rather than accepted by
         // a `??` chain and mapped to UNKNOWN - the same rule `squadSample` applies.
@@ -2905,15 +2978,7 @@ export class FeasibilitySaveParser implements CareerDataProvider {
       const rawPosCode = num(row, "preferredposition1");
       const position = rawPosCode !== null && rawPosCode >= 0 ? rawPosCode : null;
 
-      let name = editedByPlayer.get(playerId) ?? null;
-      let nameSource: SquadEntry["nameSource"] = name ? "edited-in-save" : "unresolved";
-      if (!name) {
-        const imported = this.names.get(playerId);
-        if (imported) {
-          name = imported;
-          nameSource = "imported-name-table";
-        }
-      }
+      const { name, nameSource } = resolveName(playerId, row);
 
       const clubId = clubByPlayer.get(playerId) ?? null;
       const nationalityId = nationalityCodeOf(row);

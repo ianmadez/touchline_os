@@ -1234,6 +1234,10 @@ export default function TouchlineApp() {
              * deliberately removing one, which is why the two are treated differently.
              */
             name: profileData.displayName === undefined ? p.name : profileData.displayName || p.name,
+            // Mirrors the service: a typed name counts as a name, so the "name needed" marker clears now.
+            nameResolved:
+              p.nameSource !== "unresolved" ||
+              Boolean(profileData.displayName ?? p.userProfile?.displayName),
             userProfile: {
               assignedRole: profileData.assignedRole,
               trustLevel: profileData.trustLevel,

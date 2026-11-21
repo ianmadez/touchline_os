@@ -184,6 +184,10 @@ export const players = sqliteTable(
     hasHighQualityHead: integer("has_high_quality_head", { mode: "boolean" }),
     headAssetId: integer("head_asset_id"),
     avatarPomId: integer("avatar_pom_id"),
+    // Set while the player is out on loan from the manager's club (`playerloans`); null otherwise.
+    onLoanTeamId: integer("on_loan_team_id"),
+    onLoanTeamName: text("on_loan_team_name"),
+    loanEndDate: integer("loan_end_date"),
     wage: integer("wage").notNull().default(0),
     wageProvenance: text("wage_provenance", { enum: provenanceEnum }).notNull().default("DERIVED"),
     isYouthProspect: integer("is_youth_prospect", { mode: "boolean" }).notNull().default(false),

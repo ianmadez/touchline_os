@@ -2,12 +2,56 @@
 
 import React, { useMemo, useState } from "react";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
-import { UNKNOWN_POSITION } from "@/lib/parser/interface";
+import { UNKNOWN_POSITION, eaDaysToDate } from "@/lib/parser/interface";
 import { describeTimeOut, isInjured } from "@/lib/squad/injury";
 import type { PlayerPerformancePayload } from "@/lib/squad/performance";
 import { PlayerFace } from "./player-face";
 import { RatingBadge } from "./rating-sparkline";
 import { IconTrend } from "@/components/ui/icons";
+
+/** "On loan" and "name needed" markers, shared by the desktop rows and the phone cards. */
+function PlayerStatusTags({ player }: { player: EnrichedPlayer }) {
+  const loanEnd = formatSaveDate(player.loanEndDate);
+  return (
+    <>
+      {player.onLoanTeamId !== null && (
+        <span
+          className="inline-flex min-w-0 max-w-[11rem] shrink items-center whitespace-nowrap rounded border border-sky-300 bg-sky-50 px-1.5 py-0.5 font-sub text-[10px] font-bold uppercase tracking-wider text-sky-800 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-300"
+          title={
+            `On loan${player.onLoanTeamName ? ` at ${player.onLoanTeamName}` : ""}` +
+            (loanEnd ? ` until ${loanEnd}` : "")
+          }
+        >
+          <span className="shrink-0">On loan</span>
+          {player.onLoanTeamName && (
+            <span className="ml-1 min-w-0 truncate normal-case tracking-normal">· {player.onLoanTeamName}</span>
+          )}
+        </span>
+      )}
+      {!player.nameResolved && (
+        <span
+          className="inline-flex shrink-0 items-center whitespace-nowrap rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 font-sub text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300"
+          title="This save does not store his name. Open him to add it."
+        >
+          Name needed
+        </span>
+      )}
+    </>
+  );
+}
+
+/** A save date (EA day count, the game's DATE field) as "12 Jan 2027", or null when absent. */
+function formatSaveDate(value: number | null): string | null {
+  if (value === null || value <= 0) return null;
+  const date = eaDaysToDate(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
 
 interface SquadTableProps {
   players: EnrichedPlayer[];
@@ -136,10 +180,26 @@ export function SquadTable({
     return text.replace(/_/g, " ").trim();
   };
 
+  const loanCount = players.filter((p) => p.onLoanTeamId !== null).length;
+  const unnamedCount = players.filter((p) => !p.nameResolved).length;
+  const filterChips = [
+    "ALL",
+    "INJURED",
+    "YOUTH",
+    "UNTOUCHABLE",
+    "SURPLUS",
+    ...(loanCount > 0 ? ["ON LOAN"] : []),
+    ...(unnamedCount > 0 ? ["UNNAMED"] : []),
+  ];
+
   const filteredPlayers = players.filter((p) => {
-    // A placeholder name is not a name. Every list here excludes a player the save never named, with
-    // one exception on purpose: the Youth academy, where he can actually be given one.
-    if (!p.nameResolved) return false;
+    // Unnamed players stay in the squad list. Hiding them made real squad members (modded or
+    // generated players the name tables don't cover) look like the save had lost them.
+    if (filterRole === "ON LOAN") return p.onLoanTeamId !== null;
+    if (filterRole === "UNNAMED") return !p.nameResolved;
+    // "All" is the whole registered squad, loanees included, because that is how a manager counts it.
+    // Every narrower view is about who is actually at the club, so loanees drop out of those.
+    if (filterRole !== "ALL" && p.onLoanTeamId !== null) return false;
     if (filterRole === "INJURED") return isInjured(p.userProfile?.injury, inGameDate);
     if (filterRole === "YOUTH") return p.isYouthProspect;
     if (filterRole === "UNTOUCHABLE") return p.userProfile?.importanceMarker === "UNTOUCHABLE";
@@ -246,7 +306,7 @@ export function SquadTable({
       <div className="p-4 border-b border-slate-200 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
           {!statsMode &&
-            ["ALL", "INJURED", "YOUTH", "UNTOUCHABLE", "SURPLUS"].map((f) => (
+            filterChips.map((f) => (
               <button
                 key={f}
                 onClick={() => setFilterRole(f)}
@@ -290,10 +350,28 @@ export function SquadTable({
             <>
               Showing <span className="text-amber-400 font-bold">{sortedPlayers.length}</span> squad
               members
+              {filterRole === "ALL" && loanCount > 0 ? ` · ${loanCount} out on loan` : ""}
             </>
           )}
         </span>
       </div>
+
+      {!statsMode && unnamedCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setFilterRole("UNNAMED")}
+          className="flex w-full items-start gap-2 border-b border-amber-300/60 bg-amber-50 px-4 py-2.5 text-left font-sub text-xs text-amber-900 transition-colors hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/15 cursor-pointer"
+        >
+          <span aria-hidden="true">✎</span>
+          <span>
+            <strong>
+              {unnamedCount} player{unnamedCount === 1 ? " has" : "s have"} no name in this save
+            </strong>{" "}
+            (usually generated or modded players). Open one and type his name: it is saved to your
+            career and kept on every sync.
+          </span>
+        </button>
+      )}
 
       {/* The headers are the desktop sort controls, and they vanish with the table on a phone.
           This is the same state, with a plain select, so sorting survives the card layout. */}
@@ -518,9 +596,10 @@ export function SquadTable({
                 className="group hover:bg-slate-100/80 dark:hover:bg-slate-800/40 cursor-pointer transition-colors duration-150"
               >
                 <td className="py-3 px-4 font-bold text-slate-900 dark:text-slate-100 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">
-                  <span className="flex items-center gap-2.5 min-w-0">
+                  <span className="flex min-w-0 max-w-[26rem] items-center gap-2">
                     <PlayerFace eaPlayerId={player.eaPlayerId} name={player.name} size={28} />
-                    <span className="truncate">{player.name}</span>
+                    <span className="min-w-0 truncate" title={player.name}>{player.name}</span>
+                    <PlayerStatusTags player={player} />
                   </span>
                 </td>
                 <td className="py-3 px-2 text-center">
@@ -662,6 +741,7 @@ export function SquadTable({
                       </span>
                     </span>
                     <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-sub text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      <PlayerStatusTags player={player} />
                       <span className="rounded border border-slate-200 bg-slate-100 px-1.5 py-0.5 font-bold text-slate-700 dark:border-slate-700/80 dark:bg-slate-800 dark:text-slate-300">
                         {player.primaryPosition || UNKNOWN_POSITION}
                       </span>

@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Hint } from "@/components/ui/hint";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
-import { KNOWN_POSITION_ROLES, UNKNOWN_POSITION } from "@/lib/parser/interface";
+import { KNOWN_POSITION_ROLES, UNKNOWN_POSITION, eaDaysToDate } from "@/lib/parser/interface";
 import {
   POSITION_GROUP_LABELS,
   TACTICAL_ROLES,
@@ -161,7 +161,7 @@ export function PlayerDrawer({
               <span className="font-sub text-[10px] text-amber-700 dark:text-amber-400 uppercase tracking-widest block">
                 Player Profile Dossier
               </span>
-              <h2 className="font-heading text-xl text-slate-900 dark:text-slate-100">
+              <h2 className="font-heading text-xl text-slate-900 dark:text-slate-100 break-words">
                 {displayName.trim() || player.name}
               </h2>
             </div>
@@ -172,6 +172,61 @@ export function PlayerDrawer({
               ✕
             </button>
           </div>
+
+          {player.onLoanTeamId !== null && (
+            <p className="mb-4 rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 font-sub text-xs text-sky-900 break-words dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200">
+              Out on loan{player.onLoanTeamName ? ` at ${player.onLoanTeamName}` : ""}
+              {player.loanEndDate !== null && player.loanEndDate > 0
+                ? ` until ${eaDaysToDate(player.loanEndDate).toLocaleDateString(undefined, {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                    timeZone: "UTC",
+                  })}`
+                : ""}
+              . He still belongs to your club.
+            </p>
+          )}
+
+          {player.nameSource === "unresolved" && !player.userProfile?.displayName && (
+            <form
+              className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-500/40 dark:bg-amber-500/10"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (displayName.trim()) handleSave();
+              }}
+            >
+              <label
+                htmlFor="unnamed-player-name"
+                className="block font-sub text-xs font-bold text-amber-900 dark:text-amber-200"
+              >
+                This save doesn&apos;t store his name
+              </label>
+              <p className="mt-0.5 font-sub text-[11px] text-amber-800/90 dark:text-amber-200/80">
+                Generated and modded players often come without one. Type it once and it stays on every
+                sync.
+              </p>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <input
+                  id="unnamed-player-name"
+                  type="text"
+                  autoFocus
+                  maxLength={60}
+                  placeholder="e.g. Shea Lacey"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="min-w-0 flex-1 rounded-lg border border-amber-300 bg-white p-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none dark:border-amber-500/40 dark:bg-slate-900 dark:text-slate-100"
+                />
+                <button
+                  type="submit"
+                  disabled={!displayName.trim()}
+                  className="min-h-10 shrink-0 rounded-lg bg-amber-500 px-4 font-sub text-xs font-bold uppercase tracking-wider text-slate-950 transition-colors hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                >
+                  Save name
+                </button>
+              </div>
+            </form>
+          )}
 
           {/* 3D Flip Card Container */}
           <div className="perspective-1000 mb-6">

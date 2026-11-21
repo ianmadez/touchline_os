@@ -80,6 +80,10 @@ export interface EnrichedPlayer {
    */
   attributes: Record<string, unknown> | null;
   isYouthProspect: boolean;
+  /** Set while the player is out on loan from the manager's club; null otherwise. */
+  onLoanTeamId: number | null;
+  onLoanTeamName: string | null;
+  loanEndDate: number | null;
   provenance: Provenance;
   latestSnapshotId: string | null;
   // User Profile Overlay
@@ -199,6 +203,8 @@ export class SquadService {
       };
       return {
         ...player,
+        // The manager's typed name wins over a placeholder, so it survives reloads and re-syncs.
+        name: profile?.displayName || player.name,
         form: player.form,
         // A placeholder name (`#12345`) is a string like any other, so "does he have a name" cannot be
         // answered by looking at `name`. The save's own flag decides it, and a name the manager typed
@@ -290,6 +296,10 @@ export class SquadService {
       // past snapshot to it would quietly show today's numbers under a historical heading. Null.
       attributes: null,
       isYouthProspect: p.isYouthProspect,
+      // Snapshots do not record loans; a historical view shows the squad as it was linked.
+      onLoanTeamId: null,
+      onLoanTeamName: null,
+      loanEndDate: null,
       provenance: p.provenance as Provenance,
     }));
   }

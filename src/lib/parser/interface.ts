@@ -312,7 +312,7 @@ export function calculateAgeFromBirthdate(
 export interface SquadEntry {
   playerId: number;
   name: string;
-  nameSource: "imported-name-table" | "edited-in-save" | "unresolved";
+  nameSource: "imported-name-table" | "edited-in-save" | "save-name-table" | "unresolved";
   position: number | null;
   primaryPosition: string;
   jersey: number | null;
@@ -340,6 +340,8 @@ export interface SquadEntry {
   hasHighQualityHead: boolean | null;
   headAssetId: number | null;
   avatarPomId: number | null;
+  /** Set when the player is out on loan from the manager's club (`playerloans`). Null when he is not. */
+  onLoan: { teamId: number | null; teamName: string | null; endDate: number | null } | null;
 }
 
 /**

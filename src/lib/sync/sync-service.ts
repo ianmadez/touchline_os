@@ -613,6 +613,7 @@ export class SyncService {
               hasHighQualityHead: entry.hasHighQualityHead,
               headAssetId: entry.headAssetId,
               avatarPomId: entry.avatarPomId,
+              onLoan: entry.onLoan ?? null,
               wage: entry.wage ?? 0,
               isYouthProspect: (entry.age !== null && entry.age <= 21),
             }))
@@ -643,6 +644,7 @@ export class SyncService {
                 hasHighQualityHead: null,
                 headAssetId: null,
                 avatarPomId: null,
+                onLoan: null,
                 wage: Number(p.wage) || 0,
                 isYouthProspect: Boolean(p.is_youth),
               }));
@@ -807,6 +809,9 @@ export class SyncService {
             hasHighQualityHead: player.hasHighQualityHead,
             headAssetId: player.headAssetId,
             avatarPomId: player.avatarPomId,
+            onLoanTeamId: player.onLoan?.teamId ?? null,
+            onLoanTeamName: player.onLoan?.teamName ?? null,
+            loanEndDate: player.onLoan?.endDate ?? null,
             wage: player.wage,
             wageProvenance: "DERIVED",
             isYouthProspect: player.isYouthProspect,
@@ -836,6 +841,9 @@ export class SyncService {
               hasHighQualityHead: player.hasHighQualityHead,
               headAssetId: player.headAssetId,
               avatarPomId: player.avatarPomId,
+              onLoanTeamId: player.onLoan?.teamId ?? null,
+              onLoanTeamName: player.onLoan?.teamName ?? null,
+              loanEndDate: player.onLoan?.endDate ?? null,
               // Previously omitted from the conflict set, so a re-derivation could not correct a
               // stale youth flag on an existing row.
               isYouthProspect: player.isYouthProspect,

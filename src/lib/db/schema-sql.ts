@@ -994,4 +994,9 @@ export const SCHEMA_MIGRATIONS: string[] = [
     "CREATE INDEX IF NOT EXISTS idx_assignments_career_status ON assignments(career_id, status);",
     "CREATE TABLE IF NOT EXISTS rules_profile (id TEXT PRIMARY KEY, career_id TEXT NOT NULL REFERENCES careers(id) ON DELETE CASCADE, toggles_json TEXT NOT NULL DEFAULT '{}', notes TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_rules_profile_career ON rules_profile(career_id);",
+    // Players loaned OUT are linked to the borrowing club, so they were missing from the squad. The
+    // parser now finds them through `playerloans`; these columns say where they are and until when.
+    "ALTER TABLE players ADD COLUMN on_loan_team_id INTEGER;",
+    "ALTER TABLE players ADD COLUMN on_loan_team_name TEXT;",
+    "ALTER TABLE players ADD COLUMN loan_end_date INTEGER;",
   ];
