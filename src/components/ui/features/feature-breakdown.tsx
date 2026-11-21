@@ -177,9 +177,9 @@ const SECTIONS: Section[] = [
   {
     id: "squad",
     label: "04 · Squad",
-    title: "Squad, Scouting & Academy",
+    title: "Squad, Scouting, Academy & Stats",
     intro:
-      "Your squad as the save has it, plus your own read on every player, the scouting operation, the transfer plan and the kids coming through.",
+      "Your squad as the save has it, plus your own read on every player, the scouting operation, the transfer plan, the kids coming through and every player's record at the club.",
     features: [
       {
         title: "The Squad List",
@@ -213,6 +213,11 @@ const SECTIONS: Section[] = [
         title: "Youth Academy",
         body: "Every prospect with current ability, potential, scout tier, rating swing and time in the academy. When your scouts' reports disagree, you see the range instead of one report picked at random. Regens the save leaves nameless can be given a name, and it sticks for the whole career.",
         shot: shot("academy", "Academy prospects with ability, potential and scout tier", 1240, 520),
+        wide: true,
+      },
+      {
+        title: "Player Stats, Season By Season",
+        body: "FC and FIFA forget old seasons; TouchlineOS doesn't. Every match rating the save holds is kept for good, alongside the goals, assists and opponents you log in debriefs. Open any player, former players included, to see his overview, a row per season, every match he played, and how his overall and potential grew sync by sync.",
         wide: true,
       },
     ],

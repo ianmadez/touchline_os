@@ -252,8 +252,8 @@ const TOURS: Record<string, TourStep[]> = {
     },
     {
       anchor: "squad-subtabs",
-      title: "Four rooms",
-      body: "Squad, Scouting, Transfers and Youth. Scouting and Transfers are two views of the same shortlist rather than two separate lists.",
+      title: "Five rooms",
+      body: "Squad, Scouting, Transfers, Youth and Stats. Scouting and Transfers are two views of the same shortlist rather than two separate lists.",
     },
     {
       anchor: "squad-subtab-SCOUTING",
@@ -264,6 +264,11 @@ const TOURS: Record<string, TourStep[]> = {
       anchor: "squad-subtab-YOUTH",
       title: "The academy",
       body: "Your youth prospects, read from the save's own academy table. A boy who is not in the senior squad yet still shows up in here.",
+    },
+    {
+      anchor: "squad-subtab-STATS",
+      title: "Stats",
+      body: "Every player's record at the club, season by season and match by match. The game forgets old seasons; this keeps them, former players included.",
     },
     {
       anchor: "squad-table",
@@ -485,6 +490,18 @@ const TOURS: Record<string, TourStep[]> = {
       anchor: "transfers-shortlist",
       title: "Who you are acting on",
       body: "Everyone you have shortlisted, with his cost beside him. Nothing here is a decision TouchlineOS makes for you.",
+    },
+  ],
+  "SQUAD::STATS": [
+    {
+      anchor: "stats-list",
+      title: "Everyone who has played for you",
+      body: "Apps, minutes, average rating, goals and assists across every season at the club. Ratings come from the save; goals and assists come from your debriefs. Tick the box to bring back players who have left.",
+    },
+    {
+      anchor: "stats-list",
+      title: "Open a player",
+      body: "His record has four tabs: an overview, a row per season, every match he played, and how his overall and potential grew over time.",
     },
   ],
   "SQUAD::YOUTH": [

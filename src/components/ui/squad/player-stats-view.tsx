@@ -114,7 +114,7 @@ export function PlayerStatsView({
 
   if (all.length === 0) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white/90 p-6 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900/90 dark:text-slate-300">
+      <div data-tour="stats-list" className="rounded-2xl border border-slate-200 bg-white/90 p-6 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900/90 dark:text-slate-300">
         No match record yet. Sync a save after playing a match, and every rating, goal and assist you log
         is kept here, season after season.
       </div>
@@ -122,7 +122,10 @@ export function PlayerStatsView({
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white/90 shadow-xl dark:border-slate-800/90 dark:bg-slate-900/90">
+    <div
+      data-tour="stats-list"
+      className="overflow-hidden rounded-2xl border border-slate-200 bg-white/90 shadow-xl dark:border-slate-800/90 dark:bg-slate-900/90"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4 dark:border-slate-800/80">
         <p className="font-sub text-xs text-slate-600 dark:text-slate-300">
           Every match and season at the club. <span className="text-slate-500 dark:text-slate-400">Ratings and minutes from the save; goals and assists from your debriefs.</span>
