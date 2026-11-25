@@ -48,6 +48,11 @@ export interface CurrentMatchContext {
   contributions: MatchContribution[];
   standoutPlayerIds: string[];
   matchDate?: string | null;
+  /**
+   * The match date of the first debrief the manager ever wrote: when he started using TouchlineOS on
+   * this career. A match before it is history from before the app, filled in after the fact.
+   */
+  loggingStartedOn?: string | null;
 }
 
 /** Never ask more than this many follow-up questions in one debrief, however many things are true. */
@@ -173,7 +178,16 @@ export function evaluateMatchAnomalies(
     const bTime = b.matchDate ? new Date(b.matchDate).getTime() : 0;
     return bTime - aTime; // newest first
   });
-  const recentHistory = sortedHistory.slice(0, 2);
+  // History from before the manager started using the app (a career picked up halfway): no prompts.
+  // Questions about form and follow-ups make sense for a match he has just played, not one he is
+  // reconstructing from months ago.
+  if (current.matchDate && current.loggingStartedOn && current.matchDate < current.loggingStartedOn) return [];
+
+  // Catching up a gap is still a real debrief, but "recent form" means the matches played BEFORE this
+  // one. Without a date, the newest logged matches stand in, as before.
+  const recentHistory = (
+    current.matchDate ? sortedHistory.filter((d) => d.matchDate && d.matchDate < current.matchDate!) : sortedHistory
+  ).slice(0, 2);
 
   const totalConceded = current.theirScore + recentHistory.reduce((sum, d) => sum + (d.awayScore ?? 0), 0);
   const totalScored = current.ourScore + recentHistory.reduce((sum, d) => sum + (d.homeScore ?? 0), 0);

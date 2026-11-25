@@ -758,9 +758,15 @@ export function DebriefView({
   // group debrief is MIRRORED into career_events as a MATCH_DEBRIEF row so every aggregate sees it,
   // but it belongs to its block, so counting or deleting it here would edit one entry in two places
   // and leave the two disagreeing.
-  const pastDebriefs = recentEvents.filter(
-    (evt) => evt.eventType === "MATCH_DEBRIEF" && evt.entityType === "MATCH"
-  );
+  // Newest match first, by the in-game date it was played rather than when it was typed in, so a season
+  // filled in retroactively still reads in order. Undated logs fall back to when they were written.
+  const pastDebriefs = recentEvents
+    .filter((evt) => evt.eventType === "MATCH_DEBRIEF" && evt.entityType === "MATCH")
+    .sort((a, b) => {
+      const dateOf = (evt: typeof a) =>
+        String((evt.payload as { matchDate?: unknown } | null)?.matchDate ?? "") || evt.timestamp.slice(0, 10);
+      return dateOf(b).localeCompare(dateOf(a)) || b.timestamp.localeCompare(a.timestamp);
+    });
 
   // The competitions this career can be in, and the stars on its debriefs. Both deferred by a tick because
   // setState must not run synchronously in an effect body.
@@ -907,6 +913,13 @@ export function DebriefView({
   }
   const overperformance = overperformanceAlert(overperformanceHistory);
 
+  // The match date of the first debrief ever written for this career, by when it was written.
+  const loggingStartedOn = useMemo(() => {
+    const first = [...pastDebriefs].sort((a, b) => a.timestamp.localeCompare(b.timestamp))[0];
+    const date = (first?.payload as { matchDate?: unknown } | undefined)?.matchDate;
+    return typeof date === "string" && date ? date : null;
+  }, [pastDebriefs]);
+
   const activeAnomalies = useMemo(() => {
     return evaluateMatchAnomalies(
       pastDebriefsPayloads,
@@ -919,6 +932,8 @@ export function DebriefView({
         opponent: resolveOpponentName(opponent.trim(), leagueTeams, opponentTeamId),
         contributions,
         standoutPlayerIds,
+        matchDate: matchDate || null,
+        loggingStartedOn,
       },
       playerNamesById
     );
@@ -932,6 +947,8 @@ export function DebriefView({
     contributions,
     standoutPlayerIds,
     playerNamesById,
+    matchDate,
+    loggingStartedOn,
   ]);
 
   const toggleStandout = (playerId: string) => {
