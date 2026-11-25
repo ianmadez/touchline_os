@@ -53,7 +53,10 @@ declare global {
  * Short enough that losing a tab costs nothing meaningful, long enough that the burst of writes in
  * one sync is persisted once rather than on every statement.
  */
-const PERSIST_INTERVAL_MS = 750;
+// Each flush exports and writes the WHOLE database image (tens of MB on a real career) on the main thread,
+// so the poll is kept off the typing path. Hiding the tab and leaving the page flush at once, so a longer
+// interval costs no safety.
+const PERSIST_INTERVAL_MS = 2000;
 
 const inBrowser = typeof window !== "undefined" && typeof navigator !== "undefined";
 
@@ -217,12 +220,16 @@ if (inBrowser) {
    */
   let schemaDirty = schemaMoved && loaded.kind === "loaded";
 
-  const persist = async (): Promise<void> => {
-    if (!handle || readOnly) return;
-    // `export()` hands back a `Uint8Array` over a possibly-shared buffer; the writable wants an
-    // `ArrayBufferView` over a plain one. Re-viewing the same bytes is what makes the types agree.
-    const snapshot = sqlite.export();
-    const bytes = Uint8Array.from(snapshot);
+  /** Writes the image; returns the change counter as it stands right after the export. */
+  const persist = async (): Promise<number> => {
+    if (!handle || readOnly) return writtenRows();
+    // `export()` returns a fresh, unshared buffer, so it is handed over as is. The old `Uint8Array.from`
+    // copied the whole image a second time only to satisfy a type.
+    const bytes = sqlite.export() as Uint8Array<ArrayBuffer>;
+    // sql.js re-opens the database inside `export()`, which resets `total_changes()` to 0. Reading the
+    // counter now (synchronously, before any other write can run) is what stops the next poll from seeing
+    // a "change" and exporting the entire image again for nothing.
+    const rowsAtExport = writtenRows();
 
     // Two independent choices, deliberately kept apart: HOW to replace the file (scratch + move when
     // the browser can, direct write when it cannot) and WHETHER two tabs are allowed to do it at once.
@@ -243,9 +250,10 @@ if (inBrowser) {
     // swapping the file out from under this one.
     if (navigator.locks) {
       await navigator.locks.request(PERSIST_LOCK, replace);
-      return;
+      return rowsAtExport;
     }
     await replace();
+    return rowsAtExport;
   };
 
   flushImpl = async () => {
@@ -254,10 +262,8 @@ if (inBrowser) {
     // Serialised, and the change is re-checked inside: two overlapping whole-image writes would
     // race, and the later one is not necessarily the newer one.
     queue = queue.then(async () => {
-      const changed = writtenRows();
-      if (changed === persistedRows && !schemaDirty) return;
-      await persist();
-      persistedRows = changed;
+      if (writtenRows() === persistedRows && !schemaDirty) return;
+      persistedRows = await persist();
       schemaDirty = false;
     });
     return queue;
@@ -269,6 +275,9 @@ if (inBrowser) {
 
   // Last chance to get the image out before the page goes away.
   window.addEventListener("pagehide", () => void flushImpl().catch(() => {}));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") void flushImpl().catch(() => {});
+  });
 
   // A migrated schema does not wait for the poll: the next read of this page may be the same session, and
   // a tab closed inside the interval would drop it. Fire and forget, because the app must not block its

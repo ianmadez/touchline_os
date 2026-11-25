@@ -60,8 +60,14 @@ const TICK_MS = 500;
 /** The pull poll. Only while the tab is visible: a background tab has nothing to redraw. */
 const PULL_EVERY_MS = 2_000;
 
-/** The drift check, and also the recovery path after a reconnect. */
-const DRIFT_EVERY_MS = 60_000;
+/**
+ * The drift check, and also the recovery path after a reconnect.
+ *
+ * It hashes every table on the main thread (tens of thousands of rows on a real career), so it is a safety
+ * net, not a heartbeat: every five minutes, not every one. Writes still replicate within seconds through
+ * the outbox; this only catches the two copies quietly disagreeing.
+ */
+const DRIFT_EVERY_MS = 5 * 60_000;
 
 /** The Web Lock every tab competes for. */
 const AGENT_LOCK = "touchline.sync.agent";
@@ -282,9 +288,17 @@ async function seed(careerId: string, force: boolean): Promise<boolean> {
  * A failed apply retries twice a second, and a repair is megabytes each way. Without this a disagreement
  * that cannot be repaired turns the healing mechanism into the thing that hammers the disk.
  */
-const REPAIR_COOLDOWN_MS = 60_000;
+const REPAIR_COOLDOWN_MS = 5 * 60_000;
+/** The longest a disagreement that will not heal is left before trying again. */
+const REPAIR_COOLDOWN_MAX_MS = 60 * 60_000;
 
 let lastRepair = 0;
+/**
+ * The current wait between repairs. Doubles each time a repair is followed by the copies STILL
+ * disagreeing, and resets once a check finds them equal. Without it, a difference a reseed cannot fix sent
+ * the whole career (megabytes, built on the main thread) to the PC every minute, forever.
+ */
+let repairCooldown = REPAIR_COOLDOWN_MS;
 
 /**
  * Replaces the PC's copy with this browser's.
@@ -297,7 +311,9 @@ let lastRepair = 0;
  * a state to report rather than an exception to crash on.
  */
 async function replaceReplicaWithPage(careerId: string): Promise<boolean> {
-  if (Date.now() - lastRepair < REPAIR_COOLDOWN_MS) return false;
+  if (Date.now() - lastRepair < repairCooldown) return false;
+  // A previous repair that did not take: wait longer before the next one.
+  if (lastRepair !== 0) repairCooldown = Math.min(repairCooldown * 2, REPAIR_COOLDOWN_MAX_MS);
   lastRepair = Date.now();
 
   const pkg = await buildTransferPackage(careerId);
@@ -343,7 +359,12 @@ async function driftCheck(careerId: string, clientId: string): Promise<void> {
       }
     }
   }
-  if (same) return;
+  if (same) {
+    // The copies agree, so whatever was wrong healed: the next disagreement starts from the short wait.
+    repairCooldown = REPAIR_COOLDOWN_MS;
+    lastRepair = 0;
+    return;
+  }
 
   await replaceReplicaWithPage(careerId);
 }

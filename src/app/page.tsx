@@ -1998,7 +1998,13 @@ export default function TouchlineApp() {
               formationName: formation.formationName,
               isDefault: formation.isDefault === true,
             }))}
-            onDebriefSubmitted={() => {
+            onDebriefSubmitted={(hydrated) => {
+              // The write already answered with the re-hydrated career: apply it rather than load it all again.
+              const payload = hydrated as (Partial<CareerHydrationPayload> & { success?: boolean; players?: unknown }) | undefined;
+              if (payload?.success && Array.isArray(payload.players)) {
+                applyHydration(payload);
+                return;
+              }
               if (careerId) {
                 apiFetch(`/api/career?careerId=${encodeURIComponent(careerId)}`)
                   .then((res) => res.json())

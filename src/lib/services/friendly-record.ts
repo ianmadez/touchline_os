@@ -139,6 +139,22 @@ export async function friendlyRecordThisSeason(careerId: string): Promise<Friend
   );
 }
 
+/**
+ * When the manager started using TouchlineOS on this career: the match date of the first debrief he
+ * ever WROTE (by when it was written, not when it was played). Matches dated before it are history
+ * filled in after the fact. Null when nothing dated has been logged.
+ */
+export function loggingStartedOn(rows: readonly { timestamp: string; payloadJson: string }[]): string | null {
+  const first = [...rows].sort((a, b) => a.timestamp.localeCompare(b.timestamp))[0];
+  if (!first) return null;
+  try {
+    const date = (JSON.parse(first.payloadJson) as { matchDate?: unknown }).matchDate;
+    return typeof date === "string" && date ? date.slice(0, 10) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The save's figure with declared friendlies taken out, never below zero. */
 export function withoutFriendlies(saveValue: number, friendlyValue: number): number {
   return Math.max(0, saveValue - friendlyValue);

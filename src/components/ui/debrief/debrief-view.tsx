@@ -87,7 +87,11 @@ interface DebriefViewProps {
    * that has never opened the Tactics tab, and the picker then offers only "not recorded".
    */
   formations?: FormationChoice[];
-  onDebriefSubmitted: () => void;
+  /**
+   * Called after a save, edit or delete. Every one of those writes answers with the re-hydrated career, which
+   * is passed up so the shell can apply it instead of loading the whole career a second time.
+   */
+  onDebriefSubmitted: (hydrated?: unknown) => void;
 }
 
 import type { CompetitionContext } from "@/lib/services/competition-service";
@@ -540,6 +544,16 @@ export function DebriefView({
   // Restoring happens once, and must not fight the seeded defaults, so the guard is a ref: the
   // setters below must not re-trigger the effect that reads it.
   const draftRestored = useRef(false);
+  /** A draft typed but not yet written (the write is debounced). Written on unmount or page hide. */
+  const pendingDraft = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    const flush = () => pendingDraft.current?.();
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
 
   useEffect(() => {
     if (draftRestored.current || !careerId) return;
@@ -581,7 +595,10 @@ export function DebriefView({
   useEffect(() => {
     if (!careerId || !draftRestored.current) return;
     // While a stored debrief is open for editing the form is not a draft, so nothing is saved here.
-    if (editingId !== null) return;
+    if (editingId !== null) {
+      pendingDraft.current = null;
+      return;
+    }
     const draft: DebriefDraft = {
       opponent,
       opponentTeamId,
@@ -606,8 +623,20 @@ export function DebriefView({
       concededMinutes,
       matchStats,
     };
-    if (!hasDraftContent(draft)) return;
-    writeDebriefDraft(careerId, MATCH_DRAFT_SURFACE, draft);
+    if (!hasDraftContent(draft)) {
+      pendingDraft.current = null;
+      return;
+    }
+    // Debounced: the write parses and rewrites every stored draft synchronously, which on every keystroke
+    // made typing stick. A pending write is flushed by the cleanup when the screen unmounts, so switching
+    // tab mid-word still keeps it.
+    const write = () => {
+      pendingDraft.current = null;
+      writeDebriefDraft(careerId, MATCH_DRAFT_SURFACE, draft);
+    };
+    pendingDraft.current = write;
+    const timer = window.setTimeout(write, 400);
+    return () => window.clearTimeout(timer);
   }, [
     careerId,
     editingId,
@@ -760,13 +789,19 @@ export function DebriefView({
   // and leave the two disagreeing.
   // Newest match first, by the in-game date it was played rather than when it was typed in, so a season
   // filled in retroactively still reads in order. Undated logs fall back to when they were written.
-  const pastDebriefs = recentEvents
-    .filter((evt) => evt.eventType === "MATCH_DEBRIEF" && evt.entityType === "MATCH")
-    .sort((a, b) => {
-      const dateOf = (evt: typeof a) =>
-        String((evt.payload as { matchDate?: unknown } | null)?.matchDate ?? "") || evt.timestamp.slice(0, 10);
-      return dateOf(b).localeCompare(dateOf(a)) || b.timestamp.localeCompare(a.timestamp);
-    });
+  // Memoised on the event list: rebuilt per keystroke, it handed every memo below a new array and made
+  // them all recompute while the manager typed.
+  const pastDebriefs = useMemo(
+    () =>
+      recentEvents
+        .filter((evt) => evt.eventType === "MATCH_DEBRIEF" && evt.entityType === "MATCH")
+        .sort((a, b) => {
+          const dateOf = (evt: typeof a) =>
+            String((evt.payload as { matchDate?: unknown } | null)?.matchDate ?? "") || evt.timestamp.slice(0, 10);
+          return dateOf(b).localeCompare(dateOf(a)) || b.timestamp.localeCompare(a.timestamp);
+        }),
+    [recentEvents]
+  );
 
   // The competitions this career can be in, and the stars on its debriefs. Both deferred by a tick because
   // setState must not run synchronously in an effect body.
@@ -1230,10 +1265,11 @@ export function DebriefView({
         setMediaComment("");
       }
       // The debrief is a record now, so the working note goes.
+      pendingDraft.current = null; // a debounced write must not bring the submitted draft back
       clearDebriefDraft(careerId, MATCH_DRAFT_SURFACE);
       clearForm();
       setEditingId(null);
-      onDebriefSubmitted();
+      onDebriefSubmitted(data);
     } catch (err) {
       setMessage((err as Error).message);
     } finally {
@@ -1266,7 +1302,7 @@ export function DebriefView({
       }
       setConfirmDeleteId(null);
       setMessage("Debrief deleted.");
-      onDebriefSubmitted();
+      onDebriefSubmitted(data);
     } catch (err) {
       setMessage((err as Error).message);
     } finally {

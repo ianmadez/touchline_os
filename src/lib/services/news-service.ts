@@ -12,6 +12,7 @@
  * evidence in the app.
  */
 
+import { loggingStartedOn } from "./friendly-record";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { careerEvents, careers, leagues, newsItems } from "../db/schema";
@@ -146,12 +147,21 @@ export class NewsService {
     // The debriefs, newest first, read straight from the event spine. `EventService.getTimeline` is
     // deliberately not used: it caps at 50 events of every type and excludes evidence rows, so a busy
     // career's matches would fall off the end of its own news.
-    const rows = await db
+    //
+    // All of them, then filtered and cut by MATCH date below. Taking the 40 most recently written let a
+    // manager back-filling a season push his genuinely recent matches out of the paper.
+    const allDebriefRows = await db
       .select()
       .from(careerEvents)
-      .where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "MATCH_DEBRIEF")))
-      .orderBy(desc(careerEvents.timestamp))
-      .limit(40);
+      .where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "MATCH_DEBRIEF")));
+    // Matches from before the manager started using TouchlineOS are history being filled in, not news:
+    // the desk does not report a July friendly logged in December as if it had just happened.
+    const startedOn = loggingStartedOn(allDebriefRows);
+    const rows = allDebriefRows.filter((row) => {
+      if (!startedOn) return true;
+      const date = asText(safeParse(row.payloadJson).matchDate);
+      return date === null || date.slice(0, 10) >= startedOn;
+    });
 
     // What the manager said to the press after each match, keyed by the debrief it belongs to. A comment
     // is a separate event rather than a rewrite of the debrief, and a REFUSAL is recorded explicitly, so
@@ -186,6 +196,7 @@ export class NewsService {
       }))
       .filter((entry): entry is { match: NewsMatch; chronology: number } => entry.match !== null)
       .sort((left, right) => right.chronology - left.chronology)
+      .slice(0, 40)
       .map((entry) => entry.match);
 
     // Rating movements the SAVE recorded between two snapshots. This is the one piece of player news

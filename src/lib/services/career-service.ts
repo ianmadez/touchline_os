@@ -1,3 +1,4 @@
+import { loggingStartedOn } from "./friendly-record";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { sha1Hex } from "../parser/sha";
 import { db } from "../db/client";
@@ -723,11 +724,26 @@ export class CareerService {
     //
     // Evaluates standout player mentions across the rolling 5-debrief window.
     // Opens or adopts a PRAISE storyline when a player reaches 3+ mentions.
-    const debriefRows = await db
+    const allDebriefRows = await db
       .select({ payloadJson: careerEvents.payloadJson, timestamp: careerEvents.timestamp })
       .from(careerEvents)
       .where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "MATCH_DEBRIEF")))
       .orderBy(asc(careerEvents.timestamp));
+    // The window is the last five MATCHES PLAYED, oldest first, not the last five typed in: back-filling a
+    // season would otherwise make July's games the "recent" ones and rewrite every trust badge. Matches from
+    // before the manager started using TouchlineOS are history and never feed praise at all.
+    const startedOn = loggingStartedOn(allDebriefRows);
+    const matchDateOf = (row: { payloadJson: string; timestamp: string }): string => {
+      try {
+        const date = (JSON.parse(row.payloadJson) as { matchDate?: unknown }).matchDate;
+        return typeof date === "string" && date ? date.slice(0, 10) : row.timestamp.slice(0, 10);
+      } catch {
+        return row.timestamp.slice(0, 10);
+      }
+    };
+    const debriefRows = allDebriefRows
+      .filter((row) => !startedOn || matchDateOf(row) >= startedOn)
+      .sort((a, b) => matchDateOf(a).localeCompare(matchDateOf(b)) || a.timestamp.localeCompare(b.timestamp));
 
     for (const fact of praiseFacts(debriefRows, squad)) {
       const playerName = String(fact.payload.name);
