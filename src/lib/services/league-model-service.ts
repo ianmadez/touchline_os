@@ -25,6 +25,7 @@
  */
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "../db/client";
+import { friendlyRecordThisSeason, withoutFriendlies } from "./friendly-record";
 import { careerEvents, careers, leaguePositions, seasonHistory, seasonProgress } from "../db/schema";
 
 export interface DebriefRecord {
@@ -304,8 +305,10 @@ export class LeagueModelService {
       .limit(1)
       .get();
 
-    const played = latestSeason?.gamesPlayed ?? 0;
-    const points = latestSeason?.points ?? 0;
+    // Declared pre-season friendlies are in the save's record too; they say nothing about the table.
+    const friendlies = await friendlyRecordThisSeason(careerId);
+    const played = withoutFriendlies(latestSeason?.gamesPlayed ?? 0, friendlies.played);
+    const points = withoutFriendlies(latestSeason?.points ?? 0, friendlies.points);
 
     if (played === 0) {
       return {

@@ -30,7 +30,16 @@ export type CoreEventType =
   // hydration and is idempotent by deterministic id.
   | "PLAYER_CONTRACT_EXPIRING"
   | "PLAYER_DEVELOPED"
-  | "PLAYER_POSITION_CHANGED";
+  | "PLAYER_POSITION_CHANGED"
+  // An academy player moved up to the first team. SAVE when a sync finds a former prospect in the
+  // squad; USER when the manager pressed Promote because the save had not shown it yet.
+  | "YOUTH_PROMOTED"
+  // A prospect gone from the academy without reaching the squad (SAVE), and the manager's word on
+  // what happened: most often he was released (USER).
+  | "YOUTH_LEFT"
+  | "YOUTH_RELEASED"
+  // A senior player paired with a prospect as his mentor. USER only; the save has no such idea.
+  | "YOUTH_MENTOR";
 
 export interface BaseEventPayload {
   careerId: string;

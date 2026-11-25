@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useSyncExternalStore } from "react";
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { PreseasonPanel } from "./preseason-panel";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import { ParsedCareerEvent } from "@/lib/services/event-service";
 import { PitchSlotAssignment } from "@/lib/services/tactics-service";
@@ -73,6 +74,8 @@ interface DashboardViewProps {
   onOpenStoryline: (storylineId: string) => void;
   /** Opens the news desk. Owned by the page, because the Dashboard tab has to be able to close it. */
   onOpenNews: () => void;
+  /** Called after the manager declares friendlies, so the shell can re-hydrate the season figures. */
+  onCareerChanged?: () => void;
 }
 
 export function DashboardView({
@@ -90,7 +93,9 @@ export function DashboardView({
   onSelectPlayer,
   onOpenStoryline,
   onOpenNews,
+  onCareerChanged,
 }: DashboardViewProps) {
+  const [preseasonOpen, setPreseasonOpen] = useState(false);
 
   // 1. Unassigned / Flagged Players
   const unassignedPlayers = players.filter((p) => !p.userProfile?.assignedRole);
@@ -228,8 +233,22 @@ export function DashboardView({
               <span>Season {seasonState.outlook?.seasonNumber ?? season} Objective</span>
               <span>•</span>
               <span className="text-slate-500 dark:text-slate-400">
-                {seasonState.outlook?.gamesPlayed ?? 0} matches played
+                {seasonState.outlook?.gamesPlayed ?? 0} competitive{" "}
+                {(seasonState.outlook?.gamesPlayed ?? 0) === 1 ? "match" : "matches"} played
               </span>
+              {(seasonState.outlook?.friendlies?.played ?? 0) > 0 && (
+                <span className="text-slate-500 dark:text-slate-400 normal-case">
+                  (+{seasonState.outlook?.friendlies.played} pre-season)
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => setPreseasonOpen((open) => !open)}
+                aria-expanded={preseasonOpen}
+                className="rounded-md border border-slate-300 px-1.5 py-0.5 text-[10px] text-slate-600 hover:border-[#E11D48] hover:text-[#E11D48] dark:border-slate-700 dark:text-slate-300 cursor-pointer"
+              >
+                Pre-season?
+              </button>
             </div>
             <h2 className="truncate font-heading text-lg text-slate-900 max-md:overflow-visible max-md:whitespace-normal dark:text-slate-100 uppercase tracking-wide">
               {seasonState.objectivePair?.user?.text ??
@@ -264,6 +283,43 @@ export function DashboardView({
               </span>
             </div>
           </div>
+
+          {(seasonState.outlook?.unloggedMatches ?? 0) > 0 && (
+            <div className="flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300/70 bg-amber-50/80 px-3 py-2 dark:border-amber-500/40 dark:bg-amber-500/10">
+              <p className="text-xs text-amber-900 dark:text-amber-200">
+                <strong className="tabular-nums">{seasonState.outlook?.unloggedMatches}</strong>{" "}
+                {seasonState.outlook?.unloggedMatches === 1 ? "match has" : "matches have"} no debrief yet. Your save counts them, but the
+                details (opponent, scorers, stats) are yours to add. Check Fixtures/Results in the in-game calendar.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPreseasonOpen(true)}
+                  className="cursor-pointer rounded-lg px-2.5 py-1 text-[10px] font-sub font-bold uppercase tracking-wider text-amber-800 hover:bg-amber-500/15 dark:text-amber-300"
+                >
+                  Some were friendlies
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab("DEBRIEF")}
+                  className="cursor-pointer rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-sub font-bold uppercase tracking-wider text-white hover:bg-amber-600"
+                >
+                  Log them
+                </button>
+              </div>
+            </div>
+          )}
+
+          {preseasonOpen && (
+            <PreseasonPanel
+              careerId={careerId}
+              saveGamesPlayed={seasonState.outlook?.saveGamesPlayed ?? seasonState.outlook?.gamesPlayed ?? 0}
+              declared={seasonState.outlook?.friendlies?.played ?? 0}
+              onClose={() => setPreseasonOpen(false)}
+              onSaved={() => onCareerChanged?.()}
+              onOpenDebriefs={() => onNavigateTab("DEBRIEF")}
+            />
+          )}
 
           <button
             type="button"

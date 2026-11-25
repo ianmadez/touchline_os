@@ -57,7 +57,7 @@ import { readHeadToHead } from "./head-to-head";
 import { addTransferEntry, nameTransferCounterparty, readTransferLedger, removeTransferEntry, searchLedgerPlayers } from "./transfer-ledger";
 import { readFinanceRules } from "./finance-rules";
 import { readDebriefMarks, setDebriefStar } from "./debrief";
-import { readYouthAcademy } from "./youth";
+import { readYouthAcademy, setYouthPromotion } from "./youth";
 import type { OperationResult } from "./types";
 
 /** The envelope the route handlers return when the body is not JSON at all. */
@@ -288,6 +288,8 @@ async function dispatch(call: Call): Promise<OperationResult<unknown>> {
 
     case "GET /api/youth":
       return readYouthAcademy(params.get("careerId"));
+    case "POST /api/youth":
+      return setYouthPromotion(raw ?? "");
 
     case "GET /api/news":
       return readNews(params.get("careerId"));

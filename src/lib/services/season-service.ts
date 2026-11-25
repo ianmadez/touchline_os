@@ -16,6 +16,7 @@
  */
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "../db/client";
+import { seasonLogThisSeason, withoutFriendlies, type FriendlyRecord } from "./friendly-record";
 import {
   careerEvents,
   careerObjectives,
@@ -95,6 +96,21 @@ export interface SeasonOutlook {
   goalsFor: number;
   goalsAgainst: number;
   goalDifference: number;
+  /**
+   * Pre-season friendlies the manager declared (debriefs logged as a friendly this season).
+   *
+   * The save counts friendlies in its season record, so every figure above has these taken OUT: a
+   * manager three friendlies into July reads 0 played, not 3. `saveGamesPlayed` keeps the raw count.
+   */
+  friendlies: FriendlyRecord;
+  /** The save's own all-competition count, friendlies included, exactly as read. */
+  saveGamesPlayed: number;
+  /**
+   * Matches the save says were played this season that have no debrief yet: the save's raw count
+   * minus every debrief logged for this season (friendlies included, since the save counts them).
+   * Logging a debrief never changes the save's figures, so this is the only place the two meet.
+   */
+  unloggedMatches: number;
   /**
    * The save's own points total divided by every match played, in every competition. Null with no
    * matches - a rate needs matches behind it.
@@ -238,8 +254,13 @@ export class SeasonService {
     if (!latest) return null;
 
     const career = await db.select().from(careers).where(eq(careers.id, careerId)).get();
-    const gamesPlayed = latest.gamesPlayed ?? 0;
-    const points = latest.points ?? 0;
+    // Declared friendlies come off the save's totals: it counts pre-season games in its season record.
+    const { friendlies, logged: debriefsLogged } = await seasonLogThisSeason(careerId);
+    const saveGamesPlayed = latest.gamesPlayed ?? 0;
+    const gamesPlayed = withoutFriendlies(saveGamesPlayed, friendlies.played);
+    const points = withoutFriendlies(latest.points ?? 0, friendlies.points);
+    const goalsFor = withoutFriendlies(latest.goalsFor ?? 0, friendlies.goalsFor);
+    const goalsAgainst = withoutFriendlies(latest.goalsAgainst ?? 0, friendlies.goalsAgainst);
     // The save's own record spans every competition, so this is an all-competition rate - not a
     // league rate. No projection is derived from it: extending it over league games remaining would
     // multiply a contaminated rate by a contaminated games-left count (see `SeasonOutlook`).
@@ -257,9 +278,12 @@ export class SeasonService {
       seasonLabel: this.labelFor(latest.season, latest.season, career?.currentSeason ?? null),
       gamesPlayed,
       points,
-      goalsFor: latest.goalsFor ?? 0,
-      goalsAgainst: latest.goalsAgainst ?? 0,
-      goalDifference: (latest.goalsFor ?? 0) - (latest.goalsAgainst ?? 0),
+      goalsFor,
+      goalsAgainst,
+      goalDifference: goalsFor - goalsAgainst,
+      friendlies,
+      saveGamesPlayed,
+      unloggedMatches: Math.max(0, saveGamesPlayed - debriefsLogged),
       allCompetitionPointsPerGame,
       loggedPosition: latestLogged?.position ?? null,
       loggedPositionDisputed: latestLogged?.disputed ?? false,

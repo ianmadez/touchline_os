@@ -97,7 +97,10 @@ export function SeasonPanel({ careerId, seasonState, onSeasonChange }: SeasonPan
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: "Played · all comps", value: String(outlook.gamesPlayed) },
+          {
+            label: outlook.friendlies?.played ? `Played · excl. ${outlook.friendlies.played} pre-season` : "Played · all comps",
+            value: String(outlook.gamesPlayed),
+          },
           { label: "Points · save's total", value: String(outlook.points) },
           { label: "Points per match", value: perGame },
           {

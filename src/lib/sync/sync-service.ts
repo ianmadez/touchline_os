@@ -891,6 +891,77 @@ export class SyncService {
       // log: a prospect who graduates or is released has to disappear from the table, and an upsert
       // would leave him sitting there forever with no row in the save behind him.
       const prospects = rawData.youthProspects ?? [];
+
+      // Graduation, read before the academy is wiped. The save removes a promoted prospect from
+      // `career_youthplayers` and gives him a squad row, so the only evidence is a player we last saw
+      // in the academy now standing in the first team. Also caught: a prospect still listed in the
+      // academy who already has a squad row. Recorded once per player by deterministic id.
+      const squadIds = new Set(nextPlayersState.map((player) => player.eaPlayerId));
+      const formerAcademy = tx
+        .select({
+          playerId: youthProspects.playerId,
+          name: youthProspects.name,
+          primaryPosition: youthProspects.primaryPosition,
+          overallRating: youthProspects.overallRating,
+          potentialRating: youthProspects.potentialRating,
+        })
+        .from(youthProspects)
+        .where(eq(youthProspects.careerId, careerId))
+        .all();
+      // The academy figures go with the event, so the Graduate Wall can show growth since promotion.
+      type AcademyFigures = { playerId: number; name: string | null; primaryPosition: string | null; overallRating: number | null; potentialRating: number | null };
+      const graduates = new Map<number, AcademyFigures>();
+      const currentAcademy: AcademyFigures[] = prospects.map((p) => ({
+        playerId: p.playerId,
+        name: p.name,
+        primaryPosition: p.primaryPosition,
+        overallRating: p.overallRating,
+        potentialRating: p.potentialRating,
+      }));
+      for (const row of [...formerAcademy, ...currentAcademy]) {
+        if (squadIds.has(row.playerId) && !graduates.has(row.playerId)) graduates.set(row.playerId, row);
+      }
+      for (const [playerId, figures] of graduates) {
+        tx.insert(careerEvents)
+          .values({
+            id: `evt_youth_promoted_${careerId}_${playerId}`,
+            careerId,
+            snapshotId: nextSnapshotId,
+            eventType: "YOUTH_PROMOTED",
+            source: "SAVE",
+            entityType: "PLAYER",
+            entityId: String(playerId),
+            payloadJson: JSON.stringify({
+              playerId,
+              name: figures.name,
+              via: "SAVE",
+              atPromotion: { overallRating: figures.overallRating, potentialRating: figures.potentialRating, primaryPosition: figures.primaryPosition },
+            }),
+          })
+          .onConflictDoNothing()
+          .run();
+      }
+
+      // Gone from the academy and not in the squad: the save does not say why, and most often he was
+      // released. Recorded once so the manager can declare it; his last academy figures go with it.
+      const stillInAcademy = new Set(prospects.map((p) => p.playerId));
+      for (const row of formerAcademy) {
+        if (stillInAcademy.has(row.playerId) || squadIds.has(row.playerId)) continue;
+        tx.insert(careerEvents)
+          .values({
+            id: `evt_youth_left_${careerId}_${row.playerId}`,
+            careerId,
+            snapshotId: nextSnapshotId,
+            eventType: "YOUTH_LEFT",
+            source: "SAVE",
+            entityType: "PLAYER",
+            entityId: String(row.playerId),
+            payloadJson: JSON.stringify(row),
+          })
+          .onConflictDoNothing()
+          .run();
+      }
+
       tx.delete(youthProspects).where(eq(youthProspects.careerId, careerId)).run();
       for (const prospect of prospects) {
         tx.insert(youthProspects)

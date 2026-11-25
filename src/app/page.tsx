@@ -1884,6 +1884,15 @@ export default function TouchlineApp() {
               patchSession({ openStorylineId: storylineId });
             }}
             onOpenNews={() => setNewsOpen(true)}
+            onCareerChanged={() => {
+              if (careerId) {
+                apiFetch(`/api/career?careerId=${encodeURIComponent(careerId)}`)
+                  .then((res) => res.json())
+                  .then((data) => {
+                    if (data.success) applyHydration(data);
+                  });
+              }
+            }}
             />
           </div>
           ))}

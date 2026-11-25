@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readYouthAcademy } from "@/lib/operations/youth";
+import { readYouthAcademy, setYouthPromotion } from "@/lib/operations/youth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,5 +12,10 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: Request) {
   const outcome = await readYouthAcademy(new URL(request.url).searchParams.get("careerId"));
+  return NextResponse.json(outcome.body, { status: outcome.status });
+}
+
+export async function POST(request: Request) {
+  const outcome = await setYouthPromotion(await request.text());
   return NextResponse.json(outcome.body, { status: outcome.status });
 }
