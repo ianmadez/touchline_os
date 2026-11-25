@@ -256,6 +256,8 @@ export function SettingsView({
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState<"export" | "import" | "reset" | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
+  /** Which action the result belongs to, so it is shown beside the button that produced it. */
+  const [resultFor, setResultFor] = useState<"backup" | "reset" | null>(null);
   const importInput = React.useRef<HTMLInputElement>(null);
 
   const activeCareerId = diagnostics?.activeCareer?.careerId ?? null;
@@ -283,6 +285,7 @@ export function SettingsView({
   const runExport = async () => {
     setBusy("export");
     setResult(null);
+    setResultFor("backup");
     try {
       setResult(await onExport());
     } finally {
@@ -293,6 +296,7 @@ export function SettingsView({
   const runImport = async (file: File) => {
     setBusy("import");
     setResult(null);
+    setResultFor("backup");
     try {
       // Read as text here rather than streaming the file: the whole package is parsed in one go on
       // either runtime, and a page has no path to hand over instead.
@@ -309,6 +313,7 @@ export function SettingsView({
   const runReset = async () => {
     setBusy("reset");
     setResult(null);
+    setResultFor("reset");
     try {
       setResult(await onResetCareer());
       setConfirmText("");
@@ -638,6 +643,27 @@ export function SettingsView({
               />
             </div>
 
+            {busy === "import" && (
+              <p role="status" className="rounded-xl border border-sky-300 bg-sky-50 px-4 py-3 font-sub text-xs text-sky-800 dark:border-sky-500/40 dark:bg-sky-500/10 dark:text-sky-200">
+                Reading the backup and rebuilding the career. A big file takes a few seconds…
+              </p>
+            )}
+            {result && resultFor === "backup" && (
+              <div
+                role={result.ok ? "status" : "alert"}
+                className={`flex items-start gap-3 rounded-xl border px-4 py-3 font-sub text-xs ${
+                  result.ok
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/50 dark:bg-emerald-500/10 dark:text-emerald-200"
+                    : "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/10 dark:text-rose-300"
+                }`}
+              >
+                <div>
+                  <p className="font-bold uppercase tracking-wider">{result.ok ? "Done" : "That didn't work"}</p>
+                  <p className="mt-0.5 font-sans">{result.message}</p>
+                </div>
+              </div>
+            )}
+
             <p className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
               Export writes a full backup to{" "}
               <span className="font-mono">
@@ -707,7 +733,7 @@ export function SettingsView({
         </>
       )}
 
-      {result && subTab === "PREFERENCES" && (
+      {result && resultFor !== "backup" && subTab === "PREFERENCES" && (
         <p
           className={`rounded-xl border px-4 py-3 font-sub text-xs ${
             result.ok

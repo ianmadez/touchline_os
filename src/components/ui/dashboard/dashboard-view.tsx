@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { PreseasonPanel } from "./preseason-panel";
+import { BackupReminder } from "./backup-reminder";
 import { EnrichedPlayer } from "@/lib/services/squad-service";
 import { ParsedCareerEvent } from "@/lib/services/event-service";
 import { PitchSlotAssignment } from "@/lib/services/tactics-service";
@@ -76,6 +77,8 @@ interface DashboardViewProps {
   onOpenNews: () => void;
   /** Called after the manager declares friendlies, so the shell can re-hydrate the season figures. */
   onCareerChanged?: () => void;
+  /** Export the career to JSON. Drives the browser build's backup reminder. */
+  onExportCareer?: () => Promise<{ ok: boolean; message: string }>;
 }
 
 export function DashboardView({
@@ -94,6 +97,7 @@ export function DashboardView({
   onOpenStoryline,
   onOpenNews,
   onCareerChanged,
+  onExportCareer,
 }: DashboardViewProps) {
   const [preseasonOpen, setPreseasonOpen] = useState(false);
 
@@ -224,6 +228,8 @@ export function DashboardView({
           </button>
         </div>
       </div>
+
+      {onExportCareer && <BackupReminder careerId={careerId} onExport={onExportCareer} />}
 
       {/* Season Summary & Quick Navigation Banner */}
       {seasonState && careerId && (

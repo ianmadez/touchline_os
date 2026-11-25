@@ -19,6 +19,8 @@ import { SeasonView } from "@/components/ui/season/season-view";
 import type { SeasonSubTab } from "@/lib/ui/labels";
 import { StorylineEvidence } from "@/components/ui/dashboard/storyline-evidence";
 import { DebriefView } from "@/components/ui/debrief/debrief-view";
+import { recordCareerExport } from "@/components/ui/dashboard/backup-reminder";
+import { RestoreBackup } from "@/components/ui/onboarding/restore-backup";
 import { FinanceView } from "@/components/ui/finance/finance-view";
 import { SettingsView, Diagnostics, ActionResult } from "@/components/ui/settings/settings-view";
 import { SquadTableSkeleton } from "@/components/ui/skeleton";
@@ -1029,6 +1031,7 @@ export default function TouchlineApp() {
       // Released on the next task, once the download has been handed to the browser.
       setTimeout(() => URL.revokeObjectURL(url), 0);
 
+      recordCareerExport(careerId);
       const counts = (data.counts ?? {}) as Record<string, number>;
       const rows = Object.values(counts).reduce((total, value) => total + value, 0);
       // Only mentioned when it is a real path. In the browser build `filePath` is just the file name,
@@ -1052,6 +1055,13 @@ export default function TouchlineApp() {
    * The mirror of `handleExportCareer`: one file, chosen by hand, in the format the export writes.
    * Nothing is read from disk on the app's own initiative and nothing transfers automatically.
    */
+  /**
+   * The import's outcome, shown above every tab. A successful import completes onboarding, which
+   * unmounts the Portal (and with it any message the Portal was showing) and moves to the dashboard,
+   * so the success has to live at page level or the manager sees nothing happen.
+   */
+  const [importNotice, setImportNotice] = useState<string | null>(null);
+
   const handleImportCareer = async (contents: string): Promise<ActionResult> => {
     try {
       const res = await apiFetch("/api/career/import", {
@@ -1078,10 +1088,9 @@ export default function TouchlineApp() {
       const counts = (data.imported ?? {}) as Record<string, number>;
       const tables = Object.values(counts).filter((value) => value > 0).length;
       const rows = Object.values(counts).reduce((total, value) => total + value, 0);
-      return {
-        ok: true,
-        message: `${data.replaced ? "Replaced" : "Imported"} ${data.careerId} — ${tables} tables, ${rows.toLocaleString()} rows.`,
-      };
+      const message = `${data.replaced ? "Replaced" : "Imported"} ${data.careerId}: ${tables} tables, ${rows.toLocaleString()} rows.`;
+      setImportNotice(message);
+      return { ok: true, message };
     } catch (error) {
       return { ok: false, message: (error as Error).message };
     }
@@ -1824,6 +1833,32 @@ export default function TouchlineApp() {
           />
         )}
 
+        {importNotice && (
+          <div
+            role="status"
+            className="fixed left-1/2 top-4 z-[60] flex w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 items-start gap-3 rounded-2xl border border-emerald-300 bg-emerald-50/95 p-4 shadow-2xl backdrop-blur-xl dark:border-emerald-500/50 dark:bg-emerald-950/90"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="font-sub text-xs font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-200">Career restored</p>
+              <p className="mt-0.5 text-xs text-emerald-900 dark:text-emerald-100">{importNotice}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setImportNotice(null)}
+              className="cursor-pointer rounded-lg px-2 py-1 font-sub text-[10px] font-bold uppercase tracking-wider text-emerald-800 hover:bg-emerald-500/15 dark:text-emerald-200"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {displayedTab === "PORTAL" && !isOnboardingComplete && (
+          <RestoreBackup
+            onImport={handleImportCareer}
+            // Shown on the dashboard once restored, so the success is visible in the career itself.
+            onRestored={() => window.setTimeout(() => switchTab("DASHBOARD"), 1200)}
+          />
+        )}
         {displayedTab === "PORTAL" && !isOnboardingComplete && (
           <OnboardingWizard
             saveCandidates={saveCandidates}
@@ -1884,6 +1919,7 @@ export default function TouchlineApp() {
               patchSession({ openStorylineId: storylineId });
             }}
             onOpenNews={() => setNewsOpen(true)}
+            onExportCareer={handleExportCareer}
             onCareerChanged={() => {
               if (careerId) {
                 apiFetch(`/api/career?careerId=${encodeURIComponent(careerId)}`)

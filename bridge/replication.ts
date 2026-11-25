@@ -223,6 +223,30 @@ export function backupBeforeSync(careerId: string, tag = "pre-sync"): string | n
   }
 }
 
+/**
+ * One snapshot of the PC copy each time the bridge starts, at most once a day.
+ *
+ * The PC copy is what a browser whose storage was cleared gets its career back from, and a reseed from
+ * that same browser can replace it. A dated copy taken before anything connects means there is always
+ * a known-good point to return to. `VACUUM INTO` copies the whole database, so one file covers every
+ * career. Keeps the newest few and prunes the rest.
+ */
+export function backupOnStart(): string | null {
+  const dir = backupDirectory();
+  const day = new Date().toISOString().slice(0, 10);
+  const target = path.join(dir, `on-start-${day}.db`);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    if (fs.existsSync(target)) return null;
+    storage.db.run(sql.raw(`VACUUM INTO '${target.replace(/'/g, "''")}'`));
+    pruneSeedBackups(dir, "on-start-", SEED_BACKUP_KEEP);
+    return target;
+  } catch {
+    // A missed start-up snapshot must never stop the bridge from starting.
+    return null;
+  }
+}
+
 function pruneSeedBackups(dir: string, prefix: string, keep: number): void {
   let names: string[];
   try {

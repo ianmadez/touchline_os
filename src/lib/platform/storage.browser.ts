@@ -168,6 +168,11 @@ let storageImpl: Storage = unavailable;
 let flushImpl: () => Promise<void> = async () => {};
 
 if (inBrowser) {
+  // Ask the browser to treat this origin's storage as persistent, so it is not evicted on its own under
+  // disk pressure. Best-effort and silent: it cannot stop a manual "clear site data", which is what the
+  // export reminder on the dashboard is for. Not awaited, so it never delays opening the database.
+  void navigator.storage?.persist?.().catch(() => false);
+
   const SQL = await initSqlJs({ locateFile });
   const handle = await opfsFile();
   const loaded = await readImage(handle);

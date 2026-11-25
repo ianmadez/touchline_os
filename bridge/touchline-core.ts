@@ -146,10 +146,15 @@ async function main(): Promise<void> {
 
   // Imported only now: every one of these reaches `platform/storage`, which opens the database with
   // whatever `DATABASE_URL` says at that instant.
-  const [{ createCoreServer, pairingAddress }, { createSaveWatcher }] = await Promise.all([
+  const [{ createCoreServer, pairingAddress }, { createSaveWatcher }, { backupOnStart }] = await Promise.all([
     import("./core-server"),
     import("./save-watcher"),
+    import("./replication"),
   ]);
+
+  // Before any page can connect and reseed: a dated copy of what this PC holds right now.
+  const startBackup = backupOnStart();
+  if (startBackup) console.log(`  Backed up this PC's copy to ${startBackup}`);
 
   const loopback = options.noLoopback
     ? null

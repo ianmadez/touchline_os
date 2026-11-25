@@ -211,8 +211,8 @@ export function GraduateWall({ careerId, query }: { careerId: string; query: str
             }`}
           >
             {index < 3 && g.growth !== null && g.growth > 0 && !needle && (
-              <span className="absolute right-3 top-3 text-lg" aria-label={`Number ${index + 1} riser`} title={`Number ${index + 1} riser`}>
-                {["🥇", "🥈", "🥉"][index]}
+              <span className="absolute right-3 top-3 rounded-full bg-amber-500/15 px-2 py-0.5 font-sub text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                #{index + 1} riser
               </span>
             )}
             <p className="pr-8 font-heading text-base text-slate-900 dark:text-slate-100">{g.name || "Unnamed graduate"}</p>
@@ -388,13 +388,17 @@ export function MentorBoard({ careerId, query }: { careerId: string; query: stri
                         <li key={c.playerId} className="flex flex-col gap-2 rounded-lg border border-slate-200 p-2.5 dark:border-slate-700">
                           <div className="flex items-baseline justify-between gap-2">
                             <span className="truncate font-heading text-xs text-slate-900 dark:text-slate-100">
-                              {index === 0 && <span className="mr-1 text-amber-500" title="Best fit">★</span>}
                               {c.name}
                             </span>
                             <span className="font-sub text-xs tabular-nums text-slate-500">
                               {c.primaryPosition} {c.overallRating}
                             </span>
                           </div>
+                          {index === 0 && (
+                            <span className="self-start rounded bg-amber-500/15 px-1.5 py-0.5 font-sub text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                              Best fit
+                            </span>
+                          )}
                           <ul className="space-y-0.5">
                             {c.reasons.slice(0, 3).map((reason) => (
                               <li key={reason} className="font-sans text-[11px] text-slate-500 dark:text-slate-400">

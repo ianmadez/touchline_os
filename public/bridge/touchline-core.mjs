@@ -16182,6 +16182,109 @@ var init_tactics_service = __esm({
   }
 });
 
+// src/lib/squad/season-scope.ts
+function seasonStartFor(inGameDate) {
+  const match = /^(\d{4})-(\d{2})-\d{2}$/.exec((inGameDate ?? "").trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
+  return `${month >= 7 ? year : year - 1}-07-01`;
+}
+function inSeason(date, seasonStart) {
+  if (seasonStart === null) return true;
+  return date !== null && date >= seasonStart;
+}
+var init_season_scope = __esm({
+  "src/lib/squad/season-scope.ts"() {
+    "use strict";
+  }
+});
+
+// src/lib/services/friendly-record.ts
+function isFriendlyCompetition(competition) {
+  return typeof competition === "string" && /friendl|pre-?\s?season/i.test(competition);
+}
+function tallyFriendlies(payloads, seasonStart) {
+  const record = { ...NO_FRIENDLIES };
+  for (const raw of payloads) {
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (!isFriendlyCompetition(parsed.competition)) continue;
+    const date = typeof parsed.matchDate === "string" && parsed.matchDate ? parsed.matchDate : null;
+    if (date !== null && !inSeason(date, seasonStart)) continue;
+    const ours = Number(parsed.homeScore);
+    const theirs = Number(parsed.awayScore);
+    if (!Number.isFinite(ours) || !Number.isFinite(theirs)) continue;
+    record.played++;
+    record.goalsFor += ours;
+    record.goalsAgainst += theirs;
+    if (ours > theirs) {
+      record.wins++;
+      record.points += 3;
+    } else if (ours === theirs) {
+      record.draws++;
+      record.points += 1;
+    } else {
+      record.losses++;
+    }
+  }
+  return record;
+}
+function countLoggedThisSeason(payloads, seasonStart) {
+  let count = 0;
+  for (const raw of payloads) {
+    try {
+      const parsed = JSON.parse(raw);
+      const date = typeof parsed.matchDate === "string" && parsed.matchDate ? parsed.matchDate : null;
+      if (date === null || inSeason(date, seasonStart)) count++;
+    } catch {
+    }
+  }
+  return count;
+}
+async function seasonLogThisSeason(careerId) {
+  const career = await db2.select({ inGameDate: careers.inGameDate }).from(careers).where(eq(careers.id, careerId)).get();
+  const rows = await db2.select({ payloadJson: careerEvents.payloadJson }).from(careerEvents).where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "MATCH_DEBRIEF")));
+  const payloads = rows.map((row) => row.payloadJson);
+  const start = seasonStartFor(career?.inGameDate ?? null);
+  return { friendlies: tallyFriendlies(payloads, start), logged: countLoggedThisSeason(payloads, start) };
+}
+async function friendlyRecordThisSeason(careerId) {
+  const career = await db2.select({ inGameDate: careers.inGameDate }).from(careers).where(eq(careers.id, careerId)).get();
+  const rows = await db2.select({ payloadJson: careerEvents.payloadJson }).from(careerEvents).where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "MATCH_DEBRIEF")));
+  return tallyFriendlies(
+    rows.map((row) => row.payloadJson),
+    seasonStartFor(career?.inGameDate ?? null)
+  );
+}
+function withoutFriendlies(saveValue, friendlyValue) {
+  return Math.max(0, saveValue - friendlyValue);
+}
+var NO_FRIENDLIES;
+var init_friendly_record = __esm({
+  "src/lib/services/friendly-record.ts"() {
+    "use strict";
+    init_drizzle_orm();
+    init_client();
+    init_schema();
+    init_season_scope();
+    NO_FRIENDLIES = {
+      played: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      goalsFor: 0,
+      goalsAgainst: 0,
+      points: 0
+    };
+  }
+});
+
 // src/lib/services/league-model-service.ts
 function tallyDebriefEvents(rows) {
   const record = {
@@ -16231,6 +16334,7 @@ var init_league_model_service = __esm({
     "use strict";
     init_drizzle_orm();
     init_client();
+    init_friendly_record();
     init_schema();
     MIN_OBSERVATIONS_FOR_MODEL = 3;
     ALL_COMPETITION_FORM_CAVEAT = "Calibrated on all-competition scoring rates, not league-only form. Cup games add matches without league points, so the rate reads low. Rough guide only.";
@@ -16320,8 +16424,9 @@ var init_league_model_service = __esm({
         const saveHint = hintRow?.position ?? null;
         const saveProjectedBest = hintRow?.projectedBest ?? null;
         const latestSeason = await db2.select().from(seasonHistory).where(eq(seasonHistory.careerId, careerId)).orderBy(desc(seasonHistory.season)).limit(1).get();
-        const played = latestSeason?.gamesPlayed ?? 0;
-        const points = latestSeason?.points ?? 0;
+        const friendlies = await friendlyRecordThisSeason(careerId);
+        const played = withoutFriendlies(latestSeason?.gamesPlayed ?? 0, friendlies.played);
+        const points = withoutFriendlies(latestSeason?.points ?? 0, friendlies.points);
         if (played === 0) {
           return {
             low: null,
@@ -16459,6 +16564,7 @@ var init_season_service = __esm({
     "use strict";
     init_drizzle_orm();
     init_client();
+    init_friendly_record();
     init_schema();
     init_league_model_service();
     init_league_service();
@@ -16494,8 +16600,12 @@ var init_season_service = __esm({
         const latest = seasons.at(-1);
         if (!latest) return null;
         const career = await db2.select().from(careers).where(eq(careers.id, careerId)).get();
-        const gamesPlayed = latest.gamesPlayed ?? 0;
-        const points = latest.points ?? 0;
+        const { friendlies, logged: debriefsLogged } = await seasonLogThisSeason(careerId);
+        const saveGamesPlayed = latest.gamesPlayed ?? 0;
+        const gamesPlayed = withoutFriendlies(saveGamesPlayed, friendlies.played);
+        const points = withoutFriendlies(latest.points ?? 0, friendlies.points);
+        const goalsFor = withoutFriendlies(latest.goalsFor ?? 0, friendlies.goalsFor);
+        const goalsAgainst = withoutFriendlies(latest.goalsAgainst ?? 0, friendlies.goalsAgainst);
         const allCompetitionPointsPerGame = gamesPlayed > 0 ? points / gamesPlayed : null;
         const logged = await db2.select().from(leaguePositions).where(and(eq(leaguePositions.careerId, careerId), eq(leaguePositions.source, "USER"))).orderBy(asc(leaguePositions.enteredAt));
         const latestLogged = logged.at(-1) ?? null;
@@ -16504,9 +16614,12 @@ var init_season_service = __esm({
           seasonLabel: this.labelFor(latest.season, latest.season, career?.currentSeason ?? null),
           gamesPlayed,
           points,
-          goalsFor: latest.goalsFor ?? 0,
-          goalsAgainst: latest.goalsAgainst ?? 0,
-          goalDifference: (latest.goalsFor ?? 0) - (latest.goalsAgainst ?? 0),
+          goalsFor,
+          goalsAgainst,
+          goalDifference: goalsFor - goalsAgainst,
+          friendlies,
+          saveGamesPlayed,
+          unloggedMatches: Math.max(0, saveGamesPlayed - debriefsLogged),
           allCompetitionPointsPerGame,
           loggedPosition: latestLogged?.position ?? null,
           loggedPositionDisputed: latestLogged?.disputed ?? false
@@ -17121,21 +17234,6 @@ var init_performance = __esm({
   }
 });
 
-// src/lib/squad/season-scope.ts
-function seasonStartFor(inGameDate) {
-  const match = /^(\d{4})-(\d{2})-\d{2}$/.exec((inGameDate ?? "").trim());
-  if (!match) return null;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return null;
-  return `${month >= 7 ? year : year - 1}-07-01`;
-}
-var init_season_scope = __esm({
-  "src/lib/squad/season-scope.ts"() {
-    "use strict";
-  }
-});
-
 // src/lib/services/player-performance-service.ts
 function isoFromSaveDate(value) {
   const text5 = String(value);
@@ -17457,7 +17555,7 @@ var init_player_history_service = __esm({
               }
             }
             const seasonEnd = `${Number(seasonStart.slice(0, 4)) + 1}-07-01`;
-            const inSeason = growth.filter(
+            const inSeason2 = growth.filter(
               (point) => point.inGameDate !== null && point.inGameDate >= seasonStart && point.inGameDate < seasonEnd
             );
             return {
@@ -17469,9 +17567,9 @@ var init_player_history_service = __esm({
               bestRating: best,
               goals,
               assists,
-              overallStart: inSeason[0]?.overallRating ?? null,
-              overallEnd: inSeason[inSeason.length - 1]?.overallRating ?? null,
-              potentialEnd: inSeason[inSeason.length - 1]?.potentialRating ?? null,
+              overallStart: inSeason2[0]?.overallRating ?? null,
+              overallEnd: inSeason2[inSeason2.length - 1]?.overallRating ?? null,
+              potentialEnd: inSeason2[inSeason2.length - 1]?.potentialRating ?? null,
               matches: list
             };
           });
@@ -23925,8 +24023,8 @@ async function readAssignments(careerId, options) {
 async function nextBlockIndex(careerId) {
   const blocks = await new TargetBlockService().listBlocks(careerId);
   const season = blocks.reduce((highest, block) => Math.max(highest, block.seasonNumber), 0);
-  const inSeason = blocks.filter((block) => block.seasonNumber === season);
-  return inSeason.reduce((highest, block) => Math.max(highest, block.blockIndex), 0) + 1;
+  const inSeason2 = blocks.filter((block) => block.seasonNumber === season);
+  return inSeason2.reduce((highest, block) => Math.max(highest, block.blockIndex), 0) + 1;
 }
 async function createAssignment(rawBody) {
   let body2;
@@ -27551,6 +27649,56 @@ var init_sync_service = __esm({
             }).run();
           }
           const prospects = rawData.youthProspects ?? [];
+          const squadIds = new Set(nextPlayersState.map((player) => player.eaPlayerId));
+          const formerAcademy = tx.select({
+            playerId: youthProspects.playerId,
+            name: youthProspects.name,
+            primaryPosition: youthProspects.primaryPosition,
+            overallRating: youthProspects.overallRating,
+            potentialRating: youthProspects.potentialRating
+          }).from(youthProspects).where(eq(youthProspects.careerId, careerId)).all();
+          const graduates = /* @__PURE__ */ new Map();
+          const currentAcademy = prospects.map((p) => ({
+            playerId: p.playerId,
+            name: p.name,
+            primaryPosition: p.primaryPosition,
+            overallRating: p.overallRating,
+            potentialRating: p.potentialRating
+          }));
+          for (const row of [...formerAcademy, ...currentAcademy]) {
+            if (squadIds.has(row.playerId) && !graduates.has(row.playerId)) graduates.set(row.playerId, row);
+          }
+          for (const [playerId, figures] of graduates) {
+            tx.insert(careerEvents).values({
+              id: `evt_youth_promoted_${careerId}_${playerId}`,
+              careerId,
+              snapshotId: nextSnapshotId,
+              eventType: "YOUTH_PROMOTED",
+              source: "SAVE",
+              entityType: "PLAYER",
+              entityId: String(playerId),
+              payloadJson: JSON.stringify({
+                playerId,
+                name: figures.name,
+                via: "SAVE",
+                atPromotion: { overallRating: figures.overallRating, potentialRating: figures.potentialRating, primaryPosition: figures.primaryPosition }
+              })
+            }).onConflictDoNothing().run();
+          }
+          const stillInAcademy = new Set(prospects.map((p) => p.playerId));
+          for (const row of formerAcademy) {
+            if (stillInAcademy.has(row.playerId) || squadIds.has(row.playerId)) continue;
+            tx.insert(careerEvents).values({
+              id: `evt_youth_left_${careerId}_${row.playerId}`,
+              careerId,
+              snapshotId: nextSnapshotId,
+              eventType: "YOUTH_LEFT",
+              source: "SAVE",
+              entityType: "PLAYER",
+              entityId: String(row.playerId),
+              payloadJson: JSON.stringify(row)
+            }).onConflictDoNothing().run();
+          }
           tx.delete(youthProspects).where(eq(youthProspects.careerId, careerId)).run();
           for (const prospect of prospects) {
             tx.insert(youthProspects).values({
@@ -31697,13 +31845,15 @@ var init_trophies = __esm({
 });
 
 // src/lib/services/youth-service.ts
-var YouthService;
+var releaseEventId, promotionEventId, YouthService;
 var init_youth_service = __esm({
   "src/lib/services/youth-service.ts"() {
     "use strict";
     init_drizzle_orm();
     init_client();
     init_schema();
+    releaseEventId = (careerId, playerId) => `evt_youth_released_${careerId}_${playerId}`;
+    promotionEventId = (careerId, playerId) => `evt_youth_promoted_${careerId}_${playerId}`;
     YouthService = class {
       /**
        * The academy, strongest ceiling first.
@@ -31720,14 +31870,151 @@ var init_youth_service = __esm({
         const nameByPlayer = new Map(
           profiles.map((profile) => [profile.playerId, profile.displayName])
         );
+        const promotions = await this.promotions(careerId);
         return [...rows].sort(
           (a, b) => (b.potentialRating ?? -1) - (a.potentialRating ?? -1) || (b.overallRating ?? -1) - (a.overallRating ?? -1) || a.playerId - b.playerId
         ).map((row) => ({
           ...row,
           // The save's own `player_id` is not an EA id, so the profile key is built the same way the writer
           // builds it. A miss is simply no override, never a thrown lookup.
-          displayName: nameByPlayer.get(`${careerId}_${row.playerId}`) ?? null
+          displayName: nameByPlayer.get(`${careerId}_${row.playerId}`) ?? null,
+          promotion: promotions.get(row.playerId)?.promotion ?? null
         }));
+      }
+      /** Every recorded promotion, keyed by the save's player id. */
+      async promotions(careerId) {
+        const events = await db2.select({ entityId: careerEvents.entityId, source: careerEvents.source, payloadJson: careerEvents.payloadJson, timestamp: careerEvents.timestamp }).from(careerEvents).where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "YOUTH_PROMOTED")));
+        const out = /* @__PURE__ */ new Map();
+        for (const event of events) {
+          const playerId = Number(event.entityId);
+          if (!Number.isFinite(playerId)) continue;
+          let name = null;
+          let atPromotion = null;
+          try {
+            const parsed = JSON.parse(event.payloadJson);
+            name = typeof parsed.name === "string" ? parsed.name : null;
+            if (parsed.atPromotion) {
+              const num4 = (v) => typeof v === "number" ? v : null;
+              atPromotion = { overallRating: num4(parsed.atPromotion.overallRating), potentialRating: num4(parsed.atPromotion.potentialRating) };
+            }
+          } catch {
+            name = null;
+          }
+          out.set(playerId, {
+            name,
+            atPromotion,
+            promotion: { source: event.source === "USER" ? "USER" : "SAVE", recordedAt: event.timestamp }
+          });
+        }
+        return out;
+      }
+      /**
+       * Academy graduates: everyone with a recorded promotion, newest first, joined to the squad for his
+       * current figures. A player promoted and then sold keeps his place here, because he still came
+       * through the academy; his figures simply read as unknown.
+       */
+      async graduates(careerId) {
+        const promotions = await this.promotions(careerId);
+        if (promotions.size === 0) return [];
+        const squad = await db2.select({
+          eaPlayerId: players.eaPlayerId,
+          name: players.name,
+          overallRating: players.overallRating,
+          potentialRating: players.potentialRating,
+          primaryPosition: players.primaryPosition,
+          age: players.age
+        }).from(players).where(eq(players.careerId, careerId));
+        const bySquadId = new Map(squad.map((row) => [row.eaPlayerId, row]));
+        const ratings = await db2.select({ playerId: playerMatchRatings.playerId, rating: playerMatchRatings.rating }).from(playerMatchRatings).where(eq(playerMatchRatings.careerId, careerId));
+        const form = /* @__PURE__ */ new Map();
+        for (const row of ratings) {
+          if (!promotions.has(row.playerId) || row.rating === null) continue;
+          const entry = form.get(row.playerId) ?? { apps: 0, total: 0 };
+          entry.apps++;
+          entry.total += row.rating;
+          form.set(row.playerId, entry);
+        }
+        return [...promotions.entries()].map(([playerId, { name, promotion, atPromotion }]) => {
+          const current = bySquadId.get(playerId);
+          const played = form.get(playerId);
+          const overallRating = current?.overallRating ?? null;
+          const before = atPromotion?.overallRating ?? null;
+          return {
+            playerId,
+            name: current?.name ?? name,
+            promotion,
+            overallRating,
+            potentialRating: current?.potentialRating ?? null,
+            primaryPosition: current?.primaryPosition ?? null,
+            age: current?.age ?? null,
+            atPromotion,
+            growth: overallRating !== null && before !== null ? overallRating - before : null,
+            appearances: played?.apps ?? 0,
+            averageRating: played ? Math.round(played.total / played.apps * 100) / 100 : null,
+            inSquad: current !== void 0
+          };
+        }).sort((a, b) => b.promotion.recordedAt.localeCompare(a.promotion.recordedAt));
+      }
+      /** Prospects the sync saw leave, minus any later recorded as promoted. Newest first. */
+      async leavers(careerId) {
+        const events = await db2.select({ eventType: careerEvents.eventType, entityId: careerEvents.entityId, payloadJson: careerEvents.payloadJson, timestamp: careerEvents.timestamp }).from(careerEvents).where(eq(careerEvents.careerId, careerId));
+        const promoted = new Set(events.filter((e) => e.eventType === "YOUTH_PROMOTED").map((e) => e.entityId));
+        const released = new Set(events.filter((e) => e.eventType === "YOUTH_RELEASED").map((e) => e.entityId));
+        const out = [];
+        for (const event of events) {
+          if (event.eventType !== "YOUTH_LEFT" || promoted.has(event.entityId)) continue;
+          let row = {};
+          try {
+            row = JSON.parse(event.payloadJson);
+          } catch {
+            row = {};
+          }
+          out.push({
+            playerId: Number(event.entityId),
+            name: row.name ?? null,
+            primaryPosition: row.primaryPosition ?? null,
+            overallRating: row.overallRating ?? null,
+            potentialRating: row.potentialRating ?? null,
+            leftAt: event.timestamp,
+            released: released.has(event.entityId)
+          });
+        }
+        return out.sort((a, b) => b.leftAt.localeCompare(a.leftAt));
+      }
+      /** The manager's word that a departed prospect was released, or the undo of it. */
+      async setReleased(careerId, playerId, released) {
+        if (!released) {
+          await db2.delete(careerEvents).where(eq(careerEvents.id, releaseEventId(careerId, playerId)));
+          return;
+        }
+        await db2.insert(careerEvents).values({
+          id: releaseEventId(careerId, playerId),
+          careerId,
+          eventType: "YOUTH_RELEASED",
+          source: "USER",
+          entityType: "PLAYER",
+          entityId: String(playerId),
+          payloadJson: JSON.stringify({ playerId }),
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        }).onConflictDoNothing();
+      }
+      /** The manager's Promote button. Idempotent: the id is the same one a sync would write. */
+      async promote(careerId, playerId, name) {
+        const prospect = await db2.select({ overallRating: youthProspects.overallRating, potentialRating: youthProspects.potentialRating }).from(youthProspects).where(and(eq(youthProspects.careerId, careerId), eq(youthProspects.playerId, playerId))).get();
+        await db2.insert(careerEvents).values({
+          id: promotionEventId(careerId, playerId),
+          careerId,
+          eventType: "YOUTH_PROMOTED",
+          source: "USER",
+          entityType: "PLAYER",
+          entityId: String(playerId),
+          payloadJson: JSON.stringify({ playerId, name, via: "USER", atPromotion: prospect ?? null }),
+          timestamp: (/* @__PURE__ */ new Date()).toISOString()
+        }).onConflictDoNothing();
+      }
+      /** Undo a Promote the manager pressed. A promotion the save itself showed is not his to take back. */
+      async unpromote(careerId, playerId) {
+        await db2.delete(careerEvents).where(and(eq(careerEvents.id, promotionEventId(careerId, playerId)), eq(careerEvents.source, "USER")));
       }
       summarise(rows) {
         const potentials = rows.map((row) => row.potentialRating).filter((value) => value !== null);
@@ -34748,8 +35035,8 @@ function buildNews(input, options = {}) {
     const year = Number(input.inGameDate.slice(0, 4));
     const month = Number(input.inGameDate.slice(5, 7));
     const day = Number(input.inGameDate.slice(8, 10));
-    const inSeason = month === 12 && day >= 27 || month === 1 && day <= 12;
-    if (inSeason) {
+    const inSeason2 = month === 12 && day >= 27 || month === 1 && day <= 12;
+    if (inSeason2) {
       const startYear = month === 12 ? year : year - 1;
       const from = `${startYear}-12-20`;
       const to = `${startYear + 1}-01-03`;
@@ -37502,6 +37789,172 @@ var init_finance_rules = __esm({
   }
 });
 
+// src/lib/services/mentor-service.ts
+function pitchLine(position) {
+  const code = (position ?? "").toUpperCase();
+  if (!code) return null;
+  if (code === "GK") return "GK";
+  if (DEF.has(code)) return "DEF";
+  if (MID.has(code)) return "MID";
+  if (["ST", "CF", "LF", "RF", "LW", "RW", "LS", "RS", "LST", "RST"].includes(code)) return "ATT";
+  return null;
+}
+function rankMentors(prospect, squad, menteeCount, trusted, limit = 3) {
+  const line = pitchLine(prospect.primaryPosition);
+  const out = [];
+  for (const player of squad) {
+    if ((player.age ?? 0) < MIN_MENTOR_AGE) continue;
+    const playerLine = pitchLine(player.primaryPosition);
+    if (line !== null && playerLine !== line) continue;
+    const reasons = [];
+    let score = player.overallRating;
+    const exact = (prospect.primaryPosition ?? "").toUpperCase() === player.primaryPosition.toUpperCase();
+    if (exact) {
+      score += 5;
+      reasons.push(`Plays his position (${player.primaryPosition})`);
+    } else if (playerLine) {
+      reasons.push(`Same line (${playerLine})`);
+    }
+    if (prospect.overallRating !== null) {
+      const gap = player.overallRating - prospect.overallRating;
+      if (gap > 0) reasons.push(`${gap} rating points ahead of him`);
+    }
+    const age = player.age ?? MIN_MENTOR_AGE;
+    const experience = Math.max(0, 6 - Math.abs(30 - age));
+    score += experience;
+    if (age >= 29) reasons.push(`Experienced head at ${age}`);
+    if (trusted.has(player.eaPlayerId)) {
+      score += 3;
+      reasons.push("High trust");
+    }
+    const mentees = menteeCount.get(player.eaPlayerId) ?? 0;
+    score -= mentees * 6;
+    if (mentees > 0) reasons.push(`Already mentoring ${mentees}`);
+    out.push({
+      playerId: player.eaPlayerId,
+      name: player.name,
+      primaryPosition: player.primaryPosition,
+      overallRating: player.overallRating,
+      age: player.age,
+      score,
+      reasons,
+      mentees
+    });
+  }
+  return out.sort((a, b) => b.score - a.score || b.overallRating - a.overallRating).slice(0, limit);
+}
+var DEF, MID, MIN_MENTOR_AGE, mentorshipEventId, MentorService;
+var init_mentor_service = __esm({
+  "src/lib/services/mentor-service.ts"() {
+    "use strict";
+    init_drizzle_orm();
+    init_client();
+    init_schema();
+    DEF = /* @__PURE__ */ new Set(["CB", "LCB", "RCB", "LB", "RB", "LWB", "RWB", "SW"]);
+    MID = /* @__PURE__ */ new Set(["CDM", "LDM", "RDM", "CM", "LCM", "RCM", "LM", "RM", "CAM", "LAM", "RAM"]);
+    MIN_MENTOR_AGE = 25;
+    mentorshipEventId = (careerId, prospectId) => `evt_youth_mentor_${careerId}_${prospectId}`;
+    MentorService = class {
+      async stored(careerId) {
+        const rows = await db2.select({ payloadJson: careerEvents.payloadJson }).from(careerEvents).where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "YOUTH_MENTOR")));
+        const out = [];
+        for (const row of rows) {
+          try {
+            out.push(JSON.parse(row.payloadJson));
+          } catch {
+          }
+        }
+        return out;
+      }
+      async squad(careerId) {
+        return db2.select({
+          eaPlayerId: players.eaPlayerId,
+          name: players.name,
+          primaryPosition: players.primaryPosition,
+          overallRating: players.overallRating,
+          age: players.age
+        }).from(players).where(eq(players.careerId, careerId));
+      }
+      /** Current pairings plus the top suggestions for every academy prospect still without a mentor. */
+      async overview(careerId) {
+        const [stored, squad, academy, profiles] = await Promise.all([
+          this.stored(careerId),
+          this.squad(careerId),
+          db2.select().from(youthProspects).where(eq(youthProspects.careerId, careerId)),
+          db2.select({ playerId: playerUserProfiles.playerId, trustLevel: playerUserProfiles.trustLevel }).from(playerUserProfiles).where(eq(playerUserProfiles.careerId, careerId))
+        ]);
+        const squadById = new Map(squad.map((row) => [row.eaPlayerId, row]));
+        const academyById = new Map(academy.map((row) => [row.playerId, row]));
+        const menteeCount = /* @__PURE__ */ new Map();
+        for (const pair of stored) menteeCount.set(pair.mentorId, (menteeCount.get(pair.mentorId) ?? 0) + 1);
+        const trusted = new Set(
+          profiles.filter((p) => p.trustLevel === "HIGH").map((p) => Number(p.playerId.slice(careerId.length + 1))).filter(Number.isFinite)
+        );
+        const mentorships = stored.map((pair) => {
+          const current = academyById.get(pair.prospectId)?.overallRating ?? squadById.get(pair.prospectId)?.overallRating ?? null;
+          const before = pair.atPairing?.overallRating ?? null;
+          return {
+            ...pair,
+            mentorName: squadById.get(pair.mentorId)?.name ?? pair.mentorName,
+            currentOverall: current,
+            progress: current !== null && before !== null ? current - before : null,
+            notes: pair.notes ?? []
+          };
+        }).sort((a, b) => b.pairedAt.localeCompare(a.pairedAt));
+        const paired = new Set(stored.map((pair) => pair.prospectId));
+        const academyIds = new Set(academy.map((row) => row.playerId));
+        const eligibleSquad = squad.filter((row) => !academyIds.has(row.eaPlayerId));
+        const suggestions = {};
+        for (const prospect of academy) {
+          if (paired.has(prospect.playerId)) continue;
+          suggestions[prospect.playerId] = rankMentors(prospect, eligibleSquad, menteeCount, trusted);
+        }
+        return { mentorships, suggestions };
+      }
+      /** Pair (or re-pair) a prospect. Re-pairing restarts the clock and the baseline. */
+      async pair(careerId, prospectId, mentorId) {
+        const [prospect, mentor] = await Promise.all([
+          db2.select().from(youthProspects).where(and(eq(youthProspects.careerId, careerId), eq(youthProspects.playerId, prospectId))).get(),
+          db2.select({ name: players.name }).from(players).where(and(eq(players.careerId, careerId), eq(players.eaPlayerId, mentorId))).get()
+        ]);
+        if (!mentor) throw new Error("That mentor is not in your squad.");
+        const payload = {
+          prospectId,
+          prospectName: prospect?.name ?? null,
+          mentorId,
+          mentorName: mentor.name,
+          pairedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          atPairing: { overallRating: prospect?.overallRating ?? null, potentialRating: prospect?.potentialRating ?? null },
+          notes: []
+        };
+        const payloadJson = JSON.stringify(payload);
+        await db2.insert(careerEvents).values({
+          id: mentorshipEventId(careerId, prospectId),
+          careerId,
+          eventType: "YOUTH_MENTOR",
+          source: "USER",
+          entityType: "PLAYER",
+          entityId: String(prospectId),
+          payloadJson,
+          timestamp: payload.pairedAt
+        }).onConflictDoUpdate({ target: careerEvents.id, set: { payloadJson, timestamp: payload.pairedAt } });
+      }
+      async end(careerId, prospectId) {
+        await db2.delete(careerEvents).where(eq(careerEvents.id, mentorshipEventId(careerId, prospectId)));
+      }
+      /** A progress note on a pairing, newest last. Capped so a pairing cannot grow without bound. */
+      async addNote(careerId, prospectId, text5) {
+        const id = mentorshipEventId(careerId, prospectId);
+        const row = await db2.select({ payloadJson: careerEvents.payloadJson }).from(careerEvents).where(eq(careerEvents.id, id)).get();
+        if (!row) throw new Error("He has no mentor to write a note against.");
+        const pair = JSON.parse(row.payloadJson);
+        pair.notes = [...pair.notes ?? [], { at: (/* @__PURE__ */ new Date()).toISOString(), text: text5.slice(0, 280) }].slice(-20);
+        await db2.update(careerEvents).set({ payloadJson: JSON.stringify(pair) }).where(eq(careerEvents.id, id));
+      }
+    };
+  }
+});
+
 // src/lib/operations/youth.ts
 async function readYouthAcademy(careerId) {
   if (!careerId) {
@@ -37513,6 +37966,9 @@ async function readYouthAcademy(careerId) {
     return ok({
       success: true,
       prospects,
+      graduates: await service.graduates(careerId),
+      leavers: await service.leavers(careerId),
+      mentors: await new MentorService().overview(careerId),
       summary: service.summarise(prospects)
     });
   } catch (error) {
@@ -37520,10 +37976,44 @@ async function readYouthAcademy(careerId) {
     return failed(500, error.message ?? "Could not read your academy.");
   }
 }
+async function setYouthPromotion(rawBody) {
+  let body2;
+  try {
+    body2 = JSON.parse(rawBody);
+  } catch {
+    return at(400, { success: false, error: "Request body must be valid JSON." });
+  }
+  const careerId = typeof body2.careerId === "string" ? body2.careerId : null;
+  const playerId = Number(body2.playerId);
+  if (!careerId || !Number.isInteger(playerId)) {
+    return at(400, { success: false, error: "careerId and playerId are required." });
+  }
+  try {
+    const service = new YouthService();
+    const mentors = new MentorService();
+    if (body2.action === "mentor") {
+      const mentorId = Number(body2.mentorId);
+      if (!Number.isInteger(mentorId)) return at(400, { success: false, error: "mentorId is required." });
+      await mentors.pair(careerId, playerId, mentorId);
+    } else if (body2.action === "unmentor") await mentors.end(careerId, playerId);
+    else if (body2.action === "mentorNote") {
+      const text5 = typeof body2.text === "string" ? body2.text.trim() : "";
+      if (!text5) return at(400, { success: false, error: "A note needs some text." });
+      await mentors.addNote(careerId, playerId, text5);
+    } else if (body2.action === "release" || body2.action === "unrelease") await service.setReleased(careerId, playerId, body2.action === "release");
+    else if (body2.undo === true) await service.unpromote(careerId, playerId);
+    else await service.promote(careerId, playerId, typeof body2.name === "string" ? body2.name : null);
+    return readYouthAcademy(careerId);
+  } catch (error) {
+    console.error("[api/youth] promote failed:", error);
+    return failed(500, error.message ?? "Could not update that promotion.");
+  }
+}
 var init_youth = __esm({
   "src/lib/operations/youth.ts"() {
     "use strict";
     init_youth_service();
+    init_mentor_service();
     init_types();
   }
 });
@@ -37694,6 +38184,8 @@ async function dispatch(call) {
       return readDiagnostics();
     case "GET /api/youth":
       return readYouthAcademy(params.get("careerId"));
+    case "POST /api/youth":
+      return setYouthPromotion(raw ?? "");
     case "GET /api/news":
       return readNews(params.get("careerId"));
     case "PUT /api/news": {
@@ -38173,6 +38665,18 @@ var init_seed = __esm({
 });
 
 // bridge/replication.ts
+var replication_exports = {};
+__export(replication_exports, {
+  JOURNAL_STATEMENTS: () => JOURNAL_STATEMENTS,
+  SEED_BACKUP_KEEP: () => SEED_BACKUP_KEEP,
+  backupBeforeSync: () => backupBeforeSync,
+  backupDirectory: () => backupDirectory,
+  backupOnStart: () => backupOnStart,
+  currentRevision: () => currentRevision,
+  ensureJournal: () => ensureJournal,
+  handleSyncRoutes: () => handleSyncRoutes,
+  sequence: () => sequence
+});
 import fs9 from "node:fs";
 import path10 from "node:path";
 function ensureJournal() {
@@ -38247,6 +38751,20 @@ function backupBeforeSync(careerId, tag = "pre-sync") {
     const target = path10.join(dir, `${careerId}-${tag}-${stamp}.db`);
     storage.db.run(sql.raw(`VACUUM INTO '${target.replace(/'/g, "''")}'`));
     pruneSeedBackups(dir, `${careerId}-${tag}-`, SEED_BACKUP_KEEP);
+    return target;
+  } catch {
+    return null;
+  }
+}
+function backupOnStart() {
+  const dir = backupDirectory();
+  const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const target = path10.join(dir, `on-start-${day}.db`);
+  try {
+    fs9.mkdirSync(dir, { recursive: true });
+    if (fs9.existsSync(target)) return null;
+    storage.db.run(sql.raw(`VACUUM INTO '${target.replace(/'/g, "''")}'`));
+    pruneSeedBackups(dir, "on-start-", SEED_BACKUP_KEEP);
     return target;
   } catch {
     return null;
@@ -39713,10 +40231,13 @@ async function main() {
   if (options.share === true && !store.sharing()) store.setSharing(true);
   if (options.share === false && store.sharing()) store.setSharing(false);
   const hostName = os4.hostname();
-  const [{ createCoreServer: createCoreServer2, pairingAddress: pairingAddress2 }, { createSaveWatcher: createSaveWatcher2 }] = await Promise.all([
+  const [{ createCoreServer: createCoreServer2, pairingAddress: pairingAddress2 }, { createSaveWatcher: createSaveWatcher2 }, { backupOnStart: backupOnStart2 }] = await Promise.all([
     Promise.resolve().then(() => (init_core_server(), core_server_exports)),
-    Promise.resolve().then(() => (init_save_watcher(), save_watcher_exports))
+    Promise.resolve().then(() => (init_save_watcher(), save_watcher_exports)),
+    Promise.resolve().then(() => (init_replication(), replication_exports))
   ]);
+  const startBackup = backupOnStart2();
+  if (startBackup) console.log(`  Backed up this PC's copy to ${startBackup}`);
   const loopback = options.noLoopback ? null : createCoreServer2({
     store,
     mode: "loopback",
