@@ -58,6 +58,13 @@ const SEVERITY_COLOURS: Record<string, string> = {
 
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 2, WARNING: 1, WATCH: 0 };
 
+/** "2026-11-17" as "17 Nov". The save's dates are in-game dates, so no time zone applies. */
+function shortMatchDate(iso: string): string {
+  const [, month, day] = iso.split("-").map(Number);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${day} ${months[(month ?? 1) - 1]}`;
+}
+
 interface DashboardViewProps {
   careerId: string;
   managerName: string;
@@ -290,28 +297,51 @@ export function DashboardView({
             </div>
           </div>
 
-          {(seasonState.outlook?.unloggedMatches ?? 0) > 0 && (
+          {seasonState.outlook?.unlogged &&
+            (seasonState.outlook.unlogged.missing.length > 0 || seasonState.outlook.unlogged.likelyPreseason.length > 0) && (
             <div className="flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300/70 bg-amber-50/80 px-3 py-2 dark:border-amber-500/40 dark:bg-amber-500/10">
-              <p className="text-xs text-amber-900 dark:text-amber-200">
-                <strong className="tabular-nums">{seasonState.outlook?.unloggedMatches}</strong>{" "}
-                {seasonState.outlook?.unloggedMatches === 1 ? "match has" : "matches have"} no debrief yet. Your save counts them, but the
-                details (opponent, scorers, stats) are yours to add. Check Fixtures/Results in the in-game calendar.
-              </p>
+              <div className="min-w-0 flex-1 space-y-0.5 text-xs text-amber-900 dark:text-amber-200">
+                {seasonState.outlook.unlogged.missing.length > 0 && (
+                  <p>
+                    <strong className="tabular-nums">{seasonState.outlook.unlogged.missing.length}</strong>{" "}
+                    {seasonState.outlook.unlogged.missing.length === 1 ? "match" : "matches"} since you started logging{" "}
+                    {seasonState.outlook.unlogged.missing.length === 1 ? "has" : "have"} no debrief:{" "}
+                    <strong>{seasonState.outlook.unlogged.missing.map(shortMatchDate).join(", ")}</strong>.
+                  </p>
+                )}
+                {seasonState.outlook.unlogged.likelyPreseason.length > 0 && (
+                  <p>
+                    {seasonState.outlook.unlogged.likelyPreseason.length} July{" "}
+                    {seasonState.outlook.unlogged.likelyPreseason.length === 1 ? "match looks" : "matches look"} like pre-season (
+                    {seasonState.outlook.unlogged.likelyPreseason.map(shortMatchDate).join(", ")}).
+                  </p>
+                )}
+                {seasonState.outlook.unlogged.beforeLogging > 0 && (
+                  <p className="text-amber-800/80 dark:text-amber-300/80">
+                    {seasonState.outlook.unlogged.beforeLogging} earlier {seasonState.outlook.unlogged.beforeLogging === 1 ? "match was" : "matches were"} played
+                    before you started logging; no need to go back for those.
+                  </p>
+                )}
+              </div>
               <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPreseasonOpen(true)}
-                  className="cursor-pointer rounded-lg px-2.5 py-1 text-[10px] font-sub font-bold uppercase tracking-wider text-amber-800 hover:bg-amber-500/15 dark:text-amber-300"
-                >
-                  Some were friendlies
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onNavigateTab("DEBRIEF")}
-                  className="cursor-pointer rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-sub font-bold uppercase tracking-wider text-white hover:bg-amber-600"
-                >
-                  Log them
-                </button>
+                {seasonState.outlook.unlogged.likelyPreseason.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setPreseasonOpen(true)}
+                    className="cursor-pointer rounded-lg px-2.5 py-1 text-[10px] font-sub font-bold uppercase tracking-wider text-amber-800 hover:bg-amber-500/15 dark:text-amber-300"
+                  >
+                    Declare pre-season
+                  </button>
+                )}
+                {seasonState.outlook.unlogged.missing.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigateTab("DEBRIEF")}
+                    className="cursor-pointer rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-sub font-bold uppercase tracking-wider text-white hover:bg-amber-600"
+                  >
+                    Log them
+                  </button>
+                )}
               </div>
             </div>
           )}

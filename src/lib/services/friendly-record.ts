@@ -10,9 +10,9 @@
  * The record returned here is subtracted from the save's figures wherever they stand in for
  * competitive progress. It never touches the save's own numbers on disk.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { db } from "../db/client";
-import { careerEvents, careers } from "../db/schema";
+import { careerEvents, careers, playerMatchRatings } from "../db/schema";
 import { inSeason, seasonStartFor } from "../squad/season-scope";
 
 /** Matches the competition names a friendly can carry, including the stock "Friendly / Pre-season". */
@@ -95,7 +95,9 @@ export function countLoggedThisSeason(payloads: readonly string[], seasonStart: 
 }
 
 /** This season's declared friendlies plus how many matches in total have a debrief. */
-export async function seasonLogThisSeason(careerId: string): Promise<{ friendlies: FriendlyRecord; logged: number }> {
+export async function seasonLogThisSeason(
+  careerId: string
+): Promise<{ friendlies: FriendlyRecord; logged: number; unlogged: UnloggedReport }> {
   const career = await db.select({ inGameDate: careers.inGameDate }).from(careers).where(eq(careers.id, careerId)).get();
   const rows = await db
     .select({ payloadJson: careerEvents.payloadJson })
@@ -103,7 +105,26 @@ export async function seasonLogThisSeason(careerId: string): Promise<{ friendlie
     .where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "MATCH_DEBRIEF")));
   const payloads = rows.map((row) => row.payloadJson);
   const start = seasonStartFor(career?.inGameDate ?? null);
-  return { friendlies: tallyFriendlies(payloads, start), logged: countLoggedThisSeason(payloads, start) };
+  const startNumber = start ? Number(start.replaceAll("-", "")) : 0;
+  const ratingDates = await db
+    .selectDistinct({ date: playerMatchRatings.date })
+    .from(playerMatchRatings)
+    .where(and(eq(playerMatchRatings.careerId, careerId), gte(playerMatchRatings.date, startNumber)));
+  const toIso = (n: number) => `${String(n).slice(0, 4)}-${String(n).slice(4, 6)}-${String(n).slice(6, 8)}`;
+  const debriefDates: string[] = [];
+  for (const raw of payloads) {
+    try {
+      const date = (JSON.parse(raw) as { matchDate?: unknown }).matchDate;
+      if (typeof date === "string" && date && (start === null || date >= start)) debriefDates.push(date.slice(0, 10));
+    } catch {
+      // unreadable payloads are not matches
+    }
+  }
+  return {
+    friendlies: tallyFriendlies(payloads, start),
+    logged: countLoggedThisSeason(payloads, start),
+    unlogged: findUnloggedMatches(ratingDates.map((row) => toIso(row.date)), debriefDates),
+  };
 }
 
 export async function friendlyRecordThisSeason(careerId: string): Promise<FriendlyRecord> {
@@ -121,4 +142,50 @@ export async function friendlyRecordThisSeason(careerId: string): Promise<Friend
 /** The save's figure with declared friendlies taken out, never below zero. */
 export function withoutFriendlies(saveValue: number, friendlyValue: number): number {
   return Math.max(0, saveValue - friendlyValue);
+}
+
+export interface UnloggedReport {
+  /** Save match dates (YYYY-MM-DD) since the manager started logging this season that have no debrief. */
+  missing: string[];
+  /** Save matches before the first debrief of the season: history, summarised rather than nagged about. */
+  beforeLogging: number;
+  /** Unlogged July matches, which are pre-season friendlies in an August-to-May season. */
+  likelyPreseason: string[];
+}
+
+const DAY_MS = 86_400_000;
+const dayNumber = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / DAY_MS;
+
+/**
+ * Which of the save's matches this season still need a debrief.
+ *
+ * The save's own per-player rating history carries the date of every match, so this works from real
+ * fixtures rather than a bare count. A debrief "covers" a save match when its date is within a day of it
+ * (a manager often types the day he played rather than the in-game kick-off day); each debrief covers at
+ * most one match. Only matches from the manager's first debrief onwards are reported as missing: asking
+ * him to reconstruct twenty games he played before he ever opened the app helps nobody.
+ */
+export function findUnloggedMatches(saveDates: readonly string[], debriefDates: readonly string[]): UnloggedReport {
+  const dates = [...new Set(saveDates)].sort();
+  const pool = debriefDates.filter(Boolean).map(dayNumber).sort((a, b) => a - b);
+  const unmatched: string[] = [];
+  for (const date of dates) {
+    const day = dayNumber(date);
+    const hit = pool.findIndex((d) => Math.abs(d - day) <= 1);
+    if (hit >= 0) pool.splice(hit, 1);
+    else unmatched.push(date);
+  }
+  const likelyPreseason = unmatched.filter((date) => date.slice(5, 7) === "07");
+  const firstLogged = debriefDates.filter(Boolean).sort()[0] ?? null;
+  if (firstLogged === null) {
+    // Nothing logged yet this season: nothing to measure a gap against, so no list to nag with.
+    return { missing: [], beforeLogging: unmatched.length - likelyPreseason.length, likelyPreseason };
+  }
+  const startDay = dayNumber(firstLogged) - 1;
+  const competitive = unmatched.filter((date) => !likelyPreseason.includes(date));
+  return {
+    missing: competitive.filter((date) => dayNumber(date) >= startDay),
+    beforeLogging: competitive.filter((date) => dayNumber(date) < startDay).length,
+    likelyPreseason,
+  };
 }

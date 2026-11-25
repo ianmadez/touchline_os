@@ -16,7 +16,7 @@
  */
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "../db/client";
-import { seasonLogThisSeason, withoutFriendlies, type FriendlyRecord } from "./friendly-record";
+import { seasonLogThisSeason, withoutFriendlies, type FriendlyRecord, type UnloggedReport } from "./friendly-record";
 import {
   careerEvents,
   careerObjectives,
@@ -106,11 +106,12 @@ export interface SeasonOutlook {
   /** The save's own all-competition count, friendlies included, exactly as read. */
   saveGamesPlayed: number;
   /**
-   * Matches the save says were played this season that have no debrief yet: the save's raw count
-   * minus every debrief logged for this season (friendlies included, since the save counts them).
-   * Logging a debrief never changes the save's figures, so this is the only place the two meet.
+   * Matches the save dates this season, since the manager's first debrief, that have no debrief.
+   * See `findUnloggedMatches` for the matching rules.
    */
   unloggedMatches: number;
+  /** The dates behind `unloggedMatches`, plus what was left out of it and why. */
+  unlogged: UnloggedReport;
   /**
    * The save's own points total divided by every match played, in every competition. Null with no
    * matches - a rate needs matches behind it.
@@ -255,7 +256,7 @@ export class SeasonService {
 
     const career = await db.select().from(careers).where(eq(careers.id, careerId)).get();
     // Declared friendlies come off the save's totals: it counts pre-season games in its season record.
-    const { friendlies, logged: debriefsLogged } = await seasonLogThisSeason(careerId);
+    const { friendlies, unlogged } = await seasonLogThisSeason(careerId);
     const saveGamesPlayed = latest.gamesPlayed ?? 0;
     const gamesPlayed = withoutFriendlies(saveGamesPlayed, friendlies.played);
     const points = withoutFriendlies(latest.points ?? 0, friendlies.points);
@@ -283,7 +284,8 @@ export class SeasonService {
       goalDifference: goalsFor - goalsAgainst,
       friendlies,
       saveGamesPlayed,
-      unloggedMatches: Math.max(0, saveGamesPlayed - debriefsLogged),
+      unloggedMatches: unlogged.missing.length,
+      unlogged,
       allCompetitionPointsPerGame,
       loggedPosition: latestLogged?.position ?? null,
       loggedPositionDisputed: latestLogged?.disputed ?? false,

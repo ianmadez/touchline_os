@@ -79,9 +79,9 @@ export function BackupReminder({ careerId, onExport }: { careerId: string; onExp
       role="dialog"
       aria-modal="false"
       aria-label="Back up your career"
-      className="fixed bottom-4 right-4 z-50 flex w-[min(26rem,calc(100vw-2rem))] flex-wrap items-center gap-3 rounded-2xl border border-sky-300/70 bg-white/95 p-4 shadow-2xl backdrop-blur-xl dark:border-sky-500/30 dark:bg-slate-900/95 max-md:bottom-20"
+      className="fixed bottom-4 right-4 z-50 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3 rounded-2xl border border-sky-300/70 bg-white/95 p-4 shadow-2xl backdrop-blur-xl dark:border-sky-500/30 dark:bg-slate-900/95 max-md:bottom-20"
     >
-      <div className="min-w-0 flex-1">
+      <div className="w-full">
         <p className="font-heading text-sm uppercase tracking-wide text-slate-900 dark:text-slate-100">Your browser has the memory of a goldfish</p>
         <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">
           One &ldquo;clear browsing data&rdquo; and every debrief, note and finance figure swims off for good.{" "}
@@ -89,14 +89,14 @@ export function BackupReminder({ careerId, onExport }: { careerId: string; onExp
         </p>
         {error && <p className="mt-1 text-xs text-rose-600 dark:text-rose-400">{error}</p>}
       </div>
-      <div className="flex gap-2 max-sm:w-full">
+      <div className="flex w-full justify-end gap-2">
         <button
           type="button"
           onClick={() => {
             write(snoozeKey(careerId), Date.now() + SNOOZE_FOR);
             setHidden(true);
           }}
-          className="cursor-pointer rounded-lg px-3 py-2 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:bg-slate-200/60 dark:hover:bg-slate-800 max-sm:flex-1"
+          className="cursor-pointer rounded-lg px-3 py-2 font-sub text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:bg-slate-200/60 dark:hover:bg-slate-800"
         >
           Later
         </button>
@@ -104,7 +104,7 @@ export function BackupReminder({ careerId, onExport }: { careerId: string; onExp
           type="button"
           disabled={busy}
           onClick={() => void exportNow()}
-          className="cursor-pointer rounded-lg bg-sky-600 px-3 py-2 font-sub text-[10px] font-bold uppercase tracking-wider text-white hover:bg-sky-700 disabled:opacity-60 max-sm:flex-1"
+          className="cursor-pointer rounded-lg bg-sky-600 px-3 py-2 font-sub text-[10px] font-bold uppercase tracking-wider text-white hover:bg-sky-700 disabled:opacity-60"
         >
           {busy ? "Exporting…" : "Export backup (JSON)"}
         </button>

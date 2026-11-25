@@ -2,6 +2,7 @@
 
 import type { PlayerHistoryPayload } from "@/lib/squad/history";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Navbar } from "@/components/ui/nav/navbar";
 import { LandingPage } from "@/components/ui/landing/landing-page";
 import { OsLaunchSplash } from "@/components/ui/shell/os-launch-splash";
@@ -1833,10 +1834,13 @@ export default function TouchlineApp() {
           />
         )}
 
-        {importNotice && (
+        {importNotice &&
+          typeof document !== "undefined" &&
+          // Portalled to <body>: inside the page content it shares a stacking context the top tab bar paints over.
+          createPortal(
           <div
             role="status"
-            className="fixed left-1/2 top-4 z-[60] flex w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 items-start gap-3 rounded-2xl border border-emerald-300 bg-emerald-50/95 p-4 shadow-2xl backdrop-blur-xl dark:border-emerald-500/50 dark:bg-emerald-950/90"
+            className="fixed left-1/2 top-24 z-[90] flex w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 items-start gap-3 rounded-2xl border border-emerald-300 bg-emerald-50/95 p-4 shadow-2xl backdrop-blur-xl dark:border-emerald-500/50 dark:bg-emerald-950/90"
           >
             <div className="min-w-0 flex-1">
               <p className="font-sub text-xs font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-200">Career restored</p>
@@ -1850,7 +1854,7 @@ export default function TouchlineApp() {
               Dismiss
             </button>
           </div>
-        )}
+          , document.body)}
 
         {displayedTab === "PORTAL" && !isOnboardingComplete && (
           <RestoreBackup

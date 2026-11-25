@@ -26,9 +26,10 @@ export class EventService {
    */
   async getTimeline(
     careerId: string,
-    limit = 50
+    limit = 50,
+    { allDebriefs = false }: { allDebriefs?: boolean } = {}
   ): Promise<ParsedCareerEvent[]> {
-    const rawEvents = await db
+    const recent = await db
       .select()
       .from(careerEvents)
       .where(
@@ -36,6 +37,21 @@ export class EventService {
       )
       .orderBy(desc(careerEvents.timestamp))
       .limit(limit);
+
+    // Every logged match, however old. The Debrief tab, the season figures and the unlogged-match
+    // count all read debriefs out of this list, and a cap on "recent events of any kind" let a busy
+    // save sync push the manager's own older match logs out of it: they were stored, but never shown.
+    let rawEvents = recent;
+    if (allDebriefs) {
+      const debriefs = await db
+        .select()
+        .from(careerEvents)
+        .where(and(eq(careerEvents.careerId, careerId), eq(careerEvents.eventType, "MATCH_DEBRIEF")));
+      const seen = new Set(recent.map((evt) => evt.id));
+      rawEvents = [...recent, ...debriefs.filter((evt) => !seen.has(evt.id))].sort((a, b) =>
+        b.timestamp.localeCompare(a.timestamp)
+      );
+    }
 
     return rawEvents.map((evt) => ({
       id: evt.id,

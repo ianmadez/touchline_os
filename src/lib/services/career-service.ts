@@ -230,7 +230,7 @@ export class CareerService {
     ] = await Promise.all([
         this.squadService.getCurrentSquad(careerId, career.inGameDate),
         this.tacticsService.getTacticalSystem(careerId),
-        this.eventService.getTimeline(careerId, 25),
+        this.eventService.getTimeline(careerId, 25, { allDebriefs: true }),
         db
           .select()
           .from(managerOnboardingProfiles)
